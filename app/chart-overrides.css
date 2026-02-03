@@ -1,0 +1,204 @@
+/* Chart UI Overrides - Ganttic Style */
+
+/* ===== STICKY SIDEBAR ===== */
+.chart-sticky-sidebar {
+    position: sticky;
+    left: 0;
+    top: 0;
+    z-index: 200;
+    background: #0a0a0f;
+    border-right: 2px solid #1e293b;
+    overflow: hidden;
+    box-shadow: 4px 0 12px rgba(0, 0, 0, 0.3);
+}
+
+.chart-sidebar-header {
+    position: sticky;
+    top: 0;
+    z-index: 201;
+    background: #0f172a;
+    border-bottom: 2px solid #1e293b;
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+}
+
+.chart-sidebar-row {
+    padding: 8px 16px;
+    border-bottom: 1px solid #1e293b;
+    font-size: 12px;
+    color: #e2e8f0;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chart-sidebar-row:nth-child(even) {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.chart-sidebar-row:hover,
+.chart-sidebar-row.row-hover {
+    background: rgba(0, 243, 255, 0.08);
+}
+
+.chart-sidebar-row.row-active {
+    background: rgba(0, 243, 255, 0.15);
+    border-left: 3px solid #00f3ff;
+}
+
+/* ===== CROSSHAIR HOVER ===== */
+.gantt-container.crosshair-active {
+    position: relative;
+}
+
+.gantt-crosshair-column {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: var(--column-width, 40px);
+    background: rgba(0, 243, 255, 0.05);
+    pointer-events: none;
+    z-index: 50;
+    border-left: 1px solid rgba(0, 243, 255, 0.15);
+    border-right: 1px solid rgba(0, 243, 255, 0.15);
+}
+
+/* ===== ZEBRA STRIPING ===== */
+.gantt .grid-row:nth-child(even) {
+    fill: rgba(255, 255, 255, 0.02);
+}
+
+.gantt .grid-row:nth-child(odd) {
+    fill: transparent;
+}
+
+.gantt .grid-row.row-hover {
+    fill: rgba(0, 243, 255, 0.08) !important;
+}
+
+/* Dynamic row highlighting based on hover */
+.gantt .grid-row[data-row-index] {
+    transition: fill 0.15s ease;
+}
+
+.gantt-container[data-hover-row] .grid-row {
+    transition: fill 0.15s ease;
+}
+
+/* ===== STICKY HEADERS ===== */
+.gantt-container .grid-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: #0f172a;
+    border-bottom: 2px solid #1e293b;
+}
+
+.gantt-container .upper-text {
+    fill: #94a3b8;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.gantt-container .lower-text {
+    fill: #cbd5e1;
+    font-weight: 500;
+    font-size: 12px;
+}
+
+/* ===== ROW BORDERS ===== */
+.gantt .row-line {
+    stroke: #1e293b;
+    stroke-width: 1;
+}
+
+/* ===== GRID TICKS ===== */
+.gantt .tick {
+    stroke: rgba(51, 65, 85, 0.3);
+    stroke-width: 0.5;
+}
+
+.gantt .tick.thick {
+    stroke: rgba(51, 65, 85, 0.5);
+    stroke-width: 1;
+}
+
+/* ===== FULL SCREEN MODE ===== */
+.chart-fullscreen-container {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    background: #020617;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-fullscreen-container .chart-main-grid {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+}
+
+/* ===== SCROLLBAR STYLING ===== */
+.chart-scroll-container::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+.chart-scroll-container::-webkit-scrollbar-track {
+    background: #0f172a;
+    border-radius: 0;
+}
+
+.chart-scroll-container::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 6px;
+    border: 2px solid #0f172a;
+}
+
+.chart-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+}
+
+.chart-scroll-container::-webkit-scrollbar-corner {
+    background: #0f172a;
+}
+
+/* ===== COMPACT ROW STYLING ===== */
+.gantt-compact .gantt .bar-wrapper {
+    cursor: pointer;
+}
+
+.gantt-compact .gantt .bar {
+    rx: 2;
+    ry: 2;
+}
+
+.gantt-compact .gantt .bar-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+}
+
+/* ===== HOVER EFFECTS ===== */
+.gantt .bar-wrapper:hover .bar {
+    filter: brightness(1.15);
+    stroke-width: 2;
+    stroke: rgba(255, 255, 255, 0.3);
+}
+
+.gantt .bar-wrapper:hover .bar-label {
+    fill: #ffffff;
+    font-weight: 600;
+}

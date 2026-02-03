@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Outfit, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import "./frappe-gantt.css";
+import "./chart-overrides.css";
+import "./custom-gantt.css";
 
 const outfit = Outfit({
   subsets: ["latin"],

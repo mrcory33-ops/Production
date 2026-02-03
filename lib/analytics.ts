@@ -211,3 +211,65 @@ export const calculateWeeklyLoads = (jobs: Job[], rangeStart: Date, rangeEnd: Da
     return weeklyLoads.sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime());
 };
 
+/**
+ * Calculate total points per department for specific selected dates
+ * Formula used: Sum of (Total Job Points / Total Job Days) for each day selected
+ */
+export const calculateDepartmentTotals = (jobs: Job[], selectedDates: Date[]): Record<Department, { total: number; byType: Record<ProductType, number> }> => {
+    const totals: Record<Department, { total: number; byType: Record<ProductType, number> }> = {
+        'Engineering': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
+        'Laser': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
+        'Press Brake': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
+        'Welding': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
+        'Polishing': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
+        'Assembly': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
+        'Shipping': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } }
+    };
+
+    if (selectedDates.length === 0) return totals;
+
+    // Use daily loads to get precise allocation
+    // We recreate daily loads internally or loop manually to capture Product Type
+    // calculateDailyLoads aggregates points but doesn't preserve Job metadata per entry easily without modification
+    // So better to iterate jobs directly here for the specific dates
+
+    // Find relevant jobs for these dates
+    const dateStrings = new Set(selectedDates.map(d => startOfDay(d).toISOString()));
+
+    jobs.forEach(job => {
+        if (!job.departmentSchedule || !job.weldingPoints) return;
+
+        // Product Type
+        const pType = job.productType || 'FAB'; // Default to FAB if missing
+
+        Object.entries(job.departmentSchedule).forEach(([dept, interval]) => {
+            const deptName = dept as Department;
+            if (!totals[deptName]) return;
+
+            const start = new Date(interval.start);
+            const end = new Date(interval.end);
+
+            // Calculate total duration (excluding weekends)
+            const durationDays = Math.max(1, eachDayOfInterval({ start, end }).filter(d => !isWeekend(d)).length);
+            const pointsPerDay = job.weldingPoints / durationDays;
+
+            // Check overlap with selected dates
+            eachDayOfInterval({ start, end }).forEach(day => {
+                if (isWeekend(day)) return;
+
+                const dayStr = startOfDay(day).toISOString();
+                if (dateStrings.has(dayStr)) {
+                    // Add to total
+                    totals[deptName].total += pointsPerDay;
+                    // Add to type
+                    if (totals[deptName].byType[pType] !== undefined) {
+                        totals[deptName].byType[pType] += pointsPerDay;
+                    }
+                }
+            });
+        });
+    });
+
+    return totals;
+};
+

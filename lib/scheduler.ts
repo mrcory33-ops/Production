@@ -136,7 +136,7 @@ const scheduleJobFromWelding = (job: Job, allowSaturday: boolean = false): Job =
     const durations = calculateAllDurations(job);
 
     // Work backwards from due date to find Welding slot
-    let cursorDate = subtractWorkDays(dueDate, BUFFER_DAYS, allowSaturday);
+    const cursorDate = subtractWorkDays(dueDate, BUFFER_DAYS, allowSaturday);
 
     // Assembly (works backwards from buffer)
     const assemblyEnd = cursorDate;

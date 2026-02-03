@@ -19,6 +19,8 @@ export interface DepartmentCapacity {
   colorClass: string; // CSS class name
 }
 
+export const DEPT_ORDER: Department[] = ['Engineering', 'Laser', 'Press Brake', 'Welding', 'Polishing', 'Assembly'];
+
 export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
   Engineering: {
     name: 'Engineering',

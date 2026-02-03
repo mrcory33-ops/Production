@@ -1,0 +1,480 @@
+/* Custom Gantt Table Styles */
+
+.custom-gantt-container {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background: #020617;
+    position: relative;
+}
+
+.gantt-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: max-content;
+    min-width: 100%;
+}
+
+/* ===== STICKY HEADERS ===== */
+
+/* Corner cell (top-left) */
+.gantt-table .sticky-corner {
+    position: sticky;
+    left: 0;
+    top: 0;
+    z-index: 300;
+    background: #0f172a;
+    border-right: 2px solid #1e293b;
+    border-bottom: 2px solid #1e293b;
+    padding: 12px 16px;
+    min-width: 200px;
+}
+
+.corner-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Week header row */
+.week-header-row {
+    background: #0f172a;
+}
+
+.gantt-table .week-header {
+    position: sticky;
+    top: 0;
+    z-index: 200;
+    background: #0f172a;
+    border-bottom: 1px solid #334155;
+    padding: 8px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #64748b;
+    text-align: center;
+    border-left: 1px solid #1e293b;
+}
+
+/* Day header row */
+.day-header-row {
+    background: #0f172a;
+}
+
+.gantt-table .date-header {
+    position: sticky;
+    top: 41px;
+    /* Height of week header */
+    z-index: 200;
+    background: #0f172a;
+    border-bottom: 2px solid #1e293b;
+    border-left: 1px solid #1e293b;
+    padding: 8px 4px;
+    text-align: center;
+    transition: background-color 0.15s ease;
+}
+
+.date-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.day-number {
+    font-size: 13px;
+    font-weight: 600;
+    color: #cbd5e1;
+}
+
+.day-name {
+    font-size: 9px;
+    font-weight: 500;
+    color: #64748b;
+    text-transform: uppercase;
+}
+
+/* Today column highlight */
+.today-column {
+    background: rgba(0, 243, 255, 0.05) !important;
+    border-left: 2px solid #00f3ff !important;
+    border-right: 2px solid #00f3ff !important;
+}
+
+/* ===== STICKY JOB COLUMN ===== */
+
+.gantt-table .sticky-job-cell {
+    position: sticky;
+    left: 0;
+    z-index: 100;
+    background: #0a0a0f;
+    border-right: 2px solid #1e293b;
+    border-bottom: 1px solid #1e293b;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    min-width: 200px;
+}
+
+.job-cell-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.job-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.job-id {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #64748b;
+}
+
+/* ===== TABLE CELLS ===== */
+
+.gantt-table .date-cell {
+    border: 1px solid #1e293b;
+    border-left: 1px solid #1e293b;
+    padding: 0;
+    height: 48px;
+    position: relative;
+    background: transparent;
+    transition: background-color 0.15s ease;
+}
+
+/* ===== ZEBRA STRIPING ===== */
+
+.gantt-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.gantt-table tbody tr:nth-child(even) .sticky-job-cell {
+    background: rgba(15, 23, 42, 0.6);
+}
+
+.gantt-table tbody tr:nth-child(even) .date-cell {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+/* ===== CROSSHAIR HOVER ===== */
+
+.gantt-table tr.row-hover {
+    background: rgba(0, 243, 255, 0.08) !important;
+}
+
+.gantt-table tr.row-hover .sticky-job-cell {
+    background: rgba(0, 243, 255, 0.12) !important;
+    border-left: 3px solid #00f3ff;
+}
+
+.gantt-table tr.row-hover .date-cell {
+    background: rgba(0, 243, 255, 0.08) !important;
+}
+
+.gantt-table .date-header.col-hover,
+.gantt-table .date-cell.col-hover {
+    background: rgba(0, 243, 255, 0.06) !important;
+}
+
+/* ===== ROW SELECTION ===== */
+
+.gantt-table tr.row-selected .sticky-job-cell {
+    background: rgba(0, 243, 255, 0.15) !important;
+    border-left: 4px solid #00f3ff;
+}
+
+/* ===== JOB BAR SEGMENTS (Multi-Department) ===== */
+
+.job-bar-segment {
+    position: absolute;
+    top: 6px;
+    height: 36px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: white;
+    white-space: nowrap;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease, width 0.3s ease, opacity 0.2s ease;
+
+    /* Semi-transparent for overlapping visibility */
+    opacity: 0.7;
+
+    /* Glass effect */
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+
+    /* Stronger border for definition */
+    border: 2px solid;
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+}
+
+/* Disable transition when dragging for immediate feedback */
+.job-bar-segment.dragging {
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+/* Hover effect - show grab cursor */
+.job-bar-segment:hover {
+    cursor: grab !important;
+    transform: translateY(-1px);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.4),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Active dragging - show grabbing cursor */
+.job-bar-segment:active {
+    cursor: grabbing !important;
+}
+
+.job-bar-segment:last-child {
+    border-right: none;
+}
+
+.bar-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.job-bar-segment:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    filter: brightness(1.15);
+    z-index: 50 !important;
+}
+
+/* Job label overlay - spans all segments */
+.job-label-overlay {
+    position: absolute;
+    top: 6px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.job-label-overlay .bar-label {
+    pointer-events: none;
+}
+
+/* Segment resize handles */
+.segment-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: ew-resize;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.segment-resize-start {
+    left: 0;
+    border-left: 2px solid rgba(255, 255, 255, 0.6);
+}
+
+.segment-resize-end {
+    right: 0;
+    border-right: 2px solid rgba(255, 255, 255, 0.6);
+}
+
+.job-bar-segment:hover .segment-resize-handle {
+    opacity: 1;
+}
+
+.segment-resize-handle:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Segment Edit Popover */
+.popover-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+}
+
+.popover-container {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    min-width: 400px;
+    animation: popoverFadeIn 0.2s ease;
+}
+
+@keyframes popoverFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.segment-edit-popover {
+    padding: 20px;
+}
+
+.popover-header h3 {
+    margin: 0 0 16px 0;
+    color: #e2e8f0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.popover-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.error-message {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: #fca5a5;
+    font-size: 13px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-group label {
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.form-group input[type="date"] {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: #e2e8f0;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.form-group input[type="date"]:focus {
+    outline: none;
+    border-color: #00f3ff;
+    box-shadow: 0 0 0 2px rgba(0, 243, 255, 0.1);
+}
+
+.popover-footer {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-save {
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-cancel {
+    background: transparent;
+    border: 1px solid #475569;
+    color: #94a3b8;
+}
+
+.btn-cancel:hover {
+    background: #334155;
+    color: #e2e8f0;
+}
+
+.btn-save {
+    background: #00f3ff;
+    border: none;
+    color: #020617;
+}
+
+.btn-save:hover {
+    background: #00d4e6;
+    box-shadow: 0 0 12px rgba(0, 243, 255, 0.4);
+}
+
+/* ===== SCROLLBAR STYLING ===== */
+
+.custom-gantt-container::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+.custom-gantt-container::-webkit-scrollbar-track {
+    background: #0f172a;
+}
+
+.custom-gantt-container::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 6px;
+    border: 2px solid #0f172a;
+}
+
+.custom-gantt-container::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+}
+
+.custom-gantt-container::-webkit-scrollbar-corner {
+    background: #0f172a;
+}
+
+/* ===== RESPONSIVE ADJUSTMENTS ===== */
+
+@media (max-width: 1024px) {
+
+    .gantt-table .sticky-corner,
+    .gantt-table .sticky-job-cell {
+        min-width: 150px;
+    }
+
+    .job-name {
+        font-size: 12px;
+    }
+
+    .job-id {
+        font-size: 9px;
+    }
+}
