@@ -140,6 +140,11 @@ export const parseGlobalShopExport = async (fileBuffer: ArrayBuffer): Promise<Jo
             return; // Skip 2029 placeholder dates
         }
 
+        // Filter: Ignore any jobs under 10 welding points
+        if (!job.weldingPoints || job.weldingPoints < 10) {
+            return;
+        }
+
         // Filter: Exclude DOORS projects with < 30 welding points
         if (job.productType === 'DOORS' && job.weldingPoints < 30) {
             return;

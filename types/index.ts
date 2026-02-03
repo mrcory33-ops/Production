@@ -46,10 +46,12 @@ export interface Job {
 
     // Calculated Schedule
     scheduledStartDate?: Date;
-    scheduledStartDate?: Date;
     scheduledEndDate?: Date;
     isOverdue?: boolean;
     departmentSchedule?: Record<string, { start: string; end: string }>; // Stored as ISO strings for Firestore compatibility
+    forecastStartDate?: Date;
+    forecastDueDate?: Date;
+    remainingDepartmentSchedule?: Record<string, { start: string; end: string }>; // Remaining schedule from current dept
 
     updatedAt: Date;
 }

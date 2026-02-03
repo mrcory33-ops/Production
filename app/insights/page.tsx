@@ -45,7 +45,7 @@ export default function InsightsPage() {
                 const start = new Date();
                 const end = addDays(start, 30);
                 const dailyLoads = calculateDailyLoads(jobs, start, end);
-                const alerts = detectBottlenecks(dailyLoads, 200); // 200 Capacity
+                const alerts = detectBottlenecks(dailyLoads); // Uses department-specific capacity
 
                 setLoads(dailyLoads);
                 setBottlenecks(alerts);

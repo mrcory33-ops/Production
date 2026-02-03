@@ -1,140 +1,225 @@
-import { Job } from '@/types';
+import { Job, Department, ProductType } from '@/types';
 import { addDays, isSaturday, isSunday, subDays, startOfDay, isBefore } from 'date-fns';
+import { DEPARTMENT_CONFIG, calculateDeptDuration } from './departmentConfig';
 
 // Configuration Constants
-const DAILY_CAPACITY = 200; // Points per day
-const BUFFER_DAYS = 2; // Days before due date to finish
+const BUFFER_DAYS = 2; // Days before due date to finish Assembly
 
-const DEPARTMENTS = [
+const DEPARTMENTS: Department[] = [
     'Engineering',
     'Laser',
     'Press Brake',
     'Welding',
     'Polishing',
     'Assembly'
-] as const;
+];
 
-export type DepartmentName = typeof DEPARTMENTS[number];
+export type DepartmentName = Department;
 
-/**
- * Calculates the number of work days needed for a job in a specific department.
- * - Assembly: 1.5x Multiplier
- * - Others: 1.0x Multiplier (relative to Welding Points)
- */
-export const calculateDuration = (points: number, dept: DepartmentName): number => {
-    // If points are 0 or invalid, assume 0 days (or minimum 1?)
-    // Let's assume minimum 0.5 days if points > 0
-    if (!points) return 0;
+export interface OvertimeConfig {
+    enabled: boolean;
+    saturdayCapacityMultiplier: number; // e.g., 0.5 for half day
+}
 
-    let multiplier = 1.0;
-    if (dept === 'Assembly') multiplier = 1.5;
+// Default overtime config
+let overtimeConfig: OvertimeConfig = {
+    enabled: false,
+    saturdayCapacityMultiplier: 0.5
+};
 
-    // Duration in Days = (Points / DAILY_CAPACITY) * Multiplier
-    const rawDays = (points / DAILY_CAPACITY) * multiplier;
-
-    // Round up to nearest 0.5 day for scheduling blocks? Or keep partial?
-    // Let's keep partial for calculation, but maybe snap to grid later.
-    // implementation_plan says "Duration = WeldingPoints / 200".
-
-    return Math.ceil(rawDays * 10) / 10; // Round to 1 decimal
+export const setOvertimeConfig = (config: Partial<OvertimeConfig>) => {
+    overtimeConfig = { ...overtimeConfig, ...config };
 };
 
 /**
- * Subtracts work days from a date, skipping weekends.
+ * Calculates the number of work days needed for a job in a specific department.
+ * Uses department-specific capacity from departmentConfig.
  */
-export const subtractWorkDays = (date: Date, days: number): Date => {
+export const calculateDuration = (points: number, dept: DepartmentName, productType: ProductType = 'FAB'): number => {
+    return calculateDeptDuration(dept, points, productType);
+};
+
+const normalizeWorkStart = (date: Date, allowSaturday: boolean = false): Date => {
+    let current = startOfDay(date);
+    while (isSunday(current) || (!allowSaturday && isSaturday(current))) {
+        current = addDays(current, 1);
+    }
+    return current;
+};
+
+/**
+ * Subtracts work days from a date, skipping weekends (or just Sunday if overtime enabled).
+ */
+export const subtractWorkDays = (date: Date, days: number, allowSaturday: boolean = false): Date => {
     let remaining = days;
     let current = new Date(date);
 
     while (remaining > 0) {
         current = subDays(current, 1);
-        // If it's a weekend, don't count it as a "work day subtracted"
-        // BUT we are moving BACKWARDS in time.
-        // So if we land on Sunday, we just keep moving.
-        // Wait, "subtract work days" means we need X *work* days of production.
-        if (!isSaturday(current) && !isSunday(current)) {
-            remaining -= 1; // Used 1 work day
+        const isWorkDay = !isSunday(current) && (allowSaturday || !isSaturday(current));
+        if (isWorkDay) {
+            remaining -= 1;
         }
     }
     return current;
 };
 
 /**
- * Main Scheduling Function
- * Pass 1: "Big Rocks" (Large/Priority Jobs)
- * Pass 2: "Sand" (Small Jobs)
+ * Adds work days to a date, skipping weekends (or just Sunday if overtime enabled).
  */
-export const scheduleJobs = (jobs: Job[]) => {
-    // 1. Separate Big Rocks vs Small Rocks
-    const bigRocks = jobs.filter(j => j.isPriority || j.weldingPoints >= 70);
-    const smallRocks = jobs.filter(j => !j.isPriority && j.weldingPoints < 70);
+export const addWorkDays = (date: Date, days: number, allowSaturday: boolean = false): Date => {
+    let remaining = days;
+    let current = new Date(date);
 
-    // Sort Big Rocks by Due Date ASC (Earliest due date gets priority)
-    bigRocks.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+    while (remaining > 0) {
+        current = addDays(current, 1);
+        const isWorkDay = !isSunday(current) && (allowSaturday || !isSaturday(current));
+        if (isWorkDay) {
+            remaining -= 1;
+        }
+    }
+    return current;
+};
+
+/**
+ * Calculate durations for all departments for a given job
+ */
+const calculateAllDurations = (job: Job): Record<Department, number> => {
+    const points = job.weldingPoints || 0;
+    const productType = job.productType || 'FAB';
+
+    return {
+        Engineering: calculateDuration(points, 'Engineering', productType),
+        Laser: calculateDuration(points, 'Laser', productType),
+        'Press Brake': calculateDuration(points, 'Press Brake', productType),
+        Welding: calculateDuration(points, 'Welding', productType),
+        Polishing: calculateDuration(points, 'Polishing', productType),
+        Assembly: calculateDuration(points, 'Assembly', productType),
+        Shipping: 0
+    };
+};
+
+/**
+ * Main Scheduling Function - Welding-Centric (Drum-Buffer-Rope)
+ * 
+ * 1. Sort jobs by due date (primary), size descending (secondary)
+ * 2. Schedule Welding first, then work backwards and forwards
+ */
+export const scheduleJobs = (jobs: Job[]): Job[] => {
+    // Sort by due date (primary), then by size descending (secondary)
+    // Larger jobs due later may need to start before smaller jobs due earlier
+    const sorted = [...jobs].sort((a, b) => {
+        const aDue = new Date(a.dueDate).getTime();
+        const bDue = new Date(b.dueDate).getTime();
+        if (aDue !== bDue) return aDue - bDue;
+        return (b.weldingPoints || 0) - (a.weldingPoints || 0);
+    });
 
     const scheduledJobs: Job[] = [];
 
-    // Pass 1: Schedule Big Rocks
-    bigRocks.forEach(job => {
-        const schedule = backwardScheduleJob(job);
-        scheduledJobs.push(schedule);
-    });
-
-    // Pass 2: Schedule Small Rocks (Fill in the gaps)
-    // Currently using the same backward logic for simplicity.
-    // Future optimization: forward schedule into gaps if needed.
-    smallRocks.forEach(job => {
-        const schedule = backwardScheduleJob(job);
-        scheduledJobs.push(schedule);
-    });
+    for (const job of sorted) {
+        const scheduled = scheduleJobFromWelding(job);
+        scheduledJobs.push(scheduled);
+    }
 
     return scheduledJobs;
 };
 
 /**
- * Backward Schedules a single job from its Due Date.
+ * Schedule a single job, starting from Welding and working outward
+ * (Drum-Buffer-Rope: Welding is the constraint/heartbeat)
  */
-const backwardScheduleJob = (job: Job): Job => {
-    if (!job.dueDate) return job; // Cannot schedule without due date
+const scheduleJobFromWelding = (job: Job, allowSaturday: boolean = false): Job => {
+    const dueDate = new Date(job.dueDate);
 
-    // Start with Due Date - Buffer
-    let cursorDate = subDays(new Date(job.dueDate), BUFFER_DAYS);
+    // Calculate durations for each department
+    const durations = calculateAllDurations(job);
 
-    // We work backwards: Assembly -> Polishing -> Welding -> Press -> Laser -> Engineering
-    // Reverse array of departments
-    const reverseDepts = [...DEPARTMENTS].reverse();
+    // Work backwards from due date to find Welding slot
+    let cursorDate = subtractWorkDays(dueDate, BUFFER_DAYS, allowSaturday);
 
+    // Assembly (works backwards from buffer)
+    const assemblyEnd = cursorDate;
+    const assemblyStart = subtractWorkDays(assemblyEnd, durations.Assembly, allowSaturday);
+
+    // Polishing
+    const polishingEnd = assemblyStart;
+    const polishingStart = subtractWorkDays(polishingEnd, durations.Polishing, allowSaturday);
+
+    // WELDING (THE HEARTBEAT)
+    const weldingEnd = polishingStart;
+    const weldingStart = subtractWorkDays(weldingEnd, durations.Welding, allowSaturday);
+
+    // Press Brake
+    const pressBrakeEnd = weldingStart;
+    const pressBrakeStart = subtractWorkDays(pressBrakeEnd, durations['Press Brake'], allowSaturday);
+
+    // Laser
+    const laserEnd = pressBrakeStart;
+    const laserStart = subtractWorkDays(laserEnd, durations.Laser, allowSaturday);
+
+    // Engineering
+    const engineeringEnd = laserStart;
+    const engineeringStart = subtractWorkDays(engineeringEnd, durations.Engineering, allowSaturday);
+
+    // Build schedule object
+    const departmentSchedule: Record<string, { start: string; end: string }> = {
+        Engineering: { start: engineeringStart.toISOString(), end: engineeringEnd.toISOString() },
+        Laser: { start: laserStart.toISOString(), end: laserEnd.toISOString() },
+        'Press Brake': { start: pressBrakeStart.toISOString(), end: pressBrakeEnd.toISOString() },
+        Welding: { start: weldingStart.toISOString(), end: weldingEnd.toISOString() },
+        Polishing: { start: polishingStart.toISOString(), end: polishingEnd.toISOString() },
+        Assembly: { start: assemblyStart.toISOString(), end: assemblyEnd.toISOString() }
+    };
+
+    // Check if overdue
+    const isOverdue = isBefore(engineeringStart, startOfDay(new Date()));
+
+    // If overdue and overtime not yet tried, try with Saturday
+    if (isOverdue && overtimeConfig.enabled && !allowSaturday) {
+        return scheduleJobFromWelding(job, true);
+    }
+
+    return {
+        ...job,
+        scheduledStartDate: engineeringStart,
+        isOverdue,
+        departmentSchedule
+    };
+};
+
+/**
+ * Builds a forward schedule from the job's current department to the end.
+ * This is used for "remaining work" bars and forecast due dates.
+ */
+export const applyRemainingSchedule = (job: Job, startDate: Date = new Date()): Job => {
+    const deptOrder = [...DEPARTMENTS];
+    const currentIndex = deptOrder.indexOf(job.currentDepartment as DepartmentName);
+
+    if (currentIndex === -1) {
+        return {
+            ...job,
+            forecastStartDate: job.scheduledStartDate,
+            forecastDueDate: job.dueDate,
+            remainingDepartmentSchedule: job.departmentSchedule
+        };
+    }
+
+    const durations = calculateAllDurations(job);
+    let cursorDate = normalizeWorkStart(startDate);
     const deptSchedules: Record<string, { start: Date; end: Date }> = {};
-    let isOverdue = false;
 
-    for (const dept of reverseDepts) {
-        const duration = calculateDuration(job.weldingPoints, dept);
-
-        // End Date for this dept is the current cursor
-        // (Ensure cursor is a work day? Yes)
-        // Actually, if cursor lands on Sunday, end date is Friday?
-        // Let's assume production finishes on cursor.
-
-        const endDate = new Date(cursorDate);
-
-        // Start Date = End Date - Duration (Work Days)
-        // Note: Logic here is simplified. If duration is 2 days:
-        // Mon (End) -> Fri (Start)?
-
-        const startDate = subtractWorkDays(endDate, duration);
-
-        deptSchedules[dept] = { start: startDate, end: endDate };
-
-        // Move cursor for next department to be the START of this one
-        cursorDate = new Date(startDate);
+    for (const dept of deptOrder.slice(currentIndex)) {
+        const duration = durations[dept] || 0;
+        const start = new Date(cursorDate);
+        const end = addWorkDays(start, duration);
+        deptSchedules[dept] = { start, end };
+        cursorDate = new Date(end);
     }
 
-    // Check if start date is in past (Overdue)
-    if (isBefore(cursorDate, startOfDay(new Date()))) {
-        isOverdue = true;
-    }
+    const forecastEnd = new Date(cursorDate);
+    const forecastDueDate = addDays(forecastEnd, BUFFER_DAYS);
 
-    // Convert dates to ISO strings for storage
     const formattedSchedule: Record<string, { start: string; end: string }> = {};
     Object.entries(deptSchedules).forEach(([dept, dates]) => {
         formattedSchedule[dept] = {
@@ -143,10 +228,12 @@ const backwardScheduleJob = (job: Job): Job => {
         };
     });
 
+    const firstDept = deptOrder[currentIndex];
+
     return {
         ...job,
-        scheduledStartDate: cursorDate,
-        isOverdue,
-        departmentSchedule: formattedSchedule
+        forecastStartDate: deptSchedules[firstDept]?.start || cursorDate,
+        forecastDueDate,
+        remainingDepartmentSchedule: formattedSchedule
     };
 };

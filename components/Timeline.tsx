@@ -5,19 +5,69 @@ import { useEffect, useRef, useState } from 'react';
 import Gantt from 'frappe-gantt';
 import { Job } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
-import { AlertCircle, Filter, Maximize, Minimize } from 'lucide-react';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { Filter, Maximize, Minimize } from 'lucide-react';
 import { format } from 'date-fns';
 
+const formatLabel = (name?: string) => {
+    const safeName = (name || 'Untitled').trim();
+    const maxLen = 26;
+    if (safeName.length <= maxLen) return safeName;
+    return `${safeName.slice(0, maxLen - 3).trimEnd()}...`;
+};
+
+const getRowSizing = (rowCount: number, isFullScreen: boolean, viewportHeight: number) => {
+    const base = { barHeight: 20, padding: 8 };
+    if (!isFullScreen || !viewportHeight || rowCount === 0) return base;
+
+    const headerAllowance = 48;
+    const available = Math.max(viewportHeight - headerAllowance, 0);
+    const idealRowHeight = Math.floor(available / rowCount);
+
+    if (idealRowHeight <= 26) return base;
+
+    const rowHeight = Math.min(idealRowHeight, 56);
+    const barHeight = Math.max(18, Math.min(rowHeight - 6, 48));
+    const padding = Math.max(4, rowHeight - barHeight);
+
+    return { barHeight, padding };
+};
+
 export default function Timeline() {
+    const containerRef = useRef<HTMLDivElement>(null);
     const ganttRef = useRef<HTMLDivElement>(null);
     const ganttInstanceRef = useRef<any>(null);
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(true);
-    const [viewMode, setViewMode] = useState<string>('Day');
-    const [columnWidth, setColumnWidth] = useState<number>(30);
+    const [viewMode, setViewMode] = useState<string>('Week');
+    const [columnWidth, setColumnWidth] = useState<number>(40);
     const [showSmallRocks, setShowSmallRocks] = useState(true);
     const [isFullScreen, setIsFullScreen] = useState(false);
+    const [ganttViewportHeight, setGanttViewportHeight] = useState(0);
+
+    useEffect(() => {
+        const handleFullScreenChange = () => {
+            const isActive = document.fullscreenElement === containerRef.current;
+            setIsFullScreen(isActive);
+        };
+
+        document.addEventListener('fullscreenchange', handleFullScreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
+    }, []);
+
+    useEffect(() => {
+        const target = ganttRef.current;
+        if (!target || typeof ResizeObserver === 'undefined') return;
+
+        const observer = new ResizeObserver(entries => {
+            const entry = entries[0];
+            if (!entry) return;
+            setGanttViewportHeight(Math.round(entry.contentRect.height));
+        });
+
+        observer.observe(target);
+        return () => observer.disconnect();
+    }, []);
 
     useEffect(() => {
         const fetchJobs = async () => {
@@ -43,6 +93,12 @@ export default function Timeline() {
                     }
                 });
 
+                fetchedJobs.sort((a, b) => {
+                    const aStart = a.scheduledStartDate ? new Date(a.scheduledStartDate).getTime() : 0;
+                    const bStart = b.scheduledStartDate ? new Date(b.scheduledStartDate).getTime() : 0;
+                    return aStart - bStart;
+                });
+
                 setJobs(fetchedJobs);
             } catch (err) {
                 console.error("Failed to fetch jobs for Gantt", err);
@@ -63,6 +119,8 @@ export default function Timeline() {
             ? jobs
             : jobs.filter(j => j.isPriority || (j.weldingPoints || 0) >= 70);
 
+        const { barHeight, padding } = getRowSizing(filteredJobs.length, isFullScreen, ganttViewportHeight);
+
         const tasks = filteredJobs.map(job => {
             let customClass = 'bar-fab';
             if (job.isPriority) customClass = 'bar-priority';
@@ -71,7 +129,7 @@ export default function Timeline() {
 
             return {
                 id: job.id,
-                name: `${job.name} (${job.weldingPoints?.toFixed(0) || 0} pts)`,
+                name: formatLabel(job.name),
                 start: job.scheduledStartDate ? format(job.scheduledStartDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
                 end: job.dueDate ? format(job.dueDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
                 progress: 0,
@@ -92,8 +150,8 @@ export default function Timeline() {
                 column_width: columnWidth,
                 popup_on: 'hover',
                 infinite_padding: false, // Fix: Disable wheel hijacking for date shifting // Valid values: 'click' or 'hover' (not 'mouseover')
-                bar_height: 25,
-                padding: 10,
+                bar_height: barHeight,
+                padding,
                 // The option is named 'popup', not 'custom_popup_html' in this version
                 popup: (ctx: any) => {
                     // ctx contains { task, chart, ... }
@@ -132,10 +190,6 @@ export default function Timeline() {
                         </div>
                     `;
                 },
-                on_click: (task: any) => {
-                    const job = task._job as Job;
-                    alert(`Job Details:\nName: ${job.name}\nID: ${job.id}\nQty: ${job.quantity}\nPoints: ${job.weldingPoints}`);
-                },
                 on_date_change: (task: any, start: Date, end: Date) => {
                     console.log(task, start, end);
                     // TODO: Update Firestore on drag
@@ -145,7 +199,7 @@ export default function Timeline() {
             console.error("Gantt Init Error", e);
         }
 
-    }, [jobs, loading, showSmallRocks]); // Re-init when toggle changes
+    }, [jobs, loading, showSmallRocks, isFullScreen, ganttViewportHeight]); // Re-init when toggle or fullscreen sizing changes
 
     // Handle View Mode & Zoom Change
     useEffect(() => {
@@ -155,13 +209,40 @@ export default function Timeline() {
             ganttInstanceRef.current.options.column_width = columnWidth;
             ganttInstanceRef.current.change_view_mode(viewMode);
         }
-    }, [viewMode, columnWidth]);
+    }, [viewMode, columnWidth, isFullScreen]);
+
+    const handleToggleFullScreen = async () => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const nextFullScreen = !isFullScreen;
+        setIsFullScreen(nextFullScreen);
+
+        if (nextFullScreen) {
+            if (container.requestFullscreen) {
+                try {
+                    await container.requestFullscreen();
+                } catch (err) {
+                    console.warn('Fullscreen request failed', err);
+                }
+            }
+        } else if (document.fullscreenElement) {
+            try {
+                await document.exitFullscreen();
+            } catch (err) {
+                console.warn('Exit fullscreen failed', err);
+            }
+        }
+    };
 
     if (loading) return <div className="text-cyan-500 animate-pulse">Loading Schedule...</div>;
     if (jobs.length === 0) return <div className="text-slate-400">No scheduled jobs found.</div>;
 
     return (
-        <div className={`w-full pb-4 transition-all duration-300 ${isFullScreen ? 'fixed inset-0 z-50 bg-slate-950 p-4 h-screen overflow-hidden flex flex-col' : ''}`}>
+        <div
+            ref={containerRef}
+            className={`w-full pb-4 transition-all duration-300 ${isFullScreen ? 'gantt-fullscreen fixed inset-0 z-50 bg-slate-950 p-4 h-screen overflow-hidden flex flex-col' : ''}`}
+        >
             <div className="flex justify-between items-center mb-4 shrink-0">
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                     <span className="w-2 h-8 bg-cyan-500 rounded-full inline-block"></span>
@@ -172,7 +253,7 @@ export default function Timeline() {
 
                     {/* Full Screen Toggle */}
                     <button
-                        onClick={() => setIsFullScreen(!isFullScreen)}
+                        onClick={handleToggleFullScreen}
                         className="p-1.5 text-slate-400 hover:text-white transition-colors"
                         title="Toggle Full Screen"
                     >
@@ -228,27 +309,31 @@ export default function Timeline() {
 
             {/* Gantt Container */}
             <div
-                className={`gantt-target glass-panel p-4 rounded-xl min-w-[800px] overflow-auto custom-scrollbar ${isFullScreen ? 'flex-1 rounded-none border-none' : 'h-[calc(100vh-240px)]'}`}
+                className={`gantt-target glass-panel rounded-xl min-w-[800px] overflow-auto custom-scrollbar ${isFullScreen ? 'flex-1 min-h-0 h-full w-full rounded-none border-none p-2' : 'p-4 h-[calc(100vh-240px)]'}`}
                 ref={ganttRef}
             ></div>
 
             <style jsx global>{`
                 /* Gantt Styles Overlay */
-                .gantt .grid-header { fill: transparent; stroke: #334155; stroke-width: 1; }
-                .gantt .grid-row { fill: transparent; stroke: #334155; stroke-width: 1; }
-                .gantt .row-line { stroke: #334155; }
-                .gantt .grid-row { fill: transparent; stroke: #334155; stroke-width: 1; }
-                .gantt .row-line { stroke: #334155; }
-                .gantt .tick { stroke: #334155; }
-                .gantt text { fill: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+                .gantt .grid-header { fill: transparent; stroke: rgba(51, 65, 85, 0.5); stroke-width: 1; }
+                .gantt .grid-row { fill: transparent; stroke: rgba(51, 65, 85, 0.35); stroke-width: 1; }
+                .gantt .row-line { stroke: rgba(51, 65, 85, 0.4); }
+                .gantt .tick { stroke: rgba(51, 65, 85, 0.4); }
+                .gantt text { fill: #94a3b8; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
                 
                 /* Full Screen Fixes */
                 .gantt-target { background: #020617; } /* Ensure dark background */
                 
                 /* FIX: Force SVG to take full width of content to trigger scrollbar */
                 .gantt-target svg { width: auto !important; min-width: 100%; }
+
+                /* Keep chart filling the full screen height even with fewer rows */
+                .gantt-fullscreen .gantt-container { height: 100%; }
+                .gantt-fullscreen .gantt { height: 100%; }
+                .gantt-fullscreen svg { height: 100% !important; }
                 
-                .gantt .bar-label { fill: #fff; font-size: 14px; font-weight: 500; }
+                .gantt .bar-label { fill: #e2e8f0; font-size: 12px; font-weight: 500; letter-spacing: 0.2px; }
+                .gantt .bar-wrapper:hover .bar-label { fill: #fff; }
                 .gantt .bar-wrapper.bar-priority .bar { fill: #f59e0b; }
                 .gantt .bar-wrapper.bar-fab .bar { fill: #3b82f6; } /* Blue */
                 .gantt .bar-wrapper.bar-doors .bar { fill: #10b981; } /* Emerald */

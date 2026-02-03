@@ -47,20 +47,23 @@ export default function Home() {
             </div>
           </Link>
 
-          {/* Action Card: Schedule (Disabled) */}
-          <div className="glass-card h-full rounded-2xl p-8 relative overflow-hidden opacity-60 grayscale hover:grayscale-0 transition-all cursor-not-allowed border-dashed border-slate-700">
-            <div className="w-14 h-14 rounded-xl bg-slate-800 flex items-center justify-center mb-6 border border-slate-700">
-              <Calendar className="w-7 h-7 text-slate-400" />
-            </div>
+          {/* Action Card: Planning */}
+          <Link href="/planning" className="group block h-full">
+            <div className="glass-card glass-card-hover h-full rounded-2xl p-8 relative overflow-hidden group-hover:border-cyan-500/50">
+              <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-opacity">
+                <ArrowRight className="text-cyan-400 w-6 h-6 -rotate-45 group-hover:rotate-0 transition-transform duration-300" />
+              </div>
 
-            <h3 className="text-2xl font-bold text-slate-300 mb-2">Planning</h3>
-            <p className="text-slate-500 text-sm leading-relaxed">
-              Drag-and-drop Gantt chart scheduling with capacity constraints.
-            </p>
-            <div className="absolute bottom-4 right-4 text-xs font-mono text-slate-600 border border-slate-800 px-2 py-1 rounded">
-              COMING SOON
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center mb-6 shadow-lg shadow-cyan-500/20 group-hover:scale-110 transition-transform duration-300">
+                <Calendar className="w-7 h-7 text-white" />
+              </div>
+
+              <h3 className="text-2xl font-bold text-white mb-2 group-hover:text-cyan-400 transition-colors">Planning</h3>
+              <p className="text-slate-400 text-sm leading-relaxed">
+                Drag-and-drop scheduling with remaining-work bars and capacity alerts.
+              </p>
             </div>
-          </div>
+          </Link>
 
           {/* Action Card: Insights */}
           <Link href="/insights" className="block h-full cursor-pointer hover:scale-[1.02] transition-transform">
