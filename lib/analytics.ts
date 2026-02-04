@@ -80,7 +80,8 @@ export const calculateDailyLoads = (jobs: Job[], rangeStart: Date, rangeEnd: Dat
     jobs.forEach(job => {
         if (!job.departmentSchedule || !job.weldingPoints) return;
 
-        Object.entries(job.departmentSchedule).forEach(([dept, interval]) => {
+        const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
+        Object.entries(schedule).forEach(([dept, interval]) => {
             if (!interval.start || !interval.end) return;
 
             const start = new Date(interval.start);
@@ -242,7 +243,8 @@ export const calculateDepartmentTotals = (jobs: Job[], selectedDates: Date[]): R
         // Product Type
         const pType = job.productType || 'FAB'; // Default to FAB if missing
 
-        Object.entries(job.departmentSchedule).forEach(([dept, interval]) => {
+        const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
+        Object.entries(schedule).forEach(([dept, interval]) => {
             const deptName = dept as Department;
             if (!totals[deptName]) return;
 
