@@ -53,6 +53,12 @@ export interface Job {
     forecastDueDate?: Date;
     remainingDepartmentSchedule?: Record<string, { start: string; end: string }>; // Remaining schedule from current dept
 
+    // Capacity-Aware Scheduling (NEW)
+    schedulingConflict?: boolean; // Can't meet due date within capacity limits
+    progressStatus?: 'ON_TRACK' | 'SLIPPING' | 'STALLED'; // Progress tracking
+    lastDepartmentChange?: Date; // When currentDepartment last changed (for stall detection)
+    scheduledDepartmentByDate?: Record<string, Department>; // Expected dept on each date (for slippage detection)
+
     updatedAt: Date;
 }
 

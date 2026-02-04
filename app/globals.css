@@ -6,10 +6,16 @@
 }
 
 :root {
-  --background: #020617;
-  --foreground: #f8fafc;
-  --primary: #00f3ff;
-  --primary-glow: rgba(0, 243, 255, 0.4);
+  --background: #f1f5f9;
+  /* slate-100 */
+  --foreground: #0f172a;
+  /* slate-900 */
+  --primary: #2563eb;
+  /* blue-600 */
+  --card-bg: #e2e8f0;
+  /* slate-200 */
+  --border-color: #cbd5e1;
+  /* slate-300 */
 }
 
 body {
@@ -19,37 +25,37 @@ body {
   overflow-x: hidden;
 }
 
-/* Custom Utilities for Glassmorphism */
+/* Custom Utilities for Glassmorphism (Light Theme) */
 @utility glass-panel {
-  background-color: rgba(15, 23, 42, 0.6);
+  background-color: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
 }
 
 @utility glass-card {
-  background-color: rgba(30, 41, 59, 0.4);
+  background-color: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   transition: all 0.3s ease;
 }
 
 @utility glass-card-hover {
   &:hover {
-    background-color: rgba(30, 41, 59, 0.6);
-    border-color: rgba(0, 243, 255, 0.3);
-    box-shadow: 0 0 20px rgba(0, 243, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.8);
+    border-color: rgba(37, 99, 235, 0.3);
+    box-shadow: 0 0 20px rgba(37, 99, 235, 0.1);
     transform: translateY(-2px);
   }
 }
 
 @utility text-glow {
-  text-shadow: 0 0 10px rgba(0, 243, 255, 0.5);
+  text-shadow: 0 0 10px rgba(37, 99, 235, 0.2);
 }
 
-/* Grid Background */
+/* Grid Background (Light Mode) */
 .bg-grid {
   background-size: 40px 40px;
-  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-image: linear-gradient(to right, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
 }

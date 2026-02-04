@@ -29,11 +29,11 @@ export default function SegmentEditPopover({
         const [endYear, endMonth, endDay] = newEnd.split('-').map(Number);
 
         const start = new Date(startYear, startMonth - 1, startDay, 0, 0, 0);
-        const end = new Date(endYear, endMonth - 1, endDay, 23, 59, 59);
+        const end = new Date(endYear, endMonth - 1, endDay, 0, 0, 0);
 
         // Validation
-        if (start >= end) {
-            setError('Start date must be before end date');
+        if (start > end) {
+            setError('Start date must be on or before end date');
             return;
         }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { addDays, differenceInDays, format, startOfDay, isSameDay } from 'date-fns';
+import { addDays, differenceInDays, format, startOfDay, isSameDay, startOfWeek, isWeekend } from 'date-fns';
 import { Job, Department } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
 import SegmentEditPopover from './SegmentEditPopover';
@@ -24,6 +24,7 @@ interface CustomGanttTableProps {
     selectedJob?: Job | null;
     today?: Date;
     onSegmentUpdate?: (jobId: string, department: Department, newStart: Date, newEnd: Date) => Promise<void>;
+    onJobShiftUpdate?: (jobId: string, deltaDays: number) => Promise<void>;
     visibleDepartments?: Set<Department>;
     showActiveOnly?: boolean;
     selectedDates?: Date[];
@@ -39,6 +40,7 @@ export default function CustomGanttTable({
     selectedJob,
     today = new Date(),
     onSegmentUpdate,
+    onJobShiftUpdate,
     visibleDepartments,
     showActiveOnly = false,
     selectedDates = [],
@@ -68,37 +70,45 @@ export default function CustomGanttTable({
 
     // Group dates by week for header
     const weekGroups = useMemo(() => {
-        const groups: { weekLabel: string; startIndex: number; span: number }[] = [];
-        let currentWeek = -1;
-        let weekStart = 0;
+        const groups: {
+            weekLabel: string;
+            startIndex: number;
+            span: number;
+            workdayDates: Date[];
+        }[] = [];
+
+        const weekMap = new Map<string, { startIndex: number; endIndex: number; dates: Date[] }>();
 
         dateColumns.forEach((date, index) => {
-            const weekNum = Math.floor(differenceInDays(date, startDate) / 7);
-
-            if (weekNum !== currentWeek) {
-                if (currentWeek !== -1) {
-                    groups.push({
-                        weekLabel: `WEEK${currentWeek + 1}`,
-                        startIndex: weekStart,
-                        span: index - weekStart
-                    });
-                }
-                currentWeek = weekNum;
-                weekStart = index;
+            const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+            const key = weekStart.toISOString();
+            if (!weekMap.has(key)) {
+                weekMap.set(key, { startIndex: index, endIndex: index, dates: [date] });
+            } else {
+                const entry = weekMap.get(key)!;
+                entry.endIndex = index;
+                entry.dates.push(date);
             }
         });
 
-        // Add final week
-        if (currentWeek !== -1) {
-            groups.push({
-                weekLabel: `WEEK${currentWeek + 1}`,
-                startIndex: weekStart,
-                span: dateColumns.length - weekStart
+        Array.from(weekMap.entries())
+            .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
+            .forEach(([_, entry], idx) => {
+                const span = entry.endIndex - entry.startIndex + 1;
+                const workdayDates = entry.dates.filter(d => !isWeekend(d));
+                const labelStart = entry.dates[0];
+                const labelEnd = entry.dates[entry.dates.length - 1];
+                const weekLabel = `${format(labelStart, 'MMM d')}–${format(labelEnd, 'MMM d')}`;
+                groups.push({
+                    weekLabel,
+                    startIndex: entry.startIndex,
+                    span,
+                    workdayDates
+                });
             });
-        }
 
         return groups;
-    }, [dateColumns, startDate]);
+    }, [dateColumns]);
 
     // Calculate bar position for a job
     const calculateBarPosition = (job: Job) => {
@@ -191,8 +201,14 @@ export default function CustomGanttTable({
         initialEndDate: Date;
         element: HTMLElement;
         mode: 'move' | 'resize';
+        moveAll: boolean;
         edge?: 'start' | 'end';
         originalWidth: number;
+        originalInlineWidth: string;
+        originalInlineTransform: string;
+        originalInlineTransition: string;
+        originalInlineZIndex: string;
+        originalInlineWillChange: string;
     } | null>(null);
 
     const requestRef = useRef<number | null>(null);
@@ -222,10 +238,12 @@ export default function CustomGanttTable({
     };
 
     const onMouseDown = (e: React.MouseEvent, job: Job, segment: DepartmentSegment, index: number, mode: 'move' | 'resize', edge?: 'start' | 'end') => {
-        if (!onSegmentUpdate || e.button !== 0) return;
+        if ((!onSegmentUpdate && !onJobShiftUpdate) || e.button !== 0) return;
 
         e.preventDefault();
         e.stopPropagation();
+
+        const moveAll = mode === 'move' && e.shiftKey && !!onJobShiftUpdate;
 
         const target = e.currentTarget as HTMLElement;
         let element = target;
@@ -238,6 +256,8 @@ export default function CustomGanttTable({
         // Capture initial state
         const rect = element.getBoundingClientRect();
 
+        const inlineStyle = element.style;
+
         dragStateRef.current = {
             jobId: job.id,
             segmentIndex: index,
@@ -246,8 +266,14 @@ export default function CustomGanttTable({
             initialEndDate: segment.endDate,
             element,
             mode,
+            moveAll,
             edge,
-            originalWidth: rect.width
+            originalWidth: rect.width,
+            originalInlineWidth: inlineStyle.width,
+            originalInlineTransform: inlineStyle.transform,
+            originalInlineTransition: inlineStyle.transition,
+            originalInlineZIndex: inlineStyle.zIndex,
+            originalInlineWillChange: inlineStyle.willChange
         };
 
         // Prepare element for hardware accelerated drag
@@ -299,25 +325,22 @@ export default function CustomGanttTable({
             const deltaX = ev.clientX - state.initialX;
             const deltaDays = Math.round(deltaX / columnWidth); // Snap to days
 
-            // Revert styles (React will take over on re-render)
-            // But we must wait for state update to complete? 
-            // Better to keep them until React updates?
-            // If we remove transform now, valid position might jump back before React updates.
-            // But we can't easily wait for React. 
-            // Solution: We optimistically assume onSegmentUpdate triggers a prop update.
-            // For now, clear styles.
-            state.element.style.transition = '';
-            state.element.style.zIndex = '';
-            state.element.style.willChange = '';
-            state.element.style.transform = '';
-            state.element.style.width = ''; // revert to prop-driven width
+            // Restore inline styles to pre-drag values.
+            state.element.style.transition = state.originalInlineTransition;
+            state.element.style.zIndex = state.originalInlineZIndex;
+            state.element.style.willChange = state.originalInlineWillChange;
+            state.element.style.transform = state.originalInlineTransform;
+            state.element.style.width = state.originalInlineWidth;
             state.element.classList.remove('dragging');
 
             setIsDragging(false);
             dragStateRef.current = null;
 
-            if (deltaDays !== 0) {
-                if (state.mode === 'resize') {
+            if (deltaDays !== 0 && ignoreClickRef.current) {
+                const moveAll = state.moveAll || (state.mode === 'move' && ev.shiftKey && !!onJobShiftUpdate);
+                if (moveAll) {
+                    await onJobShiftUpdate?.(state.jobId, deltaDays);
+                } else if (state.mode === 'resize') {
                     let newStart = state.initialStartDate;
                     let newEnd = state.initialEndDate;
 
@@ -328,13 +351,13 @@ export default function CustomGanttTable({
                     }
 
                     if (differenceInDays(newEnd, newStart) >= 0) { // Allow 1 day (start=end)
-                        await onSegmentUpdate(state.jobId, segment.department, newStart, newEnd);
+                        await onSegmentUpdate?.(state.jobId, segment.department, newStart, newEnd);
                     }
                 } else {
                     // Move
                     const newStart = addDays(state.initialStartDate, deltaDays);
                     const newEnd = addDays(state.initialEndDate, deltaDays);
-                    await onSegmentUpdate(state.jobId, segment.department, newStart, newEnd);
+                    await onSegmentUpdate?.(state.jobId, segment.department, newStart, newEnd);
                 }
             }
         };
@@ -359,6 +382,30 @@ export default function CustomGanttTable({
                                 key={idx}
                                 colSpan={week.span}
                                 className="week-header"
+                                style={{ cursor: onDateSelect ? 'pointer' : 'default' }}
+                                onClick={() => {
+                                    if (!onDateSelect) return;
+                                    const weekDates = week.workdayDates;
+                                    if (weekDates.length === 0) return;
+
+                                    const isSelected = weekDates.every(d =>
+                                        selectedDates.some(s => isSameDay(s, d))
+                                    );
+
+                                    if (isSelected) {
+                                        const remaining = selectedDates.filter(
+                                            s => !weekDates.some(d => isSameDay(d, s))
+                                        );
+                                        onDateSelect(remaining);
+                                    } else {
+                                        const merged = [...selectedDates];
+                                        weekDates.forEach(d => {
+                                            if (!merged.some(s => isSameDay(s, d))) merged.push(d);
+                                        });
+                                        merged.sort((a, b) => a.getTime() - b.getTime());
+                                        onDateSelect(merged);
+                                    }
+                                }}
                             >
                                 {week.weekLabel}
                             </th>
@@ -454,16 +501,44 @@ export default function CustomGanttTable({
                                         onClick={() => onJobClick?.(job)}
                                     >
                                         <div className="job-cell-content">
-                                            <div className="job-name">{job.name}</div>
+                                            <div className="flex items-center gap-1.5">
+                                                <div className="job-name flex-1">{job.name}</div>
+                                                {/* Scheduling Conflict Indicator */}
+                                                {job.schedulingConflict && (
+                                                    <div
+                                                        className="flex items-center justify-center w-5 h-5 bg-red-100 border border-red-300 rounded"
+                                                        title="Scheduling Conflict: Could not meet due date within capacity limits"
+                                                    >
+                                                        <span className="text-[10px] text-red-600 font-bold">!</span>
+                                                    </div>
+                                                )}
+                                                {/* Progress Status Indicator */}
+                                                {job.progressStatus === 'STALLED' && (
+                                                    <div
+                                                        className="px-1.5 py-0.5 bg-orange-100 border border-orange-300 rounded"
+                                                        title="Job Stalled: No progress for 2+ days and behind schedule"
+                                                    >
+                                                        <span className="text-[9px] text-orange-600 font-bold uppercase tracking-wide">OT?</span>
+                                                    </div>
+                                                )}
+                                                {job.progressStatus === 'SLIPPING' && (
+                                                    <div
+                                                        className="px-1.5 py-0.5 bg-yellow-100 border border-yellow-300 rounded"
+                                                        title="Job Slipping: Behind schedule"
+                                                    >
+                                                        <span className="text-[9px] text-yellow-600 font-bold">⚠</span>
+                                                    </div>
+                                                )}
+                                            </div>
                                             <div className="job-id">{job.id}</div>
-                                            <div className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[160px]">
+                                            <div className="text-[10px] text-slate-600 mt-0.5 truncate max-w-[160px]">
                                                 {job.description || 'No description'}
                                             </div>
-                                            <div className="flex justify-between items-center mt-1.5 text-[9px] text-slate-400 font-mono">
-                                                <span className={differenceInDays(job.dueDate, today) < 0 ? "text-red-400 font-bold" : ""}>
+                                            <div className="flex justify-between items-center mt-1.5 text-[9px] text-slate-500 font-mono">
+                                                <span className={differenceInDays(job.dueDate, today) < 0 ? "text-red-600 font-bold" : ""}>
                                                     Due: {format(job.dueDate, 'M/d')}
                                                 </span>
-                                                <span className="bg-slate-800 px-1 py-px rounded text-slate-300">
+                                                <span className="bg-slate-100 border border-slate-200 px-1 py-px rounded text-slate-600">
                                                     {Math.round(job.weldingPoints || 0)} pts
                                                 </span>
                                             </div>
@@ -495,7 +570,7 @@ export default function CustomGanttTable({
                                                                     borderColor: segment.color,
                                                                     left: `${2}px`,
                                                                     zIndex: segIndex,
-                                                                    cursor: 'grab', // Always grab, changes to grabbing via class
+                                                                    cursor: onJobShiftUpdate ? 'grab' : 'default', // Shift+drag moves all
                                                                     transition: 'all 0.3s ease'
                                                                 }}
                                                                 onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'move')}

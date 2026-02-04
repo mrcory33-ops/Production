@@ -35,7 +35,18 @@ export default function UploadPage() {
             // Dynamically import to ensure client-side execution if needed
             const { syncJobsInput } = await import('@/lib/jobs');
             const stats = await syncJobsInput(parsedJobs);
-            alert(`Success!\nAdded: ${stats.added}\nUpdated: ${stats.updated}\nClosed: ${stats.completed}`);
+
+            // Show detailed summary
+            const summaryLines = [
+                `✅ Sync Complete!`,
+                ``,
+                `📊 Job Summary:`,
+                `  • ${stats.added} new jobs scheduled`,
+                `  • ${stats.updated} existing jobs updated`,
+                `  • ${stats.completed} jobs marked complete`,
+            ];
+
+            alert(summaryLines.join('\n'));
             setParsedJobs([]); // Clear after save
         } catch (err) {
             console.error(err);

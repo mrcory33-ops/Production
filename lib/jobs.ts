@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { scheduleJobs } from './scheduler';
+import { scheduleAllJobs, trackJobProgress } from './scheduler';
 import { collection, doc, writeBatch, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { Job } from '@/types';
 
@@ -9,8 +9,11 @@ const jobsCollection = collection(db, 'jobs');
 /**
  * Synchronizes the mapped jobs from CSV with Firestore.
  * Strategy:
- * 1. Batch write new/updated jobs from CSV.
- * 2. Identify jobs in Firestore that are NOT in the CSV (but were previously Active) and mark them COMPLETED.
+ * 1. Fetch existing jobs from Firestore
+ * 2. Identify NEW jobs (schedule with capacity-aware algorithm)
+ * 3. Identify EXISTING jobs (preserve schedule, track progress)
+ * 4. Identify COMPLETED jobs (missing from CSV)
+ * 5. Batch write all updates
  */
 export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number; updated: number; completed: number }> => {
     const batch = writeBatch(db);
@@ -21,50 +24,83 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number;
     let updatedCount = 0;
     let completedCount = 0;
 
-    // 1. Prepare Writes (Upsert)
-    const csvJobIds = new Set<string>();
-
-    // We need to fetch existing jobs to know if we are adding or updating (for stats only, Firestore set with merge handles logic)
-    // For exact counts, we can just assume 'set' is fine. 
-    // But to detect "missing", we MUST fetch current active jobs.
-
+    // 1. Fetch existing active jobs
     console.log("Fetching existing active jobs...");
     const activeJobsQuery = query(jobsCollection, where("status", "in", ["PENDING", "IN_PROGRESS", "HOLD"]));
     const snapshot = await getDocs(activeJobsQuery);
-    const existingActiveJobIds = new Set<string>();
-    snapshot.forEach((doc: any) => existingActiveJobIds.add(doc.id));
 
-    // Arrays to hold operations
-    const jobsToSave: Job[] = [];
-    const idsToComplete: string[] = [];
+    const existingJobsMap = new Map<string, Job>();
+    snapshot.forEach((docSnap: any) => {
+        const data = docSnap.data();
+        existingJobsMap.set(docSnap.id, {
+            ...data,
+            dueDate: data.dueDate instanceof Timestamp ? data.dueDate.toDate() : new Date(data.dueDate),
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : new Date(data.updatedAt),
+            scheduledStartDate: data.scheduledStartDate instanceof Timestamp ? data.scheduledStartDate.toDate() : data.scheduledStartDate ? new Date(data.scheduledStartDate) : undefined,
+            lastDepartmentChange: data.lastDepartmentChange instanceof Timestamp ? data.lastDepartmentChange.toDate() : data.lastDepartmentChange ? new Date(data.lastDepartmentChange) : undefined,
+        } as Job);
+    });
 
-    // A. Process Input Jobs
-    // Run Scheduling Algorithm
-    console.log("Running Scheduling Algorithm...");
-    const scheduledJobs = scheduleJobs(parsedJobs);
+    // 2. Separate NEW jobs from EXISTING jobs
+    const newJobs: Job[] = [];
+    const existingJobs: Job[] = [];
+    const csvJobIds = new Set<string>();
 
-    scheduledJobs.forEach(job => {
+    parsedJobs.forEach(job => {
         csvJobIds.add(job.id);
-        jobsToSave.push(job);
-
-        if (existingActiveJobIds.has(job.id)) {
-            updatedCount++;
+        if (existingJobsMap.has(job.id)) {
+            existingJobs.push(job);
         } else {
-            addedCount++;
+            newJobs.push(job);
         }
     });
 
-    // B. Identify Missing Jobs (To Mark Complete)
-    existingActiveJobIds.forEach(id => {
+    console.log(`Analysis: ${newJobs.length} new jobs, ${existingJobs.length} existing jobs`);
+
+    // 3. Schedule NEW jobs only (with capacity awareness)
+    let scheduledNewJobs: Job[] = [];
+    if (newJobs.length > 0) {
+        console.log("Scheduling new jobs with capacity-aware algorithm...");
+        const existingJobsArray = Array.from(existingJobsMap.values());
+        scheduledNewJobs = scheduleAllJobs(newJobs, existingJobsArray);
+        addedCount = scheduledNewJobs.length;
+    }
+
+    // 4. Track progress for EXISTING jobs (preserve their schedules)
+    const updatedExistingJobs: Job[] = [];
+    existingJobs.forEach(csvJob => {
+        const previousJob = existingJobsMap.get(csvJob.id);
+        if (previousJob) {
+            // Preserve schedule, track progress
+            const trackedJob = trackJobProgress(csvJob, previousJob);
+            updatedExistingJobs.push({
+                ...trackedJob,
+                // PRESERVE existing schedule fields
+                scheduledStartDate: previousJob.scheduledStartDate,
+                scheduledEndDate: previousJob.scheduledEndDate,
+                departmentSchedule: previousJob.departmentSchedule,
+                scheduledDepartmentByDate: previousJob.scheduledDepartmentByDate,
+                isOverdue: previousJob.isOverdue,
+                schedulingConflict: previousJob.schedulingConflict,
+            });
+            updatedCount++;
+        }
+    });
+
+    // 5. Identify COMPLETED jobs (missing from CSV)
+    const idsToComplete: string[] = [];
+    existingJobsMap.forEach((job, id) => {
         if (!csvJobIds.has(id)) {
             idsToComplete.push(id);
             completedCount++;
         }
     });
 
-    console.log(`Sync Analysis: ${jobsToSave.length} to save, ${idsToComplete.length} to close.`);
+    console.log(`Sync Analysis: ${scheduledNewJobs.length + updatedExistingJobs.length} to save, ${idsToComplete.length} to close. `);
 
-    // Execute Batches
+    // 6. Execute Batches
+    const jobsToSave = [...scheduledNewJobs, ...updatedExistingJobs];
+
     // Define a union type for operations
     type BatchOp =
         | { type: 'set'; data: Job }
@@ -95,3 +131,4 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number;
 
     return { added: addedCount, updated: updatedCount, completed: completedCount };
 };
+
