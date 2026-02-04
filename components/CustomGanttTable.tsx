@@ -546,11 +546,12 @@ export default function CustomGanttTable({
                                     </td>
                                     {dateColumns.map((date, colIndex) => {
                                         const isToday = isSameDay(date, today);
+                                        const hasSegmentStart = segments.some(seg => seg.startCol === colIndex);
 
                                         return (
                                             <td
                                                 key={colIndex}
-                                                className={`date-cell ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''}`}
+                                                className={`date-cell ${hasSegmentStart ? 'has-segment' : ''} ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''}`}
                                                 style={{ minWidth: `${columnWidth}px`, width: `${columnWidth}px` }}
                                                 onMouseEnter={() => setHoveredCell({ row: rowIndex, col: colIndex })}
                                             >

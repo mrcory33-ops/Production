@@ -15,6 +15,21 @@
     min-width: 100%;
 }
 
+.gantt-table tbody {
+    position: relative;
+    overflow: visible;
+}
+
+.gantt-table tr {
+    position: relative;
+    overflow: visible;
+}
+
+.gantt-table td,
+.gantt-table th {
+    overflow: visible;
+}
+
 /* ===== STICKY HEADERS ===== */
 
 /* Corner cell (top-left) */
@@ -168,8 +183,13 @@
     position: relative;
     background: transparent;
     transition: background-color 0.15s ease;
+    overflow: visible;
+    z-index: 1;
 }
 
+.gantt-table .date-cell.has-segment {
+    z-index: 5;
+}
 /* ===== ZEBRA STRIPING ===== */
 
 .gantt-table tbody tr:nth-child(even) {
@@ -242,6 +262,7 @@
     overflow: hidden;
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease, width 0.3s ease, opacity 0.2s ease;
+    z-index: 20;
 
     /* Semi-transparent for overlapping visibility */
     opacity: 0.7;
@@ -305,7 +326,7 @@
     align-items: center;
     padding: 0 10px;
     pointer-events: none;
-    z-index: 100;
+    z-index: 30;
 }
 
 .job-label-overlay .bar-label {

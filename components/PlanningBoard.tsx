@@ -8,9 +8,10 @@ import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/sch
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, differenceInCalendarMonths, format, startOfDay } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap, Trash2 } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap, Trash2, FileDown } from 'lucide-react';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
+import ExportModal from './export/ExportModal';
 
 
 
@@ -77,6 +78,7 @@ export default function PlanningBoard() {
     const [dueStart, setDueStart] = useState<string>('');
     const [dueEnd, setDueEnd] = useState<string>('');
     const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(true);
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     // Handle segment date updates
     const handleSegmentUpdate = async (
@@ -380,19 +382,19 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
         return filtered
             .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
             .map(job => {
-            if (job.remainingDepartmentSchedule) {
-                return job;
-            }
-            if (job.status === 'IN_PROGRESS') {
-                return applyRemainingSchedule(job, today);
-            }
-            return {
-                ...job,
-                forecastStartDate: job.scheduledStartDate ?? job.dueDate,
-                forecastDueDate: job.dueDate,
-                remainingDepartmentSchedule: job.departmentSchedule
-            };
-        });
+                if (job.remainingDepartmentSchedule) {
+                    return job;
+                }
+                if (job.status === 'IN_PROGRESS') {
+                    return applyRemainingSchedule(job, today);
+                }
+                return {
+                    ...job,
+                    forecastStartDate: job.scheduledStartDate ?? job.dueDate,
+                    forecastDueDate: job.dueDate,
+                    remainingDepartmentSchedule: job.departmentSchedule
+                };
+            });
     }, [jobs, showSmallRocks, today, selectedProductTypes, minPoints, maxPoints, dueStart, dueEnd]); // Removed visibleDepartments dependency
 
     // ...
@@ -504,15 +506,6 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                     {/* Department Toggles */}
                     <div className="flex items-center gap-1 bg-slate-50 rounded-lg p-1 border border-slate-200 shadow-sm">
                         <span className="text-[10px] text-slate-400 font-bold px-2 uppercase tracking-wider">Departments:</span>
-                        <button
-                            onClick={() => setVisibleDepartments(new Set(DEPT_ORDER))}
-                            className={`px-3 py-1 rounded text-xs font-medium transition-all ${visibleDepartments.size === DEPT_ORDER.length
-                                ? 'bg-slate-700 text-white shadow-sm'
-                                : 'text-slate-400 hover:text-slate-200'
-                                }`}
-                        >
-                            All
-                        </button>
                         {DEPT_ORDER.map(dept => {
                             const config = DEPARTMENT_CONFIG[dept];
                             const isVisible = visibleDepartments.has(dept);
@@ -541,15 +534,6 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                     {/* Product Type Tabs */}
                     <div className="flex items-center gap-1 bg-slate-50 rounded-lg p-1 border border-slate-200 shadow-sm">
                         <span className="text-[10px] text-slate-400 font-bold px-2 uppercase tracking-wider">Types:</span>
-                        <button
-                            onClick={() => setSelectedProductTypes(new Set(['FAB', 'DOORS', 'HARMONIC']))}
-                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${selectedProductTypes.size === 3
-                                ? 'bg-white text-blue-700 shadow-md ring-1 ring-slate-200'
-                                : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'
-                                }`}
-                        >
-                            All
-                        </button>
                         {[
                             { key: 'FAB', label: 'FAB', color: 'blue', text: 'text-blue-700', bg: 'bg-blue-50', active: 'bg-blue-600 text-white' },
                             { key: 'DOORS', label: 'Doors', color: 'emerald', text: 'text-emerald-700', bg: 'bg-emerald-50', active: 'bg-emerald-600 text-white' },
@@ -673,33 +657,43 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                         />
                     </div>
 
-                    <button
-                        className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm"
-                        title="Import schedule from CSV"
-                    >
-                        <Upload className="w-3.5 h-3.5" />
-                        Import CSV
-                    </button>
-
-                    <div className="h-6 w-px bg-slate-200 mx-2" />
-
-                    {/* Zoom Control */}
-                    <div className="flex items-center gap-3 bg-white rounded-lg px-3 py-1.5 border border-slate-200 shadow-sm">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Zoom</span>
-                        <input
-                            type="range"
-                            min="20"
-                            max="100"
-                            value={columnWidth}
-                            onChange={(e) => setColumnWidth(Number(e.target.value))}
-                            className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                        />
-                    </div>
                 </div>
             </header>
 
             {/* Action Bar */}
             <div className="flex items-center gap-3 px-6 py-2 border-b border-slate-200 bg-white/90 backdrop-blur-md shrink-0">
+                <button
+                    className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm"
+                    title="Import schedule from CSV"
+                >
+                    <Upload className="w-3.5 h-3.5" />
+                    Import CSV
+                </button>
+
+                <button
+                    onClick={() => setIsExportModalOpen(true)}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm"
+                    title="Export schedule to PDF"
+                >
+                    <FileDown className="w-3.5 h-3.5" />
+                    Export
+                </button>
+
+                <div className="h-6 w-px bg-slate-200 mx-2" />
+
+                {/* Zoom Control */}
+                <div className="flex items-center gap-3 bg-white rounded-lg px-3 py-1.5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Zoom</span>
+                    <input
+                        type="range"
+                        min="20"
+                        max="100"
+                        value={columnWidth}
+                        onChange={(e) => setColumnWidth(Number(e.target.value))}
+                        className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                </div>
+
                 <button
                     onClick={handleAutoSchedule}
                     className="flex items-center gap-2 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white rounded-md text-sm transition-colors"
@@ -835,6 +829,12 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
                 .custom-scrollbar::-webkit-scrollbar-corner { background: #f1f5f9; }
             `}</style>
+            {isExportModalOpen && (
+                <ExportModal
+                    jobs={jobs}
+                    onClose={() => setIsExportModalOpen(false)}
+                />
+            )}
         </div>
     );
 }

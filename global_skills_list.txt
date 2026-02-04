@@ -1,0 +1,6 @@
+Global Skills List:
+- frontend-design (~/.agents/skills/frontend-design)
+- pdf (~/.agents/skills/pdf)
+- systematic-debugging (~/.agents/skills/systematic-debugging)
+- ui-ux-pro-max (~/.agents/skills/ui-ux-pro-max)
+- xlsx (~/.agents/skills/xlsx)
