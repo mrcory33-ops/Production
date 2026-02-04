@@ -196,6 +196,7 @@ export default function CustomGanttTable({
     } | null>(null);
 
     const requestRef = useRef<number | null>(null);
+    const ignoreClickRef = useRef(false);
 
     // Clean up animation frame on unmount
     useEffect(() => {
@@ -255,12 +256,21 @@ export default function CustomGanttTable({
         element.style.willChange = 'transform, width';
         element.classList.add('dragging');
 
+        // Reset click ignore flag
+        ignoreClickRef.current = false;
+
         setIsDragging(true);
 
         const handleMouseMove = (ev: MouseEvent) => {
             if (!dragStateRef.current) return;
+
             const state = dragStateRef.current;
             const deltaX = ev.clientX - state.initialX;
+
+            // Only consider it a drag if moved more than 3px (prevents jitter)
+            if (Math.abs(deltaX) > 3) {
+                ignoreClickRef.current = true;
+            }
 
             // Snap to column width for logic, but visual can be smooth or snapped
             // Let's do smooth visual for "premium" feel, but snap logic on release
@@ -491,7 +501,7 @@ export default function CustomGanttTable({
                                                                 onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'move')}
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    if (isDragging) return;
+                                                                    if (isDragging || ignoreClickRef.current) return;
                                                                     if (onSegmentUpdate) {
                                                                         setEditingSegment({ job, segment, segmentIndex: segIndex });
                                                                     } else {
