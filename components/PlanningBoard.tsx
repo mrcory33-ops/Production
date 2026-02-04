@@ -4,11 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, query, where, getDocs, limit, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Job, Department } from '@/types';
-import { applyRemainingSchedule } from '@/lib/scheduler';
+import { applyRemainingSchedule, scheduleJobs } from '@/lib/scheduler';
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, differenceInCalendarMonths, format, startOfDay } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap } from 'lucide-react';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
 
@@ -141,6 +141,33 @@ export default function PlanningBoard() {
         document.addEventListener('fullscreenchange', handleFullScreenChange);
         return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
     }, []);
+
+    const handleAutoSchedule = async () => {
+        if (!confirm('This will reschedule ALL jobs based on the Welding-centric logic. This will overwrite manual department schedules. Continue?')) return;
+
+        setLoading(true);
+        try {
+            const scheduled = scheduleJobs(jobs);
+
+            // Update in Firebase
+            await Promise.all(scheduled.map(job => {
+                const jobRef = doc(db, 'jobs', job.id);
+                return updateDoc(jobRef, {
+                    departmentSchedule: job.departmentSchedule,
+                    scheduledStartDate: job.scheduledStartDate,
+                    updatedAt: new Date()
+                });
+            }));
+
+            setJobs(scheduled);
+            // alert('Schedule optimized successfully!'); // Optional: keep silent or subtle toast
+        } catch (error) {
+            console.error('Auto-schedule failed:', error);
+            alert('Failed to optimize schedule.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
         const fetchJobs = async () => {
@@ -413,6 +440,8 @@ export default function PlanningBoard() {
                         onSegmentUpdate={handleSegmentUpdate}
                         visibleDepartments={visibleDepartments}
                         showActiveOnly={showActiveOnly}
+                        selectedDates={selectedDates}
+                        onDateSelect={setSelectedDates}
                     />
                 </div>
 

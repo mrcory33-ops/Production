@@ -372,7 +372,7 @@ export default function CustomGanttTable({
                             return (
                                 <th
                                     key={colIndex}
-                                    className={`date-header ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''} ${isSelected ? 'bg-indigo-500/20 text-indigo-200 border-b-indigo-500' : ''}`}
+                                    className={`date-header ${isSelected ? 'selected' : ''} ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''}`}
                                     style={{
                                         minWidth: `${columnWidth}px`,
                                         width: `${columnWidth}px`,
