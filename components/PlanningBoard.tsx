@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, query, where, getDocs, limit, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Job, Department } from '@/types';
 import { applyRemainingSchedule, scheduleJobs } from '@/lib/scheduler';
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, differenceInCalendarMonths, format, startOfDay } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap, Trash2 } from 'lucide-react';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
 
@@ -169,6 +169,36 @@ export default function PlanningBoard() {
         }
     };
 
+    const handleClearAll = async () => {
+        if (!confirm('Are you sure you want to DELETE ALL displayed jobs? This cannot be undone.')) return;
+
+        setLoading(true);
+        try {
+            const batch = writeBatch(db);
+            let count = 0;
+
+            jobs.forEach(job => {
+                // Safety check: only delete jobs we have IDs for
+                if (job.id) {
+                    const ref = doc(db, 'jobs', job.id);
+                    batch.delete(ref);
+                    count++;
+                }
+            });
+
+            if (count > 0) {
+                await batch.commit();
+                setJobs([]);
+                alert(`Successfully deleted ${count} jobs.`);
+            }
+        } catch (error) {
+            console.error('Failed to clear jobs:', error);
+            alert('Failed to delete jobs. See console for details.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
         const fetchJobs = async () => {
             try {
@@ -206,7 +236,7 @@ export default function PlanningBoard() {
     const displayJobs = useMemo(() => {
         let filtered = showSmallRocks
             ? jobs
-            : jobs.filter(j => j.isPriority || (j.weldingPoints || 0) >= 70);
+            : jobs.filter(j => j.isPriority || (j.weldingPoints || 0) >= 60);
 
         // Filter by visible departments (REMOVED: Now handled by components for Pipeline View)
         // filtered = filtered.filter(job => {
@@ -386,6 +416,24 @@ export default function PlanningBoard() {
                         </button>
                     </div>
 
+                    <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-800 ml-2">
+                        <button
+                            onClick={() => setShowSmallRocks(false)}
+                            className={`px-3 py-1.5 rounded flex items-center gap-2 text-xs font-medium transition-all ${!showSmallRocks ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                            title="Show only jobs with > 60 points"
+                        >
+                            Big Rocks
+                        </button>
+                        <button
+                            onClick={() => setShowSmallRocks(true)}
+                            className={`px-3 py-1.5 rounded flex items-center gap-2 text-xs font-medium transition-all ${showSmallRocks ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                        >
+                            All
+                        </button>
+                    </div>
+
                     {/* Product Split Toggle */}
                     <button
                         onClick={() => setSplitByProductType(!splitByProductType)}
@@ -421,6 +469,23 @@ export default function PlanningBoard() {
                             className="w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                         />
                     </div>
+                    <button
+                        onClick={handleAutoSchedule}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white rounded-md text-sm transition-colors"
+                        title="Optimize Schedule (Welding-Centric)"
+                    >
+                        <Zap size={14} />
+                        <span>Optimize</span>
+                    </button>
+
+                    <button
+                        onClick={handleClearAll}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-md text-sm transition-colors ml-2"
+                        title="Clear All Jobs"
+                    >
+                        <Trash2 size={14} />
+                        <span>Clear</span>
+                    </button>
                 </div>
             </header>
 
