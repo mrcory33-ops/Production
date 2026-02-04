@@ -143,23 +143,24 @@ const scheduleJobFromWelding = (job: Job, allowSaturday: boolean = false): Job =
     const assemblyStart = subtractWorkDays(assemblyEnd, durations.Assembly, allowSaturday);
 
     // Polishing
-    const polishingEnd = assemblyStart;
+    // End date is day before Assembly starts
+    const polishingEnd = subtractWorkDays(assemblyStart, 1, allowSaturday);
     const polishingStart = subtractWorkDays(polishingEnd, durations.Polishing, allowSaturday);
 
     // WELDING (THE HEARTBEAT)
-    const weldingEnd = polishingStart;
+    const weldingEnd = subtractWorkDays(polishingStart, 1, allowSaturday);
     const weldingStart = subtractWorkDays(weldingEnd, durations.Welding, allowSaturday);
 
     // Press Brake
-    const pressBrakeEnd = weldingStart;
+    const pressBrakeEnd = subtractWorkDays(weldingStart, 1, allowSaturday);
     const pressBrakeStart = subtractWorkDays(pressBrakeEnd, durations['Press Brake'], allowSaturday);
 
     // Laser
-    const laserEnd = pressBrakeStart;
+    const laserEnd = subtractWorkDays(pressBrakeStart, 1, allowSaturday);
     const laserStart = subtractWorkDays(laserEnd, durations.Laser, allowSaturday);
 
     // Engineering
-    const engineeringEnd = laserStart;
+    const engineeringEnd = subtractWorkDays(laserStart, 1, allowSaturday);
     const engineeringStart = subtractWorkDays(engineeringEnd, durations.Engineering, allowSaturday);
 
     // Build schedule object
@@ -214,7 +215,9 @@ export const applyRemainingSchedule = (job: Job, startDate: Date = new Date()): 
         const start = new Date(cursorDate);
         const end = addWorkDays(start, duration);
         deptSchedules[dept] = { start, end };
-        cursorDate = new Date(end);
+
+        // Next department starts the day after this one ends
+        cursorDate = addWorkDays(end, 1);
     }
 
     const forecastEnd = new Date(cursorDate);
