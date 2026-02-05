@@ -69,8 +69,7 @@ export const calculateDailyLoads = (jobs: Job[], rangeStart: Date, rangeEnd: Dat
                 'Press Brake': 0,
                 'Welding': 0,
                 'Polishing': 0,
-                'Assembly': 0,
-                'Shipping': 0 // Usually 0 load, just a milestone
+                'Assembly': 0
             },
             totalPoints: 0
         });
@@ -224,8 +223,7 @@ export const calculateDepartmentTotals = (jobs: Job[], selectedDates: Date[]): R
         'Press Brake': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
         'Welding': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
         'Polishing': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
-        'Assembly': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } },
-        'Shipping': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } }
+        'Assembly': { total: 0, byType: { FAB: 0, DOORS: 0, HARMONIC: 0 } }
     };
 
     if (selectedDates.length === 0) return totals;

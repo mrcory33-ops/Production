@@ -27,7 +27,7 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
     displayOrder: 1,
     pools: [{ count: 9, outputPerDay: 22, maxPerProject: 1 }],
     dailyCapacity: 198,
-    weeklyTarget: { min: 925, max: 1000 },
+    weeklyTarget: { min: 850, max: 1000 },
     color: '#3b82f6',
     colorClass: 'dept-engineering'
   },
@@ -36,7 +36,7 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
     displayOrder: 2,
     pools: [{ count: 3, outputPerDay: 67.5, maxPerProject: 2 }],
     dailyCapacity: 202.5,
-    weeklyTarget: { min: 925, max: 1000 },
+    weeklyTarget: { min: 850, max: 1000 },
     color: '#f97316',
     colorClass: 'dept-laser'
   },
@@ -45,7 +45,7 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
     displayOrder: 3,
     pools: [{ count: 6, outputPerDay: 33, maxPerProject: 4 }],
     dailyCapacity: 198,
-    weeklyTarget: { min: 925, max: 1000 },
+    weeklyTarget: { min: 850, max: 1000 },
     color: '#eab308',
     colorClass: 'dept-press-brake'
   },
@@ -58,7 +58,7 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
       { count: 7, outputPerDay: 15, maxPerProject: 3, productTypes: ['FAB', 'HARMONIC'] }
     ],
     dailyCapacity: 195,
-    weeklyTarget: { min: 925, max: 1000 },
+    weeklyTarget: { min: 850, max: 1000 },
     color: '#ef4444',
     colorClass: 'dept-welding'
   },
@@ -70,7 +70,7 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
       { count: 5, outputPerDay: 18, maxPerProject: 3, productTypes: ['DOORS'] }
     ],
     dailyCapacity: 198,
-    weeklyTarget: { min: 925, max: 1000 },
+    weeklyTarget: { min: 850, max: 1000 },
     color: '#14b8a6',
     colorClass: 'dept-polishing'
   },
@@ -79,19 +79,10 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
     displayOrder: 6,
     pools: [{ count: 12, outputPerDay: 16, maxPerProject: 3 }],
     dailyCapacity: 192,
-    weeklyTarget: { min: 925, max: 1000 },
+    weeklyTarget: { min: 850, max: 1000 },
     timeMultiplier: 1.25,
     color: '#8b5cf6',
     colorClass: 'dept-assembly'
-  },
-  Shipping: {
-    name: 'Shipping',
-    displayOrder: 7,
-    pools: [{ count: 1, outputPerDay: 0, maxPerProject: 1 }],
-    dailyCapacity: 0,
-    weeklyTarget: { min: 0, max: 0 },
-    color: '#6b7280',
-    colorClass: 'dept-shipping'
   }
 };
 
@@ -123,7 +114,8 @@ export const getPoolForJob = (dept: Department, productType: ProductType): Worke
 export const calculateDeptDuration = (
   dept: Department,
   points: number,
-  productType: ProductType
+  productType: ProductType,
+  description?: string
 ): number => {
   const config = DEPARTMENT_CONFIG[dept];
   if (!config || !points) return 0;
@@ -143,6 +135,15 @@ export const calculateDeptDuration = (
   // Apply time multiplier (Assembly = 1.25x)
   if (config.timeMultiplier) {
     rawDays *= config.timeMultiplier;
+  }
+
+  // Rule: Door leaf jobs (not frames) require at least 2 days in Welding
+  if (dept === 'Welding' && productType === 'DOORS') {
+    const desc = (description || '').toLowerCase();
+    const isDoorLeaf = desc.includes('door') && !desc.includes('frame');
+    if (isDoorLeaf) {
+      rawDays = Math.max(rawDays, 2);
+    }
   }
 
   // Round up to nearest half-day

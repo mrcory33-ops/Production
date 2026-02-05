@@ -6,8 +6,7 @@ export type Department =
     | 'Press Brake'
     | 'Welding'
     | 'Polishing'
-    | 'Assembly'
-    | 'Shipping';
+    | 'Assembly';
 
 export type JobStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'HOLD';
 
@@ -58,7 +57,7 @@ export interface Job {
     progressStatus?: 'ON_TRACK' | 'SLIPPING' | 'STALLED'; // Progress tracking
     lastDepartmentChange?: Date; // When currentDepartment last changed (for stall detection)
     scheduledDepartmentByDate?: Record<string, Department>; // Expected dept on each date (for slippage detection)
-    priorityByDept?: Record<Department, { value: number; setAt: string; listId: string }>;
+    priorityByDept?: Partial<Record<Department, { value: number; setAt: string; listId: string }>>;
 
     // Urgency Scoring
     urgencyScore?: number;

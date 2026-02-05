@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInDays } from 'date-fns';
+import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInCalendarDays } from 'date-fns';
 import { Job, Department } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
 import SegmentEditPopover from './SegmentEditPopover';
@@ -66,6 +66,22 @@ export default function CustomGanttTable({
     } | null>(null);
     const [priorityDrafts, setPriorityDrafts] = useState<Record<string, string>>({});
     const [isDragging, setIsDragging] = useState(false);
+
+    const addVisibleDays = (date: Date, delta: number) => {
+        if (delta === 0) return startOfDay(date);
+        let remaining = delta;
+        let cursor = startOfDay(date);
+        const step = remaining > 0 ? 1 : -1;
+
+        while (remaining !== 0) {
+            cursor = addDays(cursor, step);
+            if (!isSunday(cursor)) {
+                remaining -= step;
+            }
+        }
+
+        return cursor;
+    };
 
     // Generate date columns
     const dateColumns = useMemo(() => {
@@ -455,7 +471,7 @@ export default function CustomGanttTable({
             document.removeEventListener('mouseup', handleMouseUp);
 
             const deltaX = ev.clientX - state.initialX;
-            const deltaDays = Math.round(deltaX / columnWidth); // Snap to days
+            const deltaDays = Math.round(deltaX / columnWidth); // Snap to visible days
 
             // Restore inline styles to pre-drag values.
             state.element.style.transition = state.originalInlineTransition;
@@ -471,24 +487,26 @@ export default function CustomGanttTable({
             if (deltaDays !== 0 && ignoreClickRef.current) {
                 const moveAll = state.moveAll || (state.mode === 'move' && ev.shiftKey && !!onJobShiftUpdate);
                 if (moveAll) {
-                    await onJobShiftUpdate?.(state.jobId, deltaDays);
+                    const shiftedStart = addVisibleDays(state.initialStartDate, deltaDays);
+                    const calendarDelta = differenceInCalendarDays(shiftedStart, state.initialStartDate);
+                    await onJobShiftUpdate?.(state.jobId, calendarDelta);
                 } else if (state.mode === 'resize') {
                     let newStart = state.initialStartDate;
                     let newEnd = state.initialEndDate;
 
                     if (state.edge === 'start') {
-                        newStart = addDays(state.initialStartDate, deltaDays);
+                        newStart = addVisibleDays(state.initialStartDate, deltaDays);
                     } else if (state.edge === 'end') {
-                        newEnd = addDays(state.initialEndDate, deltaDays);
+                        newEnd = addVisibleDays(state.initialEndDate, deltaDays);
                     }
 
-                    if (differenceInDays(newEnd, newStart) >= 0) { // Allow 1 day (start=end)
+                    if (differenceInCalendarDays(newEnd, newStart) >= 0) { // Allow 1 day (start=end)
                         await onSegmentUpdate?.(state.jobId, segment.department, newStart, newEnd);
                     }
                 } else {
                     // Move
-                    const newStart = addDays(state.initialStartDate, deltaDays);
-                    const newEnd = addDays(state.initialEndDate, deltaDays);
+                    const newStart = addVisibleDays(state.initialStartDate, deltaDays);
+                    const newEnd = addVisibleDays(state.initialEndDate, deltaDays);
                     await onSegmentUpdate?.(state.jobId, segment.department, newStart, newEnd);
                 }
             }
@@ -680,7 +698,7 @@ export default function CustomGanttTable({
                                                 {job.description || 'No description'}
                                             </div>
                                             <div className="flex justify-between items-center mt-1.5 text-[9px] text-slate-500 font-mono">
-                                                <span className={differenceInDays(job.dueDate, today) < 0 ? "text-red-600 font-bold" : ""}>
+                                                <span className={differenceInCalendarDays(job.dueDate, today) < 0 ? "text-red-600 font-bold" : ""}>
                                                     Due: {format(job.dueDate, 'M/d')}
                                                 </span>
                                                 <span className="bg-slate-100 border border-slate-200 px-1 py-px rounded text-slate-600">

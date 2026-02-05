@@ -77,8 +77,82 @@ export const getScoringWeights = (): ScoringWeights => {
     return currentScoringWeights;
 };
 
-export const updateScoringWeights = (newWeights: ScoringWeights) => {
+/**
+ * Load scoring weights from localStorage and Firebase
+ * Priority: localStorage > Firebase > Defaults
+ */
+export const loadScoringWeights = async (): Promise<ScoringWeights> => {
+    // Try localStorage first (fastest)
+    try {
+        const localData = localStorage.getItem('emjac_scoringWeights');
+        if (localData) {
+            const parsed = JSON.parse(localData);
+            currentScoringWeights = { ...DEFAULT_SCORING_WEIGHTS, ...parsed };
+            return currentScoringWeights;
+        }
+    } catch (error) {
+        console.warn('Failed to load from localStorage:', error);
+    }
+
+    // Try Firebase
+    try {
+        const { db } = await import('./firebase');
+        const { doc, getDoc } = await import('firebase/firestore');
+
+        const docRef = doc(db, 'settings', 'scoringWeights');
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+            const firebaseData = docSnap.data() as ScoringWeights;
+            currentScoringWeights = { ...DEFAULT_SCORING_WEIGHTS, ...firebaseData };
+
+            // Sync to localStorage
+            localStorage.setItem('emjac_scoringWeights', JSON.stringify(currentScoringWeights));
+            return currentScoringWeights;
+        }
+    } catch (error) {
+        console.warn('Failed to load from Firebase:', error);
+    }
+
+    // Fall back to defaults
+    currentScoringWeights = { ...DEFAULT_SCORING_WEIGHTS };
+    return currentScoringWeights;
+};
+
+/**
+ * Update scoring weights and persist to localStorage + Firebase
+ */
+export const updateScoringWeights = async (newWeights: ScoringWeights): Promise<void> => {
     currentScoringWeights = newWeights;
+
+    // Save to localStorage (synchronous, fast)
+    try {
+        localStorage.setItem('emjac_scoringWeights', JSON.stringify(newWeights));
+    } catch (error) {
+        console.error('Failed to save to localStorage:', error);
+    }
+
+    // Save to Firebase (async, backup)
+    try {
+        const { db } = await import('./firebase');
+        const { doc, setDoc } = await import('firebase/firestore');
+
+        const docRef = doc(db, 'settings', 'scoringWeights');
+        await setDoc(docRef, {
+            ...newWeights,
+            updatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Failed to save to Firebase:', error);
+        // Don't throw - localStorage save succeeded
+    }
+};
+
+/**
+ * Reset scoring weights to defaults
+ */
+export const resetScoringWeights = async (): Promise<void> => {
+    await updateScoringWeights({ ...DEFAULT_SCORING_WEIGHTS });
 };
 
 // Backward compatibility proxy (read-only access)

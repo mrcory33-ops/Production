@@ -32,7 +32,7 @@ const determineDepartment = (row: any): Department => {
     // Logic: Find the *last* TRUE dept.
     // DEPT1DONE (Eng) -> DEPT2DONE (Laser) -> DEPT3DONE (Brake) -> DEPT4DONE (Weld) -> DEPT5DONE (Polish) -> DEPT6DONE (Assy)
 
-    if (row['DEPT6DONE'] === 'TRUE' || row['DEPT6DONE'] === true) return 'Shipping'; // Or completed
+    if (row['DEPT6DONE'] === 'TRUE' || row['DEPT6DONE'] === true) return 'Assembly'; // Completed final department
     if (row['DEPT5DONE'] === 'TRUE' || row['DEPT5DONE'] === true) return 'Assembly';
     if (row['DEPT4DONE'] === 'TRUE' || row['DEPT4DONE'] === true) return 'Polishing'; // Wait, DEPT4 is Welding
     // If Dept 4 (Welding) is DONE, it moves to Polishing.
