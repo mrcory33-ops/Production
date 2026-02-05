@@ -5,6 +5,7 @@ import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunda
 import { Job, Department } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
 import SegmentEditPopover from './SegmentEditPopover';
+import ScoreBreakdown from './ScoreBreakdown';
 
 interface DepartmentSegment {
     department: Department;
@@ -25,6 +26,9 @@ interface CustomGanttTableProps {
     today?: Date;
     onSegmentUpdate?: (jobId: string, department: Department, newStart: Date, newEnd: Date) => Promise<void>;
     onJobShiftUpdate?: (jobId: string, deltaDays: number) => Promise<void>;
+    onJobRangeUpdate?: (jobId: string, newStart: Date, newEnd: Date) => Promise<void>;
+    onPriorityUpdate?: (jobId: string, department: Department, value: number | null) => Promise<void>;
+    priorityDepartment?: Department;
     visibleDepartments?: Set<Department>;
     showActiveOnly?: boolean;
     selectedDates?: Date[];
@@ -41,6 +45,9 @@ export default function CustomGanttTable({
     today = new Date(),
     onSegmentUpdate,
     onJobShiftUpdate,
+    onJobRangeUpdate,
+    onPriorityUpdate,
+    priorityDepartment,
     visibleDepartments,
     showActiveOnly = false,
     selectedDates = [],
@@ -52,6 +59,12 @@ export default function CustomGanttTable({
         segment: DepartmentSegment;
         segmentIndex: number;
     } | null>(null);
+    const [editingJobRange, setEditingJobRange] = useState<{
+        job: Job;
+        startValue: string;
+        endValue: string;
+    } | null>(null);
+    const [priorityDrafts, setPriorityDrafts] = useState<Record<string, string>>({});
     const [isDragging, setIsDragging] = useState(false);
 
     // Generate date columns
@@ -176,6 +189,28 @@ export default function CustomGanttTable({
         return DEPARTMENT_CONFIG[dept]?.color || '#6b7280';
     };
 
+    const getJobRange = (job: Job) => {
+        const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
+        if (schedule && Object.keys(schedule).length > 0) {
+            const entries = Object.values(schedule)
+                .map(d => ({
+                    start: new Date(d.start),
+                    end: new Date(d.end)
+                }))
+                .filter(d => !isNaN(d.start.getTime()) && !isNaN(d.end.getTime()));
+
+            if (entries.length > 0) {
+                const minStart = entries.reduce((min, d) => (d.start < min ? d.start : min), entries[0].start);
+                const maxEnd = entries.reduce((max, d) => (d.end > max ? d.end : max), entries[0].end);
+                return { start: startOfDay(minStart), end: startOfDay(maxEnd) };
+            }
+        }
+
+        const fallbackStart = startOfDay(job.forecastStartDate || job.scheduledStartDate || job.dueDate);
+        const fallbackEnd = startOfDay(job.forecastDueDate || job.dueDate);
+        return { start: fallbackStart, end: fallbackEnd };
+    };
+
     // Calculate department segments for multi-colored bars
     const calculateDepartmentSegments = (job: Job): DepartmentSegment[] => {
         const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
@@ -199,18 +234,42 @@ export default function CustomGanttTable({
 
         Object.entries(schedule).forEach(([dept, dates]) => {
             // Filter by visible departments if specified
-            if (visibleDepartments && !visibleDepartments.has(dept as Department)) {
+            if (visibleDepartments && visibleDepartments.size > 0 && !visibleDepartments.has(dept as Department)) {
                 return; // Skip this department
             }
 
             const segmentStart = startOfDay(new Date(dates.start));
             const segmentEnd = startOfDay(new Date(dates.end));
 
-            const startCol = getColIndex(segmentStart, 'next');
-            const endCol = getColIndex(segmentEnd, 'prev');
-            if (startCol === null || endCol === null) {
+            if (isNaN(segmentStart.getTime()) || isNaN(segmentEnd.getTime())) {
                 return;
             }
+
+            let startCol = getColIndex(segmentStart, 'next') ?? -1;
+            let endCol = getColIndex(segmentEnd, 'prev') ?? -1;
+
+            // Handle out of bounds
+            if (startCol === -1) {
+                // If start is before view, clamp to 0
+                if (segmentStart < startDate) startCol = 0;
+                else startCol = -1; // actually not found?
+            }
+            if (endCol === -1) {
+                // If end is after view... wait, getColIndex implementation matters.
+                // Assuming getColIndex returns -1 if not found.
+                if (segmentEnd > endDate) endCol = dateColumns.length - 1;
+                else endCol = -1;
+            }
+
+            // If completely out of range
+            if (segmentEnd < startDate || segmentStart > endDate) {
+                return;
+            }
+
+            // Re-calculate visible columns if needed (simple fallback)
+            if (startCol === -1) startCol = 0;
+            if (endCol === -1) endCol = dateColumns.length - 1;
+
             const duration = endCol - startCol + 1;
 
             // Clamp to visible range
@@ -232,6 +291,35 @@ export default function CustomGanttTable({
 
         // Sort by start date to ensure chronological order
         return segments.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+    };
+
+    const buildDailyDeptMap = (job: Job) => {
+        const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
+        const map = new Map<string, Department[]>();
+        if (!schedule) return map;
+
+        Object.entries(schedule).forEach(([dept, dates]) => {
+            const start = startOfDay(new Date(dates.start));
+            const end = startOfDay(new Date(dates.end));
+            if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
+
+            let cursor = new Date(start);
+            while (cursor <= end) {
+                const key = cursor.toISOString().split('T')[0];
+                const list = map.get(key) || [];
+                if (!list.includes(dept as Department)) list.push(dept as Department);
+                map.set(key, list);
+                cursor = addDays(cursor, 1);
+            }
+        });
+
+        // Keep department order consistent
+        map.forEach((list, key) => {
+            list.sort((a, b) => DEPT_ORDER.indexOf(a) - DEPT_ORDER.indexOf(b));
+            map.set(key, list);
+        });
+
+        return map;
     };
 
     // Refs for High-Performance Animation Loop
@@ -539,6 +627,7 @@ export default function CustomGanttTable({
                         })
                         .map((job, rowIndex) => {
                             const segments = calculateDepartmentSegments(job);
+                            const dailyDeptMap = buildDailyDeptMap(job);
                             const isSelected = selectedJob?.id === job.id;
 
                             return (
@@ -551,8 +640,14 @@ export default function CustomGanttTable({
                                         onClick={() => onJobClick?.(job)}
                                     >
                                         <div className="job-cell-content">
-                                            <div className="flex items-center gap-1.5">
-                                                <div className="job-name flex-1">{job.name}</div>
+                                            <div className="flex items-center gap-1.5 overflow-visible relative group/tooltip">
+                                                <div className="job-name flex-1 cursor-help underline decoration-dotted decoration-slate-300 underline-offset-2">
+                                                    {job.name}
+                                                </div>
+                                                {/* Tooltip */}
+                                                <div className="absolute left-full top-0 ml-2 z-50 hidden group-hover/tooltip:block pointer-events-none">
+                                                    <ScoreBreakdown score={job.urgencyScore || 0} factors={job.urgencyFactors} />
+                                                </div>
                                                 {/* Scheduling Conflict Indicator */}
                                                 {job.schedulingConflict && (
                                                     <div
@@ -592,11 +687,104 @@ export default function CustomGanttTable({
                                                     {Math.round(job.weldingPoints || 0)} pts
                                                 </span>
                                             </div>
+                                            {showActiveOnly && priorityDepartment && onPriorityUpdate && (
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wider">
+                                                        Priority #
+                                                    </span>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={
+                                                            priorityDrafts[job.id] ??
+                                                            (job.priorityByDept?.[priorityDepartment]?.value?.toString() || '')
+                                                        }
+                                                        onChange={(e) => {
+                                                            setPriorityDrafts(prev => ({ ...prev, [job.id]: e.target.value }));
+                                                        }}
+                                                        onBlur={async (e) => {
+                                                            const raw = e.target.value.trim();
+                                                            if (!raw) {
+                                                                await onPriorityUpdate(job.id, priorityDepartment, null);
+                                                                return;
+                                                            }
+                                                            const num = Number(raw);
+                                                            if (!Number.isNaN(num)) {
+                                                                await onPriorityUpdate(job.id, priorityDepartment, num);
+                                                            }
+                                                        }}
+                                                        className="w-16 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
+                                                        placeholder="-"
+                                                    />
+                                                </div>
+                                            )}
+                                            {onJobRangeUpdate && (
+                                                <div className="mt-2">
+                                                    {editingJobRange?.job.id === job.id ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="date"
+                                                                value={editingJobRange.startValue}
+                                                                onChange={(e) => setEditingJobRange({ ...editingJobRange, startValue: e.target.value })}
+                                                                className="w-[110px] bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
+                                                            />
+                                                            <span className="text-[10px] text-slate-400">-</span>
+                                                            <input
+                                                                type="date"
+                                                                value={editingJobRange.endValue}
+                                                                onChange={(e) => setEditingJobRange({ ...editingJobRange, endValue: e.target.value })}
+                                                                className="w-[110px] bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
+                                                            />
+                                                            <button
+                                                                className="px-2 py-0.5 rounded text-[10px] bg-blue-600 text-white hover:bg-blue-500"
+                                                                onClick={async (e) => {
+                                                                    e.stopPropagation();
+                                                                    const start = new Date(editingJobRange.startValue);
+                                                                    const end = new Date(editingJobRange.endValue);
+                                                                    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+                                                                        await onJobRangeUpdate(job.id, startOfDay(start), startOfDay(end));
+                                                                    }
+                                                                    setEditingJobRange(null);
+                                                                }}
+                                                            >
+                                                                Save
+                                                            </button>
+                                                            <button
+                                                                className="px-2 py-0.5 rounded text-[10px] border border-slate-200 text-slate-600 hover:bg-slate-100"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setEditingJobRange(null);
+                                                                }}
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            className="px-2 py-0.5 rounded text-[10px] border border-slate-200 text-slate-600 hover:bg-slate-100"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const range = getJobRange(job);
+                                                                setEditingJobRange({
+                                                                    job,
+                                                                    startValue: format(range.start, 'yyyy-MM-dd'),
+                                                                    endValue: format(range.end, 'yyyy-MM-dd')
+                                                                });
+                                                            }}
+                                                        >
+                                                            Set Start/End
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </td>
                                     {dateColumns.map((date, colIndex) => {
                                         const isToday = isSameDay(date, today);
                                         const hasSegmentStart = segments.some(seg => seg.startCol === colIndex);
+                                        const dateKey = date.toISOString().split('T')[0];
+                                        const dayDepts = dailyDeptMap.get(dateKey) || [];
+                                        const hasOverlap = dayDepts.length > 1;
 
                                         return (
                                             <td
@@ -605,6 +793,17 @@ export default function CustomGanttTable({
                                                 style={{ minWidth: `${columnWidth}px`, width: `${columnWidth}px` }}
                                                 onMouseEnter={() => setHoveredCell({ row: rowIndex, col: colIndex })}
                                             >
+                                                {hasOverlap && (
+                                                    <div className="day-split-overlay">
+                                                        {dayDepts.map((dept, idx) => (
+                                                            <div
+                                                                key={`${job.id}-${dateKey}-${dept}`}
+                                                                className="day-split-segment"
+                                                                style={{ backgroundColor: getDepartmentColor(dept) }}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                )}
                                                 {segments.map((segment, segIndex) => {
                                                     // Standard rendering without react-state drag offset
                                                     const visualOffset = 0;
@@ -614,7 +813,7 @@ export default function CustomGanttTable({
                                                         return (
                                                             <div
                                                                 key={segIndex}
-                                                                className="job-bar-segment"
+                                                                className="job-bar-segment relative group/bar-tooltip"
                                                                 style={{
                                                                     width: `${segment.duration * columnWidth - 4}px`,
                                                                     backgroundColor: segment.color,
@@ -635,6 +834,11 @@ export default function CustomGanttTable({
                                                                     }
                                                                 }}
                                                             >
+                                                                {/* Bar Tooltip */}
+                                                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover/bar-tooltip:block pointer-events-none w-max">
+                                                                    <ScoreBreakdown score={job.urgencyScore || 0} factors={job.urgencyFactors} />
+                                                                </div>
+
                                                                 {/* Resize handle - start */}
                                                                 {onSegmentUpdate && (
                                                                     <div

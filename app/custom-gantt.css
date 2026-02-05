@@ -194,6 +194,26 @@
     z-index: 5;
 }
 
+.day-split-overlay {
+    position: absolute;
+    top: 6px;
+    left: 2px;
+    right: 2px;
+    height: 36px;
+    display: flex;
+    flex-direction: row;
+    gap: 1px;
+    z-index: 12;
+    pointer-events: none;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.day-split-segment {
+    flex: 1;
+    opacity: 0.9;
+}
+
 /* Saturday highlight */
 .gantt-table .saturday-column {
     background: rgba(148, 163, 184, 0.15) !important;

@@ -9,6 +9,28 @@ import { addDays, startOfWeek, endOfWeek, format, isSameDay } from 'date-fns';
 import { AlertTriangle, TrendingUp, Calendar, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
+const toDate = (value: any): Date | undefined => {
+    if (!value) return undefined;
+    if (value instanceof Date) return value;
+    if (typeof value?.toDate === 'function') return value.toDate();
+    const parsed = new Date(value);
+    return isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const normalizeSchedule = (
+    schedule?: Record<string, { start: any; end: any }>
+): Record<string, { start: string; end: string }> | undefined => {
+    if (!schedule) return undefined;
+    const normalized: Record<string, { start: string; end: string }> = {};
+    Object.entries(schedule).forEach(([dept, dates]) => {
+        const start = toDate((dates as any).start);
+        const end = toDate((dates as any).end);
+        if (!start || !end) return;
+        normalized[dept] = { start: start.toISOString(), end: end.toISOString() };
+    });
+    return Object.keys(normalized).length ? normalized : undefined;
+};
+
 export default function InsightsPage() {
     const [loading, setLoading] = useState(true);
     const [loads, setLoads] = useState<DailyLoad[]>([]);
@@ -26,19 +48,21 @@ export default function InsightsPage() {
 
                 const snapshot = await getDocs(q);
                 const jobs: Job[] = [];
-                snapshot.forEach(doc => {
-                    const data = doc.data() as Job;
-                    // Ensure dates are Dates
-                    if (data.scheduledStartDate && data.departmentSchedule) {
-                        jobs.push({
-                            ...data,
-                            // Use raw data, assuming analytics helper handles casting or we cast here
-                            // analytics helper expects Job object.
-                            // Quick cast for safety:
-                            // @ts-ignore
-                            departmentSchedule: data.departmentSchedule
-                        });
-                    }
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data() as Job;
+                    const normalizedDepartmentSchedule = normalizeSchedule((data as any).departmentSchedule);
+                    const normalizedRemainingSchedule = normalizeSchedule((data as any).remainingDepartmentSchedule);
+                    if (!normalizedDepartmentSchedule && !normalizedRemainingSchedule) return;
+
+                    jobs.push({
+                        ...data,
+                        dueDate: toDate((data as any).dueDate) || new Date(),
+                        scheduledStartDate: toDate((data as any).scheduledStartDate),
+                        forecastStartDate: toDate((data as any).forecastStartDate),
+                        forecastDueDate: toDate((data as any).forecastDueDate),
+                        departmentSchedule: normalizedDepartmentSchedule,
+                        remainingDepartmentSchedule: normalizedRemainingSchedule
+                    });
                 });
 
                 // Calculate loads for next 30 days

@@ -8,11 +8,13 @@ import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/sch
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, differenceInCalendarMonths, format, startOfDay, differenceInDays } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap, Trash2, FileDown } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap, Trash2, FileDown, SlidersHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
 import ExportModal from './export/ExportModal';
+import ScoringConfigPanel from './ScoringConfigPanel';
+import { calculateUrgencyScore } from '@/lib/scoring';
 
 
 
@@ -24,6 +26,20 @@ const toDate = (value: any): Date | undefined => {
     return isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
+const normalizeSchedule = (
+    schedule?: Record<string, { start: any; end: any }>
+): Record<string, { start: string; end: string }> | undefined => {
+    if (!schedule) return undefined;
+    const normalized: Record<string, { start: string; end: string }> = {};
+    Object.entries(schedule).forEach(([dept, dates]) => {
+        const start = toDate((dates as any).start);
+        const end = toDate((dates as any).end);
+        if (!start || !end) return;
+        normalized[dept] = { start: start.toISOString(), end: end.toISOString() };
+    });
+    return Object.keys(normalized).length ? normalized : undefined;
+};
+
 const scaleSchedule = (
     schedule: Record<string, { start: string; end: string }>,
     newStart: Date,
@@ -32,27 +48,62 @@ const scaleSchedule = (
     const entries = Object.entries(schedule)
         .map(([dept, dates]) => ({
             dept,
-            start: new Date(dates.start),
-            end: new Date(dates.end)
+            start: startOfDay(new Date(dates.start)),
+            end: startOfDay(new Date(dates.end))
         }))
-        .filter(entry => !isNaN(entry.start.getTime()) && !isNaN(entry.end.getTime()));
+        .filter(entry => !isNaN(entry.start.getTime()) && !isNaN(entry.end.getTime()))
+        .sort((a, b) => a.start.getTime() - b.start.getTime());
 
     if (!entries.length) return {};
 
-    const oldStart = entries.reduce((min, entry) => (entry.start < min ? entry.start : min), entries[0].start);
-    const oldEnd = entries.reduce((max, entry) => (entry.end > max ? entry.end : max), entries[0].end);
-    const oldLength = Math.max(oldEnd.getTime() - oldStart.getTime(), 1);
-    const newLength = Math.max(newEnd.getTime() - newStart.getTime(), 1);
-    const scale = newLength / oldLength;
+    const totalDays = Math.max(1, differenceInCalendarDays(newEnd, newStart) + 1);
+    const deptCount = entries.length;
 
     const updated: Record<string, { start: string; end: string }> = {};
 
-    entries.forEach(entry => {
-        const offset = entry.start.getTime() - oldStart.getTime();
-        const duration = entry.end.getTime() - entry.start.getTime();
-        const nextStart = new Date(newStart.getTime() + offset * scale);
-        const nextEnd = new Date(nextStart.getTime() + duration * scale);
-        updated[entry.dept] = { start: nextStart.toISOString(), end: nextEnd.toISOString() };
+    if (totalDays < deptCount) {
+        // Not enough days: overlap departments by mapping multiple to the same day
+        entries.forEach((entry, idx) => {
+            const dayIndex = Math.floor((idx * totalDays) / deptCount);
+            const day = addDays(newStart, dayIndex);
+            updated[entry.dept] = { start: day.toISOString(), end: day.toISOString() };
+        });
+        return updated;
+    }
+
+    // Enough days: give each dept at least 1 day, distribute remaining by original proportions
+    const originalDurations = entries.map(e => Math.max(1, differenceInCalendarDays(e.end, e.start) + 1));
+    const totalOriginal = originalDurations.reduce((sum, d) => sum + d, 0);
+    const baseDays = new Array(deptCount).fill(1);
+    let remaining = totalDays - deptCount;
+
+    if (remaining > 0) {
+        const weighted = originalDurations.map(d => (d / totalOriginal) * remaining);
+        const extra = weighted.map(w => Math.floor(w));
+        let extraUsed = extra.reduce((sum, d) => sum + d, 0);
+
+        // Distribute leftover days by largest fractional remainder
+        const remainders = weighted.map((w, i) => ({ i, r: w - extra[i] }))
+            .sort((a, b) => b.r - a.r);
+        let leftover = remaining - extraUsed;
+        let idx = 0;
+        while (leftover > 0) {
+            extra[remainders[idx].i] += 1;
+            leftover--;
+            idx = (idx + 1) % remainders.length;
+        }
+
+        for (let i = 0; i < deptCount; i++) {
+            baseDays[i] += extra[i];
+        }
+    }
+
+    let cursor = new Date(newStart);
+    entries.forEach((entry, i) => {
+        const start = new Date(cursor);
+        const end = addDays(start, baseDays[i] - 1);
+        updated[entry.dept] = { start: start.toISOString(), end: end.toISOString() };
+        cursor = addDays(end, 1);
     });
 
     return updated;
@@ -65,9 +116,14 @@ const shiftScheduleDates = (
     if (!schedule) return undefined;
     const updated: Record<string, { start: string; end: string }> = {};
     Object.entries(schedule).forEach(([dept, dates]) => {
-        const start = startOfDay(addDays(new Date(dates.start), deltaDays));
-        const end = startOfDay(addDays(new Date(dates.end), deltaDays));
-        updated[dept] = { start: start.toISOString(), end: end.toISOString() };
+        const s = new Date(dates.start);
+        const e = new Date(dates.end);
+
+        if (!isNaN(s.getTime()) && !isNaN(e.getTime())) {
+            const start = startOfDay(addDays(s, deltaDays));
+            const end = startOfDay(addDays(e, deltaDays));
+            updated[dept] = { start: start.toISOString(), end: end.toISOString() };
+        }
     });
     return updated;
 };
@@ -135,7 +191,9 @@ export default function PlanningBoard() {
     const [dueStart, setDueStart] = useState<string>('');
     const [dueEnd, setDueEnd] = useState<string>('');
     const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(true);
+    const [priorityListIdByDept, setPriorityListIdByDept] = useState<Record<string, string>>({});
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [isScoringConfigOpen, setIsScoringConfigOpen] = useState(false);
 
     // Handle segment date updates
     const handleSegmentUpdate = async (
@@ -268,6 +326,108 @@ export default function PlanningBoard() {
         }
     };
 
+    const handleJobRangeUpdate = async (jobId: string, newStart: Date, newEnd: Date) => {
+        try {
+            const job = jobs.find(j => j.id === jobId);
+            if (!job) {
+                console.error('Job not found:', jobId);
+                return;
+            }
+
+            const baseSchedule = job.departmentSchedule || {};
+            const baseRemaining = job.remainingDepartmentSchedule || baseSchedule;
+
+            const updatedDepartmentSchedule = scaleSchedule(baseSchedule, startOfDay(newStart), startOfDay(newEnd));
+            const updatedRemainingSchedule = scaleSchedule(baseRemaining, startOfDay(newStart), startOfDay(newEnd));
+
+            const jobRef = doc(db, 'jobs', jobId);
+            await updateDoc(jobRef, {
+                departmentSchedule: updatedDepartmentSchedule,
+                remainingDepartmentSchedule: updatedRemainingSchedule,
+                scheduledStartDate: startOfDay(newStart),
+                forecastStartDate: startOfDay(newStart),
+                forecastDueDate: startOfDay(newEnd),
+                updatedAt: new Date()
+            });
+
+            setJobs(prevJobs =>
+                prevJobs.map(j =>
+                    j.id === jobId
+                        ? {
+                            ...j,
+                            departmentSchedule: updatedDepartmentSchedule,
+                            remainingDepartmentSchedule: updatedRemainingSchedule,
+                            scheduledStartDate: startOfDay(newStart),
+                            forecastStartDate: startOfDay(newStart),
+                            forecastDueDate: startOfDay(newEnd)
+                        }
+                        : j
+                )
+            );
+        } catch (error) {
+            console.error('Error updating job range:', error);
+            alert('Failed to update job range. Please try again.');
+        }
+    };
+
+    const handlePriorityUpdate = async (jobId: string, dept: Department, value: number | null) => {
+        try {
+            const job = jobs.find(j => j.id === jobId);
+            if (!job) return;
+
+            const listId = priorityListIdByDept[dept] || new Date().toISOString();
+            const nextPriority = { ...(job.priorityByDept || {}) };
+
+            if (value === null || Number.isNaN(value)) {
+                delete nextPriority[dept];
+            } else {
+                nextPriority[dept] = {
+                    value,
+                    setAt: new Date().toISOString(),
+                    listId
+                };
+            }
+
+            const jobRef = doc(db, 'jobs', jobId);
+            await updateDoc(jobRef, {
+                priorityByDept: Object.keys(nextPriority).length ? nextPriority : deleteField(),
+                updatedAt: new Date()
+            });
+
+            setJobs(prev =>
+                prev.map(j =>
+                    j.id === jobId
+                        ? { ...j, priorityByDept: Object.keys(nextPriority).length ? nextPriority : undefined }
+                        : j
+                )
+            );
+        } catch (error) {
+            console.error('Failed to update priority:', error);
+        }
+    };
+
+    const handleResetPriorityList = async (dept: Department) => {
+        try {
+            const listId = new Date().toISOString();
+            setPriorityListIdByDept(prev => ({ ...prev, [dept]: listId }));
+
+            const batch = writeBatch(db);
+            const updatedJobs: Job[] = jobs.map(job => {
+                if (!job.priorityByDept?.[dept]) return job;
+                const next = { ...job.priorityByDept };
+                delete next[dept];
+                const ref = doc(db, 'jobs', job.id);
+                batch.update(ref, { priorityByDept: Object.keys(next).length ? next : deleteField() });
+                return { ...job, priorityByDept: Object.keys(next).length ? next : undefined };
+            });
+
+            await batch.commit();
+            setJobs(updatedJobs);
+        } catch (error) {
+            console.error('Failed to reset priority list:', error);
+        }
+    };
+
     useEffect(() => {
         const handleFullScreenChange = () => {
             const isActive = document.fullscreenElement === containerRef.current;
@@ -336,6 +496,18 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
         }
     };
 
+    const handleScoringSave = () => {
+        // Recalculate scores for all jobs with new weights
+        setJobs(prev => prev.map(job => {
+            const urgency = calculateUrgencyScore(job);
+            return {
+                ...job,
+                urgencyScore: urgency.score,
+                urgencyFactors: urgency.factors
+            };
+        }));
+    };
+
     const handleClearAll = async () => {
         if (!confirm('Are you sure you want to DELETE ALL displayed jobs? This cannot be undone.')) return;
 
@@ -380,16 +552,71 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
 
                 snapshot.forEach(docSnap => {
                     const data = docSnap.data() as Job;
+                    const normalizedDepartmentSchedule = normalizeSchedule((data as any).departmentSchedule);
+                    const normalizedRemainingSchedule = normalizeSchedule((data as any).remainingDepartmentSchedule);
                     fetched.push({
                         ...data,
                         dueDate: toDate(data.dueDate) || new Date(),
                         scheduledStartDate: toDate(data.scheduledStartDate),
                         forecastStartDate: toDate(data.forecastStartDate),
-                        forecastDueDate: toDate(data.forecastDueDate)
+                        forecastDueDate: toDate(data.forecastDueDate),
+                        departmentSchedule: normalizedDepartmentSchedule,
+                        remainingDepartmentSchedule: normalizedRemainingSchedule
                     });
                 });
 
-                setJobs(fetched);
+                // Clear stale priorities (>5 days)
+                const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
+                const now = Date.now();
+                const staleUpdates: { id: string; updates: Record<string, any> }[] = [];
+
+                const cleaned = fetched.map(job => {
+                    // Default values
+                    const jobWithDefaults = {
+                        ...job,
+                        productType: job.productType || 'FAB'
+                    };
+
+                    // Calculate initial urgency score
+                    const urgency = calculateUrgencyScore(jobWithDefaults);
+                    const jobWithScore = {
+                        ...jobWithDefaults,
+                        urgencyScore: urgency.score,
+                        urgencyFactors: urgency.factors
+                    };
+
+                    if (!jobWithScore.priorityByDept) return jobWithScore;
+                    const next = { ...jobWithScore.priorityByDept };
+                    let changed = false;
+
+                    Object.entries(next).forEach(([dept, data]) => {
+                        const setAt = new Date(data.setAt).getTime();
+                        if (!setAt || now - setAt > fiveDaysMs) {
+                            delete next[dept as Department];
+                            changed = true;
+                        }
+                    });
+
+                    if (changed) {
+                        staleUpdates.push({
+                            id: job.id,
+                            updates: { priorityByDept: Object.keys(next).length ? next : deleteField() }
+                        });
+                    }
+
+                    return changed ? { ...jobWithScore, priorityByDept: Object.keys(next).length ? next : undefined } : jobWithScore;
+                });
+
+                if (staleUpdates.length) {
+                    const batch = writeBatch(db);
+                    staleUpdates.forEach(u => {
+                        const ref = doc(db, 'jobs', u.id);
+                        batch.update(ref, u.updates);
+                    });
+                    await batch.commit();
+                }
+
+                setJobs(cleaned);
             } catch (err) {
                 console.error('Failed to fetch jobs for planning', err);
             } finally {
@@ -427,7 +654,7 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
 
         // Filter by product type tabs
         if (selectedProductTypes.size > 0) {
-            filtered = filtered.filter(j => selectedProductTypes.has(j.productType));
+            filtered = filtered.filter(j => selectedProductTypes.has(j.productType || 'FAB'));
         }
 
         // Filter by visible departments (REMOVED: Now handled by components for Pipeline View)
@@ -622,6 +849,14 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                     <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-700 to-cyan-700">
                         Planning Board
                     </h1>
+                    <button
+                        onClick={() => setIsScoringConfigOpen(true)}
+                        className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-2"
+                        title="Configure Urgency Scoring"
+                    >
+                        <SlidersHorizontal size={20} />
+                        <span className="text-xs font-semibold uppercase tracking-wider hidden xl:inline">Scoring</span>
+                    </button>
 
                     {/* Department Toggles */}
                     <div className="flex items-center gap-1 bg-slate-50 rounded-lg p-1 border border-slate-200 shadow-sm">
@@ -703,6 +938,16 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                             Active
                         </button>
                     </div>
+
+                    {showActiveOnly && visibleDepartments.size === 1 && (
+                        <button
+                            onClick={() => handleResetPriorityList(Array.from(visibleDepartments)[0])}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm"
+                            title="Start a new priority list for this department"
+                        >
+                            New Priority List
+                        </button>
+                    )}
 
                     <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-800 ml-2">
                         <button
@@ -850,6 +1095,9 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                             today={today}
                             onSegmentUpdate={handleSegmentUpdate}
                             onJobShiftUpdate={handleJobShiftUpdate}
+                            onJobRangeUpdate={handleJobRangeUpdate}
+                            onPriorityUpdate={handlePriorityUpdate}
+                            priorityDepartment={showActiveOnly && visibleDepartments.size === 1 ? Array.from(visibleDepartments)[0] : undefined}
                             visibleDepartments={visibleDepartments}
                             showActiveOnly={showActiveOnly}
                             selectedDates={selectedDates}
@@ -956,6 +1204,12 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                     onClose={() => setIsExportModalOpen(false)}
                 />
             )}
+
+            <ScoringConfigPanel
+                isOpen={isScoringConfigOpen}
+                onClose={() => setIsScoringConfigOpen(false)}
+                onSave={handleScoringSave}
+            />
         </div>
     );
 }

@@ -58,6 +58,21 @@ export interface Job {
     progressStatus?: 'ON_TRACK' | 'SLIPPING' | 'STALLED'; // Progress tracking
     lastDepartmentChange?: Date; // When currentDepartment last changed (for stall detection)
     scheduledDepartmentByDate?: Record<string, Department>; // Expected dept on each date (for slippage detection)
+    priorityByDept?: Record<Department, { value: number; setAt: string; listId: string }>;
+
+    // Urgency Scoring
+    urgencyScore?: number;
+    urgencyFactors?: {
+        dueDateProximity: number;
+        fastShipBonus: number;
+        slippageRisk: number;
+        stallPenalty: number;
+        bigRockWeight: number;
+        refJobBonus: number;
+        harmonicBonus: number;
+        [key: string]: number;
+    };
+    fastShip?: boolean; // True if "Fast Ship" column indicates priority (Column K)
 
     updatedAt: Date;
 }

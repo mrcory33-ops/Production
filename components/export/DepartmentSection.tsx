@@ -74,10 +74,11 @@ export default function DepartmentSection({ department, jobs, dateRange }: Depar
     // Columns Configuration
     const columns = [
         { header: 'Job #', width: '12%', field: 'id' },
-        { header: 'Job Name', width: '20%', field: 'name' },
-        { header: 'Description', width: '38%', field: 'description' },
-        { header: 'Due Date', width: '15%', field: 'dueDate' },
-        { header: 'Points', width: '15%', field: 'weldingPoints' },
+        { header: 'Job Name', width: '18%', field: 'name' },
+        { header: 'Description', width: '32%', field: 'description' },
+        { header: 'Due Date', width: '14%', field: 'dueDate' },
+        { header: 'Points', width: '12%', field: 'weldingPoints' },
+        { header: 'Priority', width: '12%', field: 'priority' },
     ];
 
     const formatDateRange = () => {
@@ -130,6 +131,11 @@ export default function DepartmentSection({ department, jobs, dateRange }: Depar
                         <View style={[styles.tableCol, { width: columns[4].width }]}>
                             <Text style={styles.tableCell}>
                                 {Math.round(job.weldingPoints || 0)}
+                            </Text>
+                        </View>
+                        <View style={[styles.tableCol, { width: columns[5].width }]}>
+                            <Text style={styles.tableCell}>
+                                {job.priorityByDept?.[department]?.value ?? ''}
                             </Text>
                         </View>
                     </View>

@@ -78,9 +78,8 @@ export const calculateDailyLoads = (jobs: Job[], rangeStart: Date, rangeEnd: Dat
 
     // 3. Iterate Jobs and Distribute Points
     jobs.forEach(job => {
-        if (!job.departmentSchedule || !job.weldingPoints) return;
-
         const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
+        if (!schedule || !job.weldingPoints) return;
         Object.entries(schedule).forEach(([dept, interval]) => {
             if (!interval.start || !interval.end) return;
 
@@ -134,6 +133,8 @@ export const detectBottlenecks = (
             if (!config) return;
 
             const capacity = config.dailyCapacity;
+
+            if (capacity <= 0) return;
 
             if (points > capacity) {
                 const overload = points - capacity;
@@ -238,12 +239,12 @@ export const calculateDepartmentTotals = (jobs: Job[], selectedDates: Date[]): R
     const dateStrings = new Set(selectedDates.map(d => startOfDay(d).toISOString()));
 
     jobs.forEach(job => {
-        if (!job.departmentSchedule || !job.weldingPoints) return;
+        const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
+        if (!schedule || !job.weldingPoints) return;
 
         // Product Type
         const pType = job.productType || 'FAB'; // Default to FAB if missing
 
-        const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
         Object.entries(schedule).forEach(([dept, interval]) => {
             const deptName = dept as Department;
             if (!totals[deptName]) return;
