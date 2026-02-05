@@ -6,6 +6,7 @@
     overflow: auto;
     background: #f8fafc;
     position: relative;
+    --week-header-height: 44px;
 }
 
 .gantt-table {
@@ -62,7 +63,7 @@
     z-index: 200;
     background: #f1f5f9;
     border-bottom: 1px solid #cbd5e1;
-    padding: 8px 12px;
+    padding: 6px 10px;
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
@@ -70,6 +71,8 @@
     color: #475569;
     text-align: center;
     border-left: 1px solid #e2e8f0;
+    height: var(--week-header-height);
+    line-height: 1.1;
 }
 
 /* Day header row */
@@ -79,9 +82,9 @@
 
 .gantt-table .date-header {
     position: sticky;
-    top: 41px;
+    top: var(--week-header-height);
     /* Height of week header */
-    z-index: 200;
+    z-index: 210;
     background: #f1f5f9;
     border-bottom: 2px solid #cbd5e1;
     border-left: 1px solid #e2e8f0;
@@ -189,6 +192,11 @@
 
 .gantt-table .date-cell.has-segment {
     z-index: 5;
+}
+
+/* Saturday highlight */
+.gantt-table .saturday-column {
+    background: rgba(148, 163, 184, 0.15) !important;
 }
 /* ===== ZEBRA STRIPING ===== */
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { addDays, differenceInDays, format, startOfDay, isSameDay, startOfWeek, isWeekend } from 'date-fns';
+import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInDays } from 'date-fns';
 import { Job, Department } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
 import SegmentEditPopover from './SegmentEditPopover';
@@ -61,12 +61,45 @@ export default function CustomGanttTable({
         const end = startOfDay(endDate);
 
         while (current <= end) {
-            dates.push(current);
+            if (!isSunday(current)) {
+                dates.push(current);
+            }
             current = addDays(current, 1);
         }
 
         return dates;
     }, [startDate, endDate]);
+
+    const dateIndexMap = useMemo(() => {
+        const map = new Map<string, number>();
+        dateColumns.forEach((date, index) => {
+            map.set(format(date, 'yyyy-MM-dd'), index);
+        });
+        return map;
+    }, [dateColumns]);
+
+    const getColIndex = (date: Date, direction: 'next' | 'prev') => {
+        const normalized = startOfDay(date);
+        const key = format(normalized, 'yyyy-MM-dd');
+        if (dateIndexMap.has(key)) return dateIndexMap.get(key)!;
+
+        let cursor = normalized;
+        for (let i = 0; i < 7; i += 1) {
+            cursor = addDays(cursor, direction === 'next' ? 1 : -1);
+            const cursorKey = format(cursor, 'yyyy-MM-dd');
+            if (dateIndexMap.has(cursorKey)) return dateIndexMap.get(cursorKey)!;
+        }
+        return null;
+    };
+
+    const earliestJobDate = useMemo(() => {
+        if (!jobs.length) return startOfDay(startDate);
+        return jobs.reduce((min, job) => {
+            const raw = job.forecastStartDate || job.scheduledStartDate || job.dueDate;
+            const normalized = startOfDay(raw);
+            return normalized < min ? normalized : min;
+        }, startOfDay(startDate));
+    }, [jobs, startDate]);
 
     // Group dates by week for header
     const weekGroups = useMemo(() => {
@@ -98,7 +131,12 @@ export default function CustomGanttTable({
                 const workdayDates = entry.dates.filter(d => !isWeekend(d));
                 const labelStart = entry.dates[0];
                 const labelEnd = entry.dates[entry.dates.length - 1];
-                const weekLabel = `${format(labelStart, 'MMM d')}–${format(labelEnd, 'MMM d')}`;
+                let weekLabel = `${format(labelStart, 'MMM d')}–${format(labelEnd, 'MMM d')}`;
+                if (labelEnd < earliestJobDate) {
+                    weekLabel = '';
+                } else if (labelStart < earliestJobDate) {
+                    weekLabel = `${format(earliestJobDate, 'MMM d')}–${format(labelEnd, 'MMM d')}`;
+                }
                 groups.push({
                     weekLabel,
                     startIndex: entry.startIndex,
@@ -108,15 +146,18 @@ export default function CustomGanttTable({
             });
 
         return groups;
-    }, [dateColumns]);
+    }, [dateColumns, earliestJobDate]);
 
     // Calculate bar position for a job
     const calculateBarPosition = (job: Job) => {
         const jobStart = startOfDay(job.forecastStartDate || job.scheduledStartDate || job.dueDate);
         const jobEnd = startOfDay(job.forecastDueDate || job.dueDate);
 
-        const startCol = differenceInDays(jobStart, startDate);
-        const endCol = differenceInDays(jobEnd, startDate);
+        const startCol = getColIndex(jobStart, 'next');
+        const endCol = getColIndex(jobEnd, 'prev');
+        if (startCol === null || endCol === null) {
+            return { startCol: 0, duration: 0, isVisible: false };
+        }
         const duration = endCol - startCol + 1;
 
         // Clamp to visible range
@@ -165,8 +206,11 @@ export default function CustomGanttTable({
             const segmentStart = startOfDay(new Date(dates.start));
             const segmentEnd = startOfDay(new Date(dates.end));
 
-            const startCol = differenceInDays(segmentStart, startDate);
-            const endCol = differenceInDays(segmentEnd, startDate);
+            const startCol = getColIndex(segmentStart, 'next');
+            const endCol = getColIndex(segmentEnd, 'prev');
+            if (startCol === null || endCol === null) {
+                return;
+            }
             const duration = endCol - startCol + 1;
 
             // Clamp to visible range
@@ -419,7 +463,7 @@ export default function CustomGanttTable({
                             return (
                                 <th
                                     key={colIndex}
-                                    className={`date-header ${isSelected ? 'selected' : ''} ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''}`}
+                                    className={`date-header ${isSelected ? 'selected' : ''} ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''} ${isSaturday(date) ? 'saturday-column' : ''}`}
                                     style={{
                                         minWidth: `${columnWidth}px`,
                                         width: `${columnWidth}px`,
@@ -443,8 +487,14 @@ export default function CustomGanttTable({
                                     }}
                                 >
                                     <div className="date-content">
-                                        <div className={`day-number ${isSelected ? 'text-indigo-300' : ''}`}>{format(date, 'd')}</div>
-                                        <div className="day-name">{format(date, 'EEE').slice(0, 1)}</div>
+                                        {date < earliestJobDate ? (
+                                            <div className="day-number opacity-0">0</div>
+                                        ) : (
+                                            <>
+                                                <div className={`day-number ${isSelected ? 'text-indigo-300' : ''}`}>{format(date, 'd')}</div>
+                                                <div className="day-name">{format(date, 'EEE').slice(0, 1)}</div>
+                                            </>
+                                        )}
                                     </div>
                                 </th>
                             );
@@ -551,7 +601,7 @@ export default function CustomGanttTable({
                                         return (
                                             <td
                                                 key={colIndex}
-                                                className={`date-cell ${hasSegmentStart ? 'has-segment' : ''} ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''}`}
+                                                className={`date-cell ${hasSegmentStart ? 'has-segment' : ''} ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''} ${isSaturday(date) ? 'saturday-column' : ''}`}
                                                 style={{ minWidth: `${columnWidth}px`, width: `${columnWidth}px` }}
                                                 onMouseEnter={() => setHoveredCell({ row: rowIndex, col: colIndex })}
                                             >

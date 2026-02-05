@@ -6,6 +6,26 @@ import { Job } from '@/types';
 // Collection reference
 const jobsCollection = collection(db, 'jobs');
 
+const removeUndefined = (value: any): any => {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (value instanceof Date) return value;
+    if (Array.isArray(value)) {
+        return value.map(item => removeUndefined(item)).filter(item => item !== undefined);
+    }
+    if (typeof value === 'object') {
+        const result: Record<string, any> = {};
+        Object.entries(value).forEach(([key, val]) => {
+            const cleaned = removeUndefined(val);
+            if (cleaned !== undefined) {
+                result[key] = cleaned;
+            }
+        });
+        return result;
+    }
+    return value;
+};
+
 /**
  * Synchronizes the mapped jobs from CSV with Firestore.
  * Strategy:
@@ -118,10 +138,12 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number;
         chunk.forEach(op => {
             if (op.type === 'set') {
                 const ref = doc(jobsCollection, op.data.id);
-                newBatch.set(ref, op.data, { merge: true });
+                const cleaned = removeUndefined(op.data);
+                newBatch.set(ref, cleaned, { merge: true });
             } else {
                 const ref = doc(jobsCollection, op.id);
-                newBatch.update(ref, op.data);
+                const cleaned = removeUndefined(op.data);
+                newBatch.update(ref, cleaned);
             }
         });
 

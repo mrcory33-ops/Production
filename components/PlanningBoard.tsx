@@ -7,8 +7,9 @@ import { Job, Department } from '@/types';
 import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/scheduler';
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
-import { addDays, differenceInCalendarDays, differenceInCalendarMonths, format, startOfDay } from 'date-fns';
+import { addDays, differenceInCalendarDays, differenceInCalendarMonths, format, startOfDay, differenceInDays } from 'date-fns';
 import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap, Trash2, FileDown } from 'lucide-react';
+import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
 import ExportModal from './export/ExportModal';
@@ -55,6 +56,62 @@ const scaleSchedule = (
     });
 
     return updated;
+};
+
+const shiftScheduleDates = (
+    schedule: Record<string, { start: string; end: string }> | undefined,
+    deltaDays: number
+) => {
+    if (!schedule) return undefined;
+    const updated: Record<string, { start: string; end: string }> = {};
+    Object.entries(schedule).forEach(([dept, dates]) => {
+        const start = startOfDay(addDays(new Date(dates.start), deltaDays));
+        const end = startOfDay(addDays(new Date(dates.end), deltaDays));
+        updated[dept] = { start: start.toISOString(), end: end.toISOString() };
+    });
+    return updated;
+};
+
+const getEarliestScheduleDate = (job: Job) => {
+    const schedules = [
+        job.remainingDepartmentSchedule,
+        job.departmentSchedule
+    ].filter(Boolean) as Record<string, { start: string; end: string }>[];
+
+    const dates: Date[] = [];
+    schedules.forEach(schedule => {
+        Object.values(schedule).forEach(({ start }) => {
+            const d = startOfDay(new Date(start));
+            if (!isNaN(d.getTime())) dates.push(d);
+        });
+    });
+
+    if (dates.length) {
+        return new Date(Math.min(...dates.map(d => d.getTime())));
+    }
+
+    const fallback = job.forecastStartDate || job.scheduledStartDate || job.dueDate;
+    return startOfDay(fallback);
+};
+
+const removeUndefined = (value: any): any => {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (value instanceof Date) return value;
+    if (Array.isArray(value)) {
+        return value.map(item => removeUndefined(item)).filter(item => item !== undefined);
+    }
+    if (typeof value === 'object') {
+        const result: Record<string, any> = {};
+        Object.entries(value).forEach(([key, val]) => {
+            const cleaned = removeUndefined(val);
+            if (cleaned !== undefined) {
+                result[key] = cleaned;
+            }
+        });
+        return result;
+    }
+    return value;
 };
 
 export default function PlanningBoard() {
@@ -128,11 +185,11 @@ export default function PlanningBoard() {
 
             // Update in Firebase
             const jobRef = doc(db, 'jobs', jobId);
-            await updateDoc(jobRef, {
+            await updateDoc(jobRef, removeUndefined({
                 departmentSchedule: updatedDepartmentSchedule,
                 remainingDepartmentSchedule: updatedRemainingSchedule,
                 updatedAt: new Date()
-            });
+            }));
 
             // Update local state
             setJobs(prevJobs =>
@@ -186,12 +243,12 @@ export default function PlanningBoard() {
                 : job.scheduledStartDate;
 
             const jobRef = doc(db, 'jobs', jobId);
-            await updateDoc(jobRef, {
+            await updateDoc(jobRef, removeUndefined({
                 departmentSchedule: updatedDepartmentSchedule || job.departmentSchedule,
                 remainingDepartmentSchedule: updatedRemainingSchedule || job.remainingDepartmentSchedule,
                 scheduledStartDate: newScheduledStartDate || null,
                 updatedAt: new Date()
-            });
+            }));
 
             setJobs(prevJobs =>
                 prevJobs.map(j =>
@@ -232,7 +289,7 @@ export default function PlanningBoard() {
             // Update in Firebase with all new scheduling fields
             await Promise.all(scheduled.map(job => {
                 const jobRef = doc(db, 'jobs', job.id);
-                return updateDoc(jobRef, {
+                return updateDoc(jobRef, removeUndefined({
                     departmentSchedule: job.departmentSchedule,
                     // Clear old legacy schedule fields that might interfere
                     remainingDepartmentSchedule: deleteField(),
@@ -242,7 +299,7 @@ export default function PlanningBoard() {
                     progressStatus: job.progressStatus || 'ON_TRACK',
                     isOverdue: job.isOverdue || false,
                     updatedAt: new Date()
-                });
+                }));
             }));
 
             setJobs(scheduled);
@@ -436,6 +493,68 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
         setCapacityAlerts(alerts);
     }, [displayJobs, today]);
 
+    useEffect(() => {
+        if (!jobs.length) return;
+
+        const cutoffDate = addDays(today, -45);
+        const toShift = jobs
+            .map(job => {
+                const earliest = getEarliestScheduleDate(job);
+                if (earliest >= cutoffDate) return null;
+
+                const delta = differenceInDays(cutoffDate, earliest);
+                if (delta <= 0) return null;
+
+                const updatedDepartmentSchedule = shiftScheduleDates(job.departmentSchedule, delta);
+                const updatedRemainingSchedule = shiftScheduleDates(job.remainingDepartmentSchedule, delta);
+                const updatedForecastStart = job.forecastStartDate
+                    ? addDays(startOfDay(job.forecastStartDate), delta)
+                    : job.forecastStartDate;
+                const updatedForecastDue = job.forecastDueDate
+                    ? addDays(startOfDay(job.forecastDueDate), delta)
+                    : job.forecastDueDate;
+                const updatedScheduledStart = job.scheduledStartDate
+                    ? addDays(startOfDay(job.scheduledStartDate), delta)
+                    : job.scheduledStartDate;
+
+                return {
+                    jobId: job.id,
+                    updates: {
+                        departmentSchedule: updatedDepartmentSchedule || job.departmentSchedule,
+                        remainingDepartmentSchedule: updatedRemainingSchedule || job.remainingDepartmentSchedule,
+                        forecastStartDate: updatedForecastStart || null,
+                        forecastDueDate: updatedForecastDue || null,
+                        scheduledStartDate: updatedScheduledStart || null,
+                        updatedAt: new Date()
+                    }
+                };
+            })
+            .filter(Boolean) as { jobId: string; updates: Record<string, any> }[];
+
+        if (!toShift.length) return;
+
+        const run = async () => {
+            try {
+                const batch = writeBatch(db);
+                toShift.forEach(item => {
+                    batch.update(doc(db, 'jobs', item.jobId), removeUndefined(item.updates));
+                });
+                await batch.commit();
+
+                setJobs(prev =>
+                    prev.map(job => {
+                        const match = toShift.find(item => item.jobId === job.id);
+                        return match ? { ...job, ...match.updates } : job;
+                    })
+                );
+            } catch (error) {
+                console.error('Failed to shift past jobs forward', error);
+            }
+        };
+
+        run();
+    }, [jobs, today]);
+
     // Calculate date range for chart
     const chartDateRange = useMemo(() => {
         if (!displayJobs.length) {
@@ -447,6 +566,7 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
 
         let earliest = today;
         let latest = addDays(today, 30);
+        const cutoffDate = addDays(today, -45);
 
         displayJobs.forEach(job => {
             const jobStart = job.forecastStartDate || job.scheduledStartDate || job.dueDate;
@@ -458,7 +578,7 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
 
         // Add buffer
         return {
-            startDate: addDays(earliest, -3),
+            startDate: addDays(earliest < cutoffDate ? cutoffDate : earliest, -3),
             endDate: addDays(latest, 7)
         };
     }, [displayJobs, today]);
@@ -662,13 +782,14 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
 
             {/* Action Bar */}
             <div className="flex items-center gap-3 px-6 py-2 border-b border-slate-200 bg-white/90 backdrop-blur-md shrink-0">
-                <button
+                <Link
+                    href="/upload"
                     className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm"
                     title="Import schedule from CSV"
                 >
                     <Upload className="w-3.5 h-3.5" />
                     Import CSV
-                </button>
+                </Link>
 
                 <button
                     onClick={() => setIsExportModalOpen(true)}
