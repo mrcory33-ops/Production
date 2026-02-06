@@ -46,6 +46,33 @@ export default function UploadPage() {
                 `  • ${stats.completed} jobs marked complete`,
             ];
 
+            // Add due date change alerts
+            if (stats.dueDateChanged.length > 0) {
+                summaryLines.push(``);
+                summaryLines.push(`📅 Due Date Changes (${stats.dueDateChanged.length} jobs):`);
+                stats.dueDateChanged.slice(0, 5).forEach(job => {
+                    const prev = job.previousDueDate ? new Date(job.previousDueDate).toLocaleDateString() : '?';
+                    const curr = new Date(job.dueDate).toLocaleDateString();
+                    summaryLines.push(`  ⚠️ ${job.id}: ${prev} → ${curr}`);
+                });
+                if (stats.dueDateChanged.length > 5) {
+                    summaryLines.push(`  ... and ${stats.dueDateChanged.length - 5} more`);
+                }
+                summaryLines.push(`  → Go to Planning Board to reschedule these jobs`);
+            }
+
+            // Add ahead of schedule alerts
+            if (stats.ahead.length > 0) {
+                summaryLines.push(``);
+                summaryLines.push(`🚀 Ahead of Schedule (${stats.ahead.length} jobs):`);
+                stats.ahead.slice(0, 5).forEach(job => {
+                    summaryLines.push(`  ✨ ${job.id} (now in ${job.currentDepartment})`);
+                });
+                if (stats.ahead.length > 5) {
+                    summaryLines.push(`  ... and ${stats.ahead.length - 5} more`);
+                }
+            }
+
             alert(summaryLines.join('\n'));
             setParsedJobs([]); // Clear after save
         } catch (err) {

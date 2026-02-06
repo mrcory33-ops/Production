@@ -1632,52 +1632,83 @@ export const scheduleAllJobs = (jobs: Job[], existingJobs: Job[] = []): Job[] =>
 export const trackJobProgress = (job: Job, previousJob: Job | null): Job => {
     const updatedJob = { ...job };
 
-    // Check if department changed
+    // =========================================================================
+    // 1. DUE DATE CHANGE DETECTION
+    // =========================================================================
+    if (previousJob?.dueDate) {
+        const prevDue = new Date(previousJob.dueDate);
+        const newDue = new Date(job.dueDate);
+
+        // Compare dates (ignore time component)
+        const prevDueKey = prevDue.toISOString().split('T')[0];
+        const newDueKey = newDue.toISOString().split('T')[0];
+
+        if (prevDueKey !== newDueKey) {
+            updatedJob.dueDateChanged = true;
+            updatedJob.previousDueDate = prevDue;
+            updatedJob.needsReschedule = true; // Flag for user prompt
+            console.log(`📅 Due date changed for ${job.id}: ${prevDueKey} → ${newDueKey}`);
+        } else {
+            // Preserve previous change flag if already set and not resolved
+            updatedJob.dueDateChanged = previousJob.dueDateChanged;
+            updatedJob.previousDueDate = previousJob.previousDueDate;
+            updatedJob.needsReschedule = previousJob.needsReschedule;
+        }
+    }
+
+    // =========================================================================
+    // 2. DEPARTMENT CHANGE DETECTION
+    // =========================================================================
     if (previousJob && previousJob.currentDepartment !== job.currentDepartment) {
         updatedJob.lastDepartmentChange = new Date();
     } else if (previousJob?.lastDepartmentChange) {
         updatedJob.lastDepartmentChange = previousJob.lastDepartmentChange;
     }
 
-    // Check if stalled (no movement for 2+ days)
-    if (updatedJob.lastDepartmentChange) {
-        const daysSinceChange = Math.floor(
-            (new Date().getTime() - new Date(updatedJob.lastDepartmentChange).getTime()) / (1000 * 60 * 60 * 24)
-        );
+    // =========================================================================
+    // 3. PROGRESS STATUS CALCULATION
+    // =========================================================================
+    const deptOrder = DEPARTMENTS;
+    const currentIndex = deptOrder.indexOf(job.currentDepartment as DepartmentName);
 
-        if (daysSinceChange >= 2) {
-            // Check if behind schedule
-            const today = startOfDay(new Date());
-            const todayKey = today.toISOString().split('T')[0];
-            const expectedDept = previousJob?.scheduledDepartmentByDate?.[todayKey];
+    // Get expected department for today
+    let expectedDept: Department | undefined;
+    let expectedIndex = -1;
 
-            const deptOrder = DEPARTMENTS;
-            const currentIndex = deptOrder.indexOf(job.currentDepartment as DepartmentName);
-            const expectedIndex = expectedDept ? deptOrder.indexOf(expectedDept) : -1;
-
-            if (expectedIndex !== -1 && currentIndex < expectedIndex) {
-                updatedJob.progressStatus = 'STALLED';
-            }
-        }
-    }
-
-    // Check if slipping (behind schedule but moving)
     if (previousJob?.scheduledDepartmentByDate) {
         const today = startOfDay(new Date());
         const todayKey = today.toISOString().split('T')[0];
-        const expectedDept = previousJob.scheduledDepartmentByDate[todayKey];
-
+        expectedDept = previousJob.scheduledDepartmentByDate[todayKey];
         if (expectedDept) {
-            const deptOrder = DEPARTMENTS;
-            const currentIndex = deptOrder.indexOf(job.currentDepartment as DepartmentName);
-            const expectedIndex = deptOrder.indexOf(expectedDept);
-
-            if (currentIndex < expectedIndex) {
-                updatedJob.progressStatus = 'SLIPPING';
-            } else if (updatedJob.progressStatus !== 'STALLED') {
-                updatedJob.progressStatus = 'ON_TRACK';
-            }
+            expectedIndex = deptOrder.indexOf(expectedDept);
         }
+    }
+
+    // Determine progress status
+    if (expectedIndex !== -1 && currentIndex !== -1) {
+        if (currentIndex > expectedIndex) {
+            // Current dept is LATER in the flow than expected = JUMPED AHEAD! 🚀
+            updatedJob.progressStatus = 'AHEAD';
+        } else if (currentIndex < expectedIndex) {
+            // Check for stall (no movement for 2+ days)
+            if (updatedJob.lastDepartmentChange) {
+                const daysSinceChange = Math.floor(
+                    (new Date().getTime() - new Date(updatedJob.lastDepartmentChange).getTime()) / (1000 * 60 * 60 * 24)
+                );
+                if (daysSinceChange >= 2) {
+                    updatedJob.progressStatus = 'STALLED';
+                } else {
+                    updatedJob.progressStatus = 'SLIPPING';
+                }
+            } else {
+                updatedJob.progressStatus = 'SLIPPING';
+            }
+        } else {
+            updatedJob.progressStatus = 'ON_TRACK';
+        }
+    } else {
+        // No expected schedule to compare - default to ON_TRACK
+        updatedJob.progressStatus = updatedJob.progressStatus || 'ON_TRACK';
     }
 
     return updatedJob;

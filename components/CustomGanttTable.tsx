@@ -694,6 +694,22 @@ export default function CustomGanttTable({
                                                         <span className="text-[9px] text-yellow-600 font-bold">⚠</span>
                                                     </div>
                                                 )}
+                                                {job.progressStatus === 'AHEAD' && (
+                                                    <div
+                                                        className="px-1.5 py-0.5 bg-emerald-100 border border-emerald-300 rounded"
+                                                        title="🚀 Ahead of Schedule! Job has advanced past expected department"
+                                                    >
+                                                        <span className="text-[9px]">🚀</span>
+                                                    </div>
+                                                )}
+                                                {job.needsReschedule && (
+                                                    <div
+                                                        className="px-1.5 py-0.5 bg-purple-100 border border-purple-300 rounded animate-pulse"
+                                                        title={`📅 Due date changed! Was: ${job.previousDueDate ? new Date(job.previousDueDate).toLocaleDateString() : '?'} → Now: ${new Date(job.dueDate).toLocaleDateString()}`}
+                                                    >
+                                                        <span className="text-[9px]">📅</span>
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="job-id">{job.id}</div>
                                             <div className="text-[10px] text-slate-600 mt-0.5 truncate max-w-[160px]">

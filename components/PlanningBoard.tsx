@@ -7,7 +7,7 @@ import { Job, Department } from '@/types';
 import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/scheduler';
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
-import { addDays, differenceInCalendarDays, differenceInCalendarMonths, format, startOfDay, differenceInDays } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, startOfDay, differenceInDays } from 'date-fns';
 import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
@@ -592,7 +592,7 @@ export default function PlanningBoard() {
 
     const displayJobs = useMemo(() => {
         let filtered = showSmallRocks
-            ? jobs
+            ? [...jobs]
             : jobs.filter(j => j.isPriority || (j.weldingPoints || 0) >= 60);
 
         // Filter by welding points range

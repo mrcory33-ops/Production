@@ -54,11 +54,16 @@ export interface Job {
 
     // Capacity-Aware Scheduling (NEW)
     schedulingConflict?: boolean; // Can't meet due date within capacity limits
-    progressStatus?: 'ON_TRACK' | 'SLIPPING' | 'STALLED'; // Progress tracking
+    progressStatus?: 'ON_TRACK' | 'SLIPPING' | 'STALLED' | 'AHEAD'; // Progress tracking (AHEAD = jumped ahead of schedule)
     lastDepartmentChange?: Date; // When currentDepartment last changed (for stall detection)
     scheduledDepartmentByDate?: Record<string, Department>; // Expected dept on each date (for slippage detection)
     priorityByDept?: Partial<Record<Department, { value: number; setAt: string; listId: string }>>;
     noGaps?: boolean; // Override: Remove all department gaps for this job
+
+    // Due Date Change Tracking
+    dueDateChanged?: boolean; // Flag: due date differs from previous upload
+    previousDueDate?: Date; // Original due date before change
+    needsReschedule?: boolean; // User should be prompted to reschedule
 
     // Urgency Scoring
     urgencyScore?: number;

@@ -35,14 +35,20 @@ const removeUndefined = (value: any): any => {
  * 4. Identify COMPLETED jobs (missing from CSV)
  * 5. Batch write all updates
  */
-export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number; updated: number; completed: number }> => {
-    const batch = writeBatch(db);
+export const syncJobsInput = async (parsedJobs: Job[]): Promise<{
+    added: number;
+    updated: number;
+    completed: number;
+    dueDateChanged: Job[];  // Jobs with due date changes needing reschedule
+    ahead: Job[];           // Jobs that jumped ahead of schedule
+}> => {
     const CHUNK_SIZE = 450; // Firestore batch limit is 500, keeping it safe
-    let operationCount = 0;
 
     let addedCount = 0;
     let updatedCount = 0;
     let completedCount = 0;
+    const dueDateChangedJobs: Job[] = [];
+    const aheadJobs: Job[] = [];
 
     // 1. Fetch existing active jobs
     console.log("Fetching existing active jobs...");
@@ -58,6 +64,7 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number;
             updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : new Date(data.updatedAt),
             scheduledStartDate: data.scheduledStartDate instanceof Timestamp ? data.scheduledStartDate.toDate() : data.scheduledStartDate ? new Date(data.scheduledStartDate) : undefined,
             lastDepartmentChange: data.lastDepartmentChange instanceof Timestamp ? data.lastDepartmentChange.toDate() : data.lastDepartmentChange ? new Date(data.lastDepartmentChange) : undefined,
+            previousDueDate: data.previousDueDate instanceof Timestamp ? data.previousDueDate.toDate() : data.previousDueDate ? new Date(data.previousDueDate) : undefined,
         } as Job);
     });
 
@@ -93,7 +100,8 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number;
         if (previousJob) {
             // Preserve schedule, track progress
             const trackedJob = trackJobProgress(csvJob, previousJob);
-            updatedExistingJobs.push({
+
+            const updatedJob = {
                 ...trackedJob,
                 // PRESERVE existing schedule fields
                 scheduledStartDate: previousJob.scheduledStartDate,
@@ -102,8 +110,18 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number;
                 scheduledDepartmentByDate: previousJob.scheduledDepartmentByDate,
                 isOverdue: previousJob.isOverdue,
                 schedulingConflict: previousJob.schedulingConflict,
-            });
+            };
+
+            updatedExistingJobs.push(updatedJob);
             updatedCount++;
+
+            // Collect jobs with special conditions for user notification
+            if (trackedJob.dueDateChanged && trackedJob.needsReschedule) {
+                dueDateChangedJobs.push(updatedJob);
+            }
+            if (trackedJob.progressStatus === 'AHEAD') {
+                aheadJobs.push(updatedJob);
+            }
         }
     });
 
@@ -116,7 +134,8 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number;
         }
     });
 
-    console.log(`Sync Analysis: ${scheduledNewJobs.length + updatedExistingJobs.length} to save, ${idsToComplete.length} to close. `);
+    console.log(`Sync Analysis: ${scheduledNewJobs.length + updatedExistingJobs.length} to save, ${idsToComplete.length} to close.`);
+    console.log(`📅 Due date changes: ${dueDateChangedJobs.length}, 🚀 Ahead of schedule: ${aheadJobs.length}`);
 
     // 6. Execute Batches
     const jobsToSave = [...scheduledNewJobs, ...updatedExistingJobs];
@@ -151,6 +170,11 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{ added: number;
         console.log(`Committed batch ${Math.ceil(i / CHUNK_SIZE) + 1}`);
     }
 
-    return { added: addedCount, updated: updatedCount, completed: completedCount };
+    return {
+        added: addedCount,
+        updated: updatedCount,
+        completed: completedCount,
+        dueDateChanged: dueDateChangedJobs,
+        ahead: aheadJobs
+    };
 };
-
