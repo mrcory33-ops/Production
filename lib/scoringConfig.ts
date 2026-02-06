@@ -22,6 +22,7 @@ export interface ScoringWeights {
     bigRock: ScoringFactor;
     refJob: ScoringFactor;
     harmonicProduct: ScoringFactor;
+    paintingRequired: ScoringFactor;
     customFactors?: ScoringFactor[]; // New: array of user-defined factors
 }
 
@@ -66,6 +67,11 @@ const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
         bonusPoints: 10,
         enabled: true,
         label: 'Harmonic Product'
+    },
+    paintingRequired: {
+        bonusPoints: 15,
+        enabled: true,
+        label: 'Painting Required'
     },
     customFactors: []
 };

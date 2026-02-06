@@ -115,6 +115,26 @@ Duration = (Job Points / (Effective Workers × Output Per Day)) × Time Multipli
 
 ---
 
+### Product-Specific Rules
+
+**Location:** `lib/departmentConfig.ts` → `calculateDeptDuration()`
+
+Certain products have minimum duration requirements or extensions:
+
+| Rule | Trigger | Effect |
+|------|---------|--------|
+| **DOORS Minimum** | Description contains "door" (not "frame") | Min 2 days in Welding |
+| **NYCHA Minimum** | Job name contains "NYCHA" | Min 3 days in Welding |
+| **HARMONIC Painting** | Product type = HARMONIC + painting flag | +5 days painting + 3-4 days post-paint assembly |
+
+**HARMONIC Painting Details:**
+- Painting flag is set during import via user prompt
+- Adds 5 work days for off-site painting
+- Adds 3-4 additional days for post-paint assembly (4 days if job ≥50 pts)
+- Total extension: 8-9 days to Assembly department
+
+---
+
 ## Algorithm Deep Dive
 
 ### Main Entry: `scheduleAllJobs()`

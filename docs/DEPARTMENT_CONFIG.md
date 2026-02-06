@@ -190,6 +190,87 @@ Laser: {
 
 ---
 
+## Product-Specific Rules
+
+**Location:** `lib/departmentConfig.ts` → `calculateDeptDuration()`
+
+These rules enforce product-type-specific scheduling constraints beyond standard capacity calculations.
+
+### DOORS: Minimum Welding Duration
+
+| Condition | Requirement |
+|-----------|-------------|
+| Product Type | `DOORS` |
+| Description | Contains "door" but NOT "frame" |
+| **Effect** | Minimum **2 days** in Welding |
+
+```typescript
+// Applied in calculateDeptDuration()
+if (dept === 'Welding' && productType === 'DOORS') {
+  const isDoorLeaf = desc.includes('door') && !desc.includes('frame');
+  if (isDoorLeaf) {
+    rawDays = Math.max(rawDays, 2);
+  }
+}
+```
+
+**Rationale:** Door leaf assemblies require multi-stage welding processes regardless of point value.
+
+---
+
+### NYCHA: Minimum Welding Duration
+
+| Condition | Requirement |
+|-----------|-------------|
+| Job Name | Contains "NYCHA" |
+| **Effect** | Minimum **3 days** in Welding |
+
+```typescript
+// Applied in calculateDeptDuration()
+if (dept === 'Welding') {
+  const isNYCHA = (jobName || '').toUpperCase().includes('NYCHA');
+  if (isNYCHA) {
+    rawDays = Math.max(rawDays, 3);
+  }
+}
+```
+
+**Rationale:** NYCHA projects have specific quality requirements that necessitate extended welding time.
+
+---
+
+### HARMONIC: Painting Extension
+
+| Condition | Requirement |
+|-----------|-------------|
+| Product Type | `HARMONIC` |
+| Requires Painting | Flagged via UI during import |
+| **Effect** | **+5 days** (painting) + **3-4 days** (post-paint assembly) |
+| **Scoring Bonus** | **+15 points** to urgency score |
+
+```typescript
+// Applied in calculateDeptDuration()
+if (dept === 'Assembly' && productType === 'HARMONIC' && requiresPainting) {
+  const paintDays = 5; // 1 work week for off-site painting
+  const postPaintDays = points >= 50 ? 4 : 3; // Post-paint assembly based on job size
+  rawDays += paintDays + postPaintDays;
+}
+```
+
+**Rationale:** Some HARMONIC jobs require off-site painting (1 work week) followed by additional assembly time for final finishing. The +15 point scoring bonus helps prioritize these jobs due to the extended timeline.
+
+---
+
+### Adding New Product Rules
+
+To add a new product-specific rule:
+
+1. Add logic to `calculateDeptDuration()` in `lib/departmentConfig.ts`
+2. Use pattern: `if (dept === 'X' && productType === 'Y') { ... }`
+3. Document the rule in this section
+
+---
+
 ## Color Configuration
 
 Each department has a color for Gantt chart visualization:

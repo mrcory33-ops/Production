@@ -6,12 +6,15 @@ import { Job } from '@/types';
 import { Upload, FileUp, AlertCircle, CheckCircle, ArrowLeft, Database } from 'lucide-react';
 import Link from 'next/link';
 import clsx from 'clsx';
+import PaintingPrompt from '@/components/PaintingPrompt';
 
 export default function UploadPage() {
     const [dragActive, setDragActive] = useState(false);
     const [parsedJobs, setParsedJobs] = useState<Job[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const [showPaintingPrompt, setShowPaintingPrompt] = useState(false);
+    const [jobsRequiringPainting, setJobsRequiringPainting] = useState<Set<string>>(new Set());
 
     const handleFile = useCallback(async (file: File) => {
         setLoading(true);
@@ -20,6 +23,12 @@ export default function UploadPage() {
             const buffer = await file.arrayBuffer();
             const jobs = await parseGlobalShopExport(buffer);
             setParsedJobs(jobs);
+
+            // Check if there are any HARMONIC jobs
+            const harmonicJobs = jobs.filter(j => j.productType === 'HARMONIC');
+            if (harmonicJobs.length > 0) {
+                setShowPaintingPrompt(true);
+            }
         } catch (metricErr) {
             console.error(metricErr);
             setError("Failed to parse file. Please ensure it's a valid Global Shop export.");
@@ -32,9 +41,15 @@ export default function UploadPage() {
         if (!parsedJobs.length) return;
         setLoading(true);
         try {
+            // Apply painting flags to jobs
+            const jobsWithPaintingFlags = parsedJobs.map(job => ({
+                ...job,
+                requiresPainting: jobsRequiringPainting.has(job.id)
+            }));
+
             // Dynamically import to ensure client-side execution if needed
             const { syncJobsInput } = await import('@/lib/jobs');
-            const stats = await syncJobsInput(parsedJobs);
+            const stats = await syncJobsInput(jobsWithPaintingFlags);
 
             // Show detailed summary
             const summaryLines = [
@@ -45,6 +60,13 @@ export default function UploadPage() {
                 `  • ${stats.updated} existing jobs updated`,
                 `  • ${stats.completed} jobs marked complete`,
             ];
+
+            // Add painting info
+            if (jobsRequiringPainting.size > 0) {
+                summaryLines.push(``);
+                summaryLines.push(`🎨 Painting Flagged (${jobsRequiringPainting.size} jobs):`);
+                summaryLines.push(`  • +8-9 days added to Assembly time`);
+            }
 
             // Add due date change alerts
             if (stats.dueDateChanged.length > 0) {
@@ -75,6 +97,7 @@ export default function UploadPage() {
 
             alert(summaryLines.join('\n'));
             setParsedJobs([]); // Clear after save
+            setJobsRequiringPainting(new Set()); // Clear painting flags
         } catch (err) {
             console.error(err);
             setError("Failed to save to database. Check console details.");
@@ -106,6 +129,18 @@ export default function UploadPage() {
         <div className="min-h-screen bg-grid bg-fixed p-8 relative">
             {/* Background Gradient */}
             <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-[100px] pointer-events-none" />
+
+            {/* Painting Prompt Modal */}
+            {showPaintingPrompt && (
+                <PaintingPrompt
+                    harmonicJobs={parsedJobs.filter(j => j.productType === 'HARMONIC')}
+                    onConfirm={(selectedJobs) => {
+                        setJobsRequiringPainting(selectedJobs);
+                        setShowPaintingPrompt(false);
+                    }}
+                    onSkip={() => setShowPaintingPrompt(false)}
+                />
+            )}
 
             <div className="max-w-7xl mx-auto relative z-10">
                 {/* Header */}

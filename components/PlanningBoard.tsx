@@ -1037,7 +1037,10 @@ export default function PlanningBoard() {
             <div className="flex-1 overflow-hidden relative">
 
                 {/* Left Panel: Gantt Chart */}
-                <div className="h-full overflow-hidden flex flex-col relative">
+                <div
+                    className="h-full overflow-hidden flex flex-col relative"
+                    style={{ paddingRight: isAnalyticsOpen ? '320px' : '0' }}
+                >
                     {hasJobs ? (
                         <CustomGanttTable
                             jobs={displayJobs}

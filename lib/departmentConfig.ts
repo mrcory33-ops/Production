@@ -115,7 +115,9 @@ export const calculateDeptDuration = (
   dept: Department,
   points: number,
   productType: ProductType,
-  description?: string
+  description?: string,
+  jobName?: string,
+  requiresPainting?: boolean
 ): number => {
   const config = DEPARTMENT_CONFIG[dept];
   if (!config || !points) return 0;
@@ -144,6 +146,21 @@ export const calculateDeptDuration = (
     if (isDoorLeaf) {
       rawDays = Math.max(rawDays, 2);
     }
+  }
+
+  // Rule: NYCHA jobs require at least 3 days in Welding
+  if (dept === 'Welding') {
+    const isNYCHA = (jobName || '').toUpperCase().includes('NYCHA');
+    if (isNYCHA) {
+      rawDays = Math.max(rawDays, 3);
+    }
+  }
+
+  // Rule: HARMONIC jobs with painting get extended Assembly time
+  if (dept === 'Assembly' && productType === 'HARMONIC' && requiresPainting) {
+    const paintDays = 5; // 1 work week for off-site painting
+    const postPaintDays = points >= 50 ? 4 : 3; // Post-paint assembly based on job size
+    rawDays += paintDays + postPaintDays;
   }
 
   // Round up to nearest half-day

@@ -32,7 +32,8 @@ export const calculateUrgencyScore = (job: Job): UrgencyResult => {
         stallPenalty: 0,
         bigRockWeight: 0,
         refJobBonus: 0,
-        harmonicBonus: 0
+        harmonicBonus: 0,
+        paintingBonus: 0
     };
 
     // 1. Due Date Proximity
@@ -103,7 +104,12 @@ export const calculateUrgencyScore = (job: Job): UrgencyResult => {
         factors.harmonicBonus = weights.harmonicProduct.bonusPoints || 10;
     }
 
-    // 8. Custom Factors
+    // 8. Painting Required Bonus
+    if (weights.paintingRequired.enabled && job.requiresPainting === true) {
+        factors.paintingBonus = weights.paintingRequired.bonusPoints || 15;
+    }
+
+    // 9. Custom Factors
     if (weights.customFactors) {
         weights.customFactors.forEach(factor => {
             if (!factor.enabled || !factor.id) return;

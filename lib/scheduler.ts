@@ -701,9 +701,11 @@ export const calculateDuration = (
     points: number,
     dept: DepartmentName,
     productType: ProductType = 'FAB',
-    description?: string
+    description?: string,
+    jobName?: string,
+    requiresPainting?: boolean
 ): number => {
-    return calculateDeptDuration(dept, points, productType, description);
+    return calculateDeptDuration(dept, points, productType, description, jobName, requiresPainting);
 };
 
 const normalizeWorkStart = (date: Date, allowSaturday: boolean = false): Date => {
@@ -802,13 +804,13 @@ const calculateAllDurations = (job: Job): Record<Department, number> => {
     const hasRef = (job.description || '').toUpperCase().includes('REF');
 
     return {
-        Engineering: calculateDuration(points, 'Engineering', productType, job.description),
-        Laser: calculateDuration(points, 'Laser', productType, job.description),
-        'Press Brake': calculateDuration(points, 'Press Brake', productType, job.description),
-        Welding: calculateDuration(points, 'Welding', productType, job.description),
-        Polishing: calculateDuration(points, 'Polishing', productType, job.description),
+        Engineering: calculateDuration(points, 'Engineering', productType, job.description, job.name, job.requiresPainting),
+        Laser: calculateDuration(points, 'Laser', productType, job.description, job.name, job.requiresPainting),
+        'Press Brake': calculateDuration(points, 'Press Brake', productType, job.description, job.name, job.requiresPainting),
+        Welding: calculateDuration(points, 'Welding', productType, job.description, job.name, job.requiresPainting),
+        Polishing: calculateDuration(points, 'Polishing', productType, job.description, job.name, job.requiresPainting),
         Assembly: Math.max(
-            calculateDuration(points, 'Assembly', productType, job.description),
+            calculateDuration(points, 'Assembly', productType, job.description, job.name, job.requiresPainting),
             hasRef ? 4 : 0
         )
     };
