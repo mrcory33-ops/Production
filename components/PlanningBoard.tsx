@@ -8,7 +8,7 @@ import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/sch
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, format, startOfDay, differenceInDays } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator } from 'lucide-react';
 import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
@@ -988,6 +988,7 @@ export default function PlanningBoard() {
                 </div>
             </header>
 
+
             {/* Action Bar */}
             <div className="flex items-center gap-3 px-6 py-2 border-b border-slate-200 bg-white/90 backdrop-blur-md shrink-0">
                 <Link
@@ -999,6 +1000,15 @@ export default function PlanningBoard() {
                     Import CSV
                 </Link>
 
+                <Link
+                    href="/quote-estimator"
+                    className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-900 transition-all shadow-sm"
+                    title="Estimate FAB job completion dates"
+                >
+                    <Calculator className="w-3.5 h-3.5" />
+                    Quote Estimator
+                </Link>
+
                 <button
                     onClick={() => setIsExportModalOpen(true)}
                     className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm"
@@ -1007,6 +1017,7 @@ export default function PlanningBoard() {
                     <FileDown className="w-3.5 h-3.5" />
                     Export
                 </button>
+
 
                 <div className="h-6 w-px bg-slate-200 mx-2" />
 

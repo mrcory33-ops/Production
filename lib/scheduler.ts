@@ -43,6 +43,39 @@ const DOOR_LOCK_SEAM_PATTERNS = [
     'lock seam doors'
 ];
 
+const WALL_PANEL_PATTERNS = [
+    'wall panel',
+    'wall panels'
+];
+
+const DISH_TABLE_PATTERNS = [
+    'dish table',
+    'dishtable'
+];
+
+const THREE_COMP_SINK_PATTERNS = [
+    '3cpt sink',
+    '3 cpt sink',
+    '3 compartment sink',
+    '3-compartment sink',
+    '3 compartment sinks',
+    '3-compartment sinks'
+];
+
+const WALL_SHELF_PATTERNS = [
+    'wall shelf',
+    'wall shelves',
+    'lower wall shelf',
+    'upper wall shelf'
+];
+
+const CORNER_GUARD_PATTERNS = [
+    'corner guard',
+    'corner guards',
+    'cornerguard',
+    'cornerguards'
+];
+
 export const DEPARTMENTS: Department[] = [
     'Engineering',
     'Laser',
@@ -79,10 +112,20 @@ const normalizeBatchText = (value?: string): string =>
 const matchesAny = (text: string, patterns: string[]): boolean =>
     patterns.some(pattern => text.includes(pattern));
 
-const getBatchCategory = (text: string): 'FRAME_KD' | 'FRAME_CO' | 'DOOR_LOCK_SEAM' | null => {
+const hasToken = (text: string, token: string): boolean =>
+    new RegExp(`\\b${token}\\b`).test(text);
+
+const getBatchCategory = (
+    text: string
+): 'FRAME_KD' | 'FRAME_CO' | 'DOOR_LOCK_SEAM' | 'WALL_PANEL' | 'DISH_TABLE' | 'THREE_COMP_SINK' | 'WALL_SHELF' | 'CORNER_GUARD' | null => {
     if (matchesAny(text, FRAME_KD_PATTERNS)) return 'FRAME_KD';
     if (matchesAny(text, FRAME_CO_PATTERNS)) return 'FRAME_CO';
-    if (matchesAny(text, DOOR_LOCK_SEAM_PATTERNS)) return 'DOOR_LOCK_SEAM';
+    if (matchesAny(text, DOOR_LOCK_SEAM_PATTERNS) || hasToken(text, 'ls')) return 'DOOR_LOCK_SEAM';
+    if (matchesAny(text, WALL_PANEL_PATTERNS)) return 'WALL_PANEL';
+    if (matchesAny(text, DISH_TABLE_PATTERNS)) return 'DISH_TABLE';
+    if (matchesAny(text, THREE_COMP_SINK_PATTERNS)) return 'THREE_COMP_SINK';
+    if (matchesAny(text, WALL_SHELF_PATTERNS)) return 'WALL_SHELF';
+    if (matchesAny(text, CORNER_GUARD_PATTERNS)) return 'CORNER_GUARD';
     return null;
 };
 

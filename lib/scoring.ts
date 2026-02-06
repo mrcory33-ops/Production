@@ -56,6 +56,20 @@ export const calculateUrgencyScore = (job: Job): UrgencyResult => {
         factors.fastShipBonus = weights.fastShip.bonusPoints || 25;
     }
 
+    // Optional cap: FastShip + Due Date Proximity combined
+    const FASTSHIP_DUE_CAP = 40;
+    if (factors.fastShipBonus > 0) {
+        const combined = factors.fastShipBonus + factors.dueDateProximity;
+        if (combined > FASTSHIP_DUE_CAP) {
+            if (factors.fastShipBonus >= FASTSHIP_DUE_CAP) {
+                factors.fastShipBonus = FASTSHIP_DUE_CAP;
+                factors.dueDateProximity = 0;
+            } else {
+                factors.dueDateProximity = Math.max(0, FASTSHIP_DUE_CAP - factors.fastShipBonus);
+            }
+        }
+    }
+
     // 3. Slippage Risk
     if (weights.slippageRisk.enabled && job.scheduledDepartmentByDate) {
         const todayKey = startOfDay(new Date()).toISOString().split('T')[0];
