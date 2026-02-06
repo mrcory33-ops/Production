@@ -28,6 +28,7 @@ interface CustomGanttTableProps {
     onJobShiftUpdate?: (jobId: string, deltaDays: number) => Promise<void>;
     onJobRangeUpdate?: (jobId: string, newStart: Date, newEnd: Date) => Promise<void>;
     onPriorityUpdate?: (jobId: string, department: Department, value: number | null) => Promise<void>;
+    onNoGapsToggle?: (jobId: string, noGaps: boolean) => Promise<void>;
     priorityDepartment?: Department;
     visibleDepartments?: Set<Department>;
     showActiveOnly?: boolean;
@@ -47,6 +48,7 @@ export default function CustomGanttTable({
     onJobShiftUpdate,
     onJobRangeUpdate,
     onPriorityUpdate,
+    onNoGapsToggle,
     priorityDepartment,
     visibleDepartments,
     showActiveOnly = false,
@@ -705,6 +707,23 @@ export default function CustomGanttTable({
                                                     {Math.round(job.weldingPoints || 0)} pts
                                                 </span>
                                             </div>
+                                            {onNoGapsToggle && (
+                                                <div className="mt-1.5">
+                                                    <button
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation();
+                                                            await onNoGapsToggle(job.id, !job.noGaps);
+                                                        }}
+                                                        className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${job.noGaps
+                                                            ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold'
+                                                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                                                            }`}
+                                                        title={job.noGaps ? "Gaps removed - departments run back-to-back" : "Click to remove gaps between departments"}
+                                                    >
+                                                        {job.noGaps ? '⚡ No Gaps' : '+ No Gaps'}
+                                                    </button>
+                                                </div>
+                                            )}
                                             {showActiveOnly && priorityDepartment && onPriorityUpdate && (
                                                 <div className="mt-2 flex items-center gap-2">
                                                     <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wider">

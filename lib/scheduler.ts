@@ -13,6 +13,7 @@ const MAX_DEPTS_PER_DAY_PER_JOB = 2;
 const SMALL_JOB_THRESHOLD = 7; // Jobs < 7 points can have same-day dept transitions
 const BATCH_WEEK_STARTS_ON = 1; // Monday
 export const QUEUE_BUFFER_DAYS = 2; // Each department should maintain a 2-day work buffer
+const WEEKLY_CAPACITY = 850; // Weekly capacity pool per department (pts/week)
 
 const FRAME_KD_PATTERNS = [
     'frame knock down',
@@ -229,7 +230,7 @@ const getDaysOverdue = (job: Job): number => {
 
 /**
  * Schedule a job forward from today (for overdue jobs)
- * Starts Engineering today and works forward through departments
+ * Starts from the job's CURRENT department and works forward through remaining departments
  * These jobs get highest priority and reserved capacity first
  */
 const scheduleForwardFromToday = (
@@ -244,10 +245,16 @@ const scheduleForwardFromToday = (
     const departmentSchedule: Record<string, { start: string; end: string }> = {};
     const scheduledDepartmentByDate: Record<string, Department> = {};
 
+    // Find the index of the current department
+    const currentDeptIndex = DEPARTMENTS.indexOf(job.currentDepartment);
+    const remainingDepartments = currentDeptIndex >= 0
+        ? DEPARTMENTS.slice(currentDeptIndex)
+        : DEPARTMENTS; // Fallback to all departments if current dept not found
+
     let currentStart = new Date(today);
 
-    // Schedule each department forward
-    for (const dept of DEPARTMENTS) {
+    // Schedule remaining departments forward from today
+    for (const dept of remainingDepartments) {
         const duration = Math.ceil(durations[dept] || 0);
         if (duration <= 0) continue;
 
@@ -278,25 +285,27 @@ const scheduleForwardFromToday = (
 
         // Next department starts after this one ends (with gap based on size)
         let gapDays = 0;
-        if (points >= BIG_ROCK_CONFIG.threshold) {
-            gapDays = 2; // Big rock: 2 day gap
-        } else if (points > SMALL_JOB_THRESHOLD) {
-            gapDays = 1; // Medium: 1 day gap
+        if (!job.noGaps) { // Respect no-gaps override
+            if (points >= BIG_ROCK_CONFIG.threshold) {
+                gapDays = 1; // Big rock: 1 day gap
+            } else if (points > SMALL_JOB_THRESHOLD) {
+                gapDays = 0.5; // Medium: 1/2 day gap
+            }
         }
 
         currentStart = addWorkDays(deptEnd, gapDays + 1);
     }
 
-    // Get the final end date from Assembly
-    const lastDept = DEPARTMENTS[DEPARTMENTS.length - 1];
-    const scheduledEndDate = departmentSchedule[lastDept]
-        ? new Date(departmentSchedule[lastDept].end)
+    // Get the final end date from the last scheduled department
+    const lastScheduledDept = remainingDepartments[remainingDepartments.length - 1];
+    const scheduledEndDate = departmentSchedule[lastScheduledDept]
+        ? new Date(departmentSchedule[lastScheduledDept].end)
         : today;
 
-    // Get the start date from first department
-    const firstDept = DEPARTMENTS[0];
-    const scheduledStartDate = departmentSchedule[firstDept]
-        ? new Date(departmentSchedule[firstDept].start)
+    // Get the start date from first scheduled department
+    const firstScheduledDept = remainingDepartments[0];
+    const scheduledStartDate = departmentSchedule[firstScheduledDept]
+        ? new Date(departmentSchedule[firstScheduledDept].start)
         : today;
 
     return {
@@ -324,13 +333,15 @@ export type CapacityBuckets = Record<string, Record<Department, number> & {
     bigRockPoints: Record<Department, number>;
     bigRockJobIds: Record<Department, Set<string>>; // Track which jobs have been counted as big rocks
     poolUsage: Record<Department, Record<number, number>>; // Usage per pool index: { Welding: { 0: 50, 1: 100 } }
-}>;
+}> & {
+    weeklyUsage: Record<string, Record<Department, number>>; // Usage per week: { "2026-W05": { "Welding": 450 } }
+};
 
 /**
  * Initialize empty capacity buckets for a date range
  */
 export const initBuckets = (startDate: Date, endDate: Date): CapacityBuckets => {
-    const buckets: CapacityBuckets = {}; // Initialize capacity buckets
+    const buckets = { weeklyUsage: {} } as CapacityBuckets; // Initialize with weeklyUsage
     let current = new Date(startDate);
 
     while (current <= endDate) {
@@ -379,6 +390,54 @@ export const initBuckets = (startDate: Date, endDate: Date): CapacityBuckets => 
     }
 
     return buckets;
+};
+
+/**
+ * Get week key for a date (ISO week format: YYYY-Www)
+ */
+const getWeekKey = (date: Date): string => {
+    const weekStart = startOfWeek(date, { weekStartsOn: 1 }); // Monday
+    const year = weekStart.getFullYear();
+    const oneJan = new Date(year, 0, 1);
+    const weekNum = Math.ceil((((weekStart.getTime() - oneJan.getTime()) / 86400000) + oneJan.getDay() + 1) / 7);
+    return `${year}-W${String(weekNum).padStart(2, '0')}`;
+};
+
+/**
+ * Check if adding points would exceed weekly capacity for a department
+ */
+const canFitInWeek = (
+    date: Date,
+    dept: Department,
+    points: number,
+    buckets: CapacityBuckets
+): boolean => {
+    const weekKey = getWeekKey(date);
+    const currentUsage = buckets.weeklyUsage?.[weekKey]?.[dept] || 0;
+    return (currentUsage + points) <= WEEKLY_CAPACITY;
+};
+
+/**
+ * Reserve weekly capacity for a department
+ */
+const reserveWeeklyCapacity = (
+    date: Date,
+    dept: Department,
+    points: number,
+    buckets: CapacityBuckets
+): void => {
+    const weekKey = getWeekKey(date);
+    if (!buckets.weeklyUsage[weekKey]) {
+        buckets.weeklyUsage[weekKey] = {
+            Engineering: 0,
+            Laser: 0,
+            'Press Brake': 0,
+            Welding: 0,
+            Polishing: 0,
+            Assembly: 0
+        };
+    }
+    buckets.weeklyUsage[weekKey][dept] += points;
 };
 
 /**
@@ -462,86 +521,50 @@ export const canFitJob = (
     job: Job,
     startDate: Date,
     buckets: CapacityBuckets,
-    maxDaily: number = 300
+    maxDaily: number = 300 // Legacy param, now ignored - using weekly pools
 ): boolean => {
     const durations = calculateAllDurations(job);
     let deptStartDate = new Date(startDate);
-    const productType = job.productType || 'FAB';
+    const jobPoints = job.weldingPoints || 0;
 
     // Check each department sequentially (they run in order, not parallel)
     for (const dept of DEPARTMENTS) {
         const duration = Math.ceil(durations[dept] || 0); // Full days only
         if (duration === 0) continue;
 
-        // Daily load for THIS department (points spread over duration)
-        const dailyLoad = (job.weldingPoints || 0) / Math.max(duration, 1);
+        // For weekly pool, we check if the FULL job points fit in the week
+        // (not daily load - the week absorbs the full job)
 
-        // Identify Pool and Pool Limit
-        const deptConfig = DEPARTMENT_CONFIG[dept];
-        // Find which pool index this job belongs to
-        const poolIndex = deptConfig?.pools.findIndex(p => !p.productTypes || p.productTypes.includes(productType)) ?? 0;
-        const pool = deptConfig?.pools[poolIndex];
-
-        // Calculate Pool Capacity: Count * Output
-        // If maxDaily is overriden (e.g. 300), we stick to that global override for now OR we can scale the pool limit.
-        // For accurate "Frames vs Doors", we should respect the pool limit strictly unless maxDaily is explicitly forcing high throughput.
-        // Let's assume maxDaily applies to the whole department, but we MUST respect pool limits if defined.
-
-        let poolLimit = 195; // Default fallback
-        if (pool) {
-            poolLimit = pool.count * pool.outputPerDay;
+        // Get the first work day for this department to determine which week
+        let dayDate = new Date(deptStartDate);
+        while (isSaturday(dayDate) || isSunday(dayDate)) {
+            dayDate = addDays(dayDate, 1);
         }
 
-        // Check each work day for this department
-        let dayDate = new Date(deptStartDate);
+        // Check weekly capacity - can this job fit in the week?
+        if (!canFitInWeek(dayDate, dept, jobPoints, buckets)) {
+            return false; // Week is full
+        }
+
+        // Skip through the duration to find where next dept starts
         for (let i = 0; i < duration; i++) {
-            // Skip weekends
             while (isSaturday(dayDate) || isSunday(dayDate)) {
                 dayDate = addDays(dayDate, 1);
             }
-
-            const dateKey = dayDate.toISOString().split('T')[0];
-            const currentLoad = buckets[dateKey]?.[dept] || 0;
-            const currentPoolLoad = buckets[dateKey]?.poolUsage?.[dept]?.[poolIndex] || 0;
-
-            // Allow override, otherwise use department config limits
-            const limit = maxDaily === 300 ? (DEPARTMENT_CONFIG[dept]?.dailyCapacity || 195) : maxDaily;
-
-            // --- CAPACITY CHECK LOGIC ---
-            // 1. Total Department Capacity Check
-            if (currentLoad + dailyLoad > limit) {
-                return false;
-            }
-
-            // 1b. Specific Pool Capacity Check (The "Batching Logic")
-            // Only enforce if we found a valid pool config
-            if (maxDaily === 300 && pool && (currentPoolLoad + dailyLoad > poolLimit)) {
-                return false;
-            }
-
-            // 2. Big Rock Constraints (NEW)
-            const pts = job.weldingPoints || 0;
-            if (pts >= BIG_ROCK_CONFIG.threshold) {
-                const currentBigCount = buckets[dateKey]?.bigRockCount?.[dept] || 0;
-                const currentBigPoints = buckets[dateKey]?.bigRockPoints?.[dept] || 0;
-                const maxBigConcurrent = BIG_ROCK_CONFIG.maxConcurrent[dept] || 3;
-
-                // Rule A: Max concurrent big rocks
-                if (currentBigCount >= maxBigConcurrent) {
-                    return false; // Too many big rocks already
-                }
-
-                // Rule B: Capacity Ratio (70/30)
-                // If there's already AT LEAST ONE big rock, applying another triggers the 70% rule
-                if (currentBigCount > 0) {
-                    const maxBigCapacity = limit * BIG_ROCK_CONFIG.capacityRatio; // 70% of daily limit
-                    if (currentBigPoints + dailyLoad > maxBigCapacity) {
-                        return false; // Exceeds Big Rock allocated capacity (70%)
-                    }
-                }
-            }
-
             dayDate = addDays(dayDate, 1);
+        }
+
+        // 2. Big Rock Constraints (still apply)
+        const pts = job.weldingPoints || 0;
+        if (pts >= BIG_ROCK_CONFIG.threshold) {
+            const dateKey = deptStartDate.toISOString().split('T')[0];
+            const currentBigCount = buckets[dateKey]?.bigRockCount?.[dept] || 0;
+            const maxBigConcurrent = BIG_ROCK_CONFIG.maxConcurrent[dept] || 3;
+
+            // Rule A: Max concurrent big rocks per day
+            if (currentBigCount >= maxBigConcurrent) {
+                return false; // Too many big rocks already
+            }
         }
 
         // Next department starts after this one ends
@@ -642,6 +665,9 @@ export const reserveCapacity = (
             }
             dayDate = addDays(dayDate, 1);
         }
+
+        // Reserve weekly capacity for this department (full job points for the week)
+        reserveWeeklyCapacity(deptStartDate, dept, job.weldingPoints || 0, buckets);
 
         // Next department starts after this one ends
         // Gap logic: Small (≤7 pts) = 0 gap, Medium (8-49) = 1 day, Big Rock (≥50) = 2 days
@@ -1309,13 +1335,15 @@ const scheduleBackwardFromDue = (
         }
 
         // Next department (going backwards) - gap depends on job size
-        // Small (≤7 pts) = 0 gap, Medium (8-49) = 1 day, Big Rock (≥50) = 2 days
+        // Small (≤7 pts) = 0 gap, Medium (8-49) = 1/2 day, Big Rock (≥50) = 1 day
         const points = job.weldingPoints || 0;
         let gapDays = 0;
-        if (points >= BIG_ROCK_CONFIG.threshold) {
-            gapDays = 2; // Big rock: 2 day gap
-        } else if (points > SMALL_JOB_THRESHOLD) {
-            gapDays = 1; // Medium: 1 day gap
+        if (!job.noGaps) { // Respect no-gaps override
+            if (points >= BIG_ROCK_CONFIG.threshold) {
+                gapDays = 1; // Big rock: 1 day gap
+            } else if (points > SMALL_JOB_THRESHOLD) {
+                gapDays = 0.5; // Medium: 1/2 day gap
+            }
         }
         // else: Small job - no gap (same day OK)
 

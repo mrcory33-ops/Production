@@ -8,7 +8,7 @@ import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/sch
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, differenceInCalendarMonths, format, startOfDay, differenceInDays } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Zap, Trash2, FileDown, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
@@ -406,6 +406,27 @@ export default function PlanningBoard() {
         }
     };
 
+    const handleNoGapsToggle = async (jobId: string, noGaps: boolean) => {
+        try {
+            const jobRef = doc(db, 'jobs', jobId);
+            await updateDoc(jobRef, {
+                noGaps,
+                updatedAt: new Date()
+            });
+
+            // Update local state and re-schedule
+            setJobs(prev => {
+                const updated = prev.map(j =>
+                    j.id === jobId ? { ...j, noGaps } : j
+                );
+                // Re-schedule all jobs to apply gap changes
+                return scheduleAllJobs(updated);
+            });
+        } catch (error) {
+            console.error('Failed to toggle noGaps:', error);
+        }
+    };
+
     const handleResetPriorityList = async (dept: Department) => {
         try {
             const listId = new Date().toISOString();
@@ -437,64 +458,6 @@ export default function PlanningBoard() {
         document.addEventListener('fullscreenchange', handleFullScreenChange);
         return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
     }, []);
-
-    const handleAutoSchedule = async () => {
-        if (!confirm('This will reschedule ALL jobs using the capacity-aware algorithm (300pt/day limit). Continue?')) return;
-
-        setLoading(true);
-        try {
-            // Use the new capacity-aware Two-Pass scheduler (no existing jobs to preserve)
-            const scheduled = scheduleAllJobs(jobs, []);
-
-            // Update in Firebase with all new scheduling fields
-            await Promise.all(scheduled.map(job => {
-                const jobRef = doc(db, 'jobs', job.id);
-                return updateDoc(jobRef, removeUndefined({
-                    departmentSchedule: job.departmentSchedule,
-                    // Clear old legacy schedule fields that might interfere
-                    remainingDepartmentSchedule: deleteField(),
-                    scheduledStartDate: job.scheduledStartDate,
-                    scheduledDepartmentByDate: job.scheduledDepartmentByDate || null,
-                    schedulingConflict: job.schedulingConflict || false,
-                    progressStatus: job.progressStatus || 'ON_TRACK',
-                    isOverdue: job.isOverdue || false,
-                    updatedAt: new Date()
-                }));
-            }));
-
-            setJobs(scheduled);
-
-            // DEBUG: Log a sample HECTOR job to see what data we're setting
-            const hectorSample = scheduled.find(j => j.name.includes('HECTOR'));
-            if (hectorSample) {
-                console.log('📊 HECTOR Job Data After Scheduling:', {
-                    name: hectorSample.name,
-                    dueDate: hectorSample.dueDate,
-                    scheduledStartDate: hectorSample.scheduledStartDate,
-                    departmentSchedule: hectorSample.departmentSchedule
-                });
-            }
-            // Check for conflicts
-            const conflicts = scheduled.filter(j => j.schedulingConflict).length;
-            alert(`✅ Schedule Optimized!
-            
-Algorithm: Backward from Due Date
-• Assembly finishes ON due date
-• Each dept works backwards respecting capacity
-• Bigger jobs scheduled first (priority)
-
-Results:
-• ${scheduled.length} jobs scheduled
-• ${conflicts} conflicts (capacity exceeded)
-
-Check the Gantt chart - jobs should now finish near their due dates!`);
-        } catch (error) {
-            console.error('Auto-schedule failed:', error);
-            alert('Failed to optimize schedule.');
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleScoringSave = () => {
         // Recalculate scores for all jobs with new weights
@@ -1061,15 +1024,6 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                 </div>
 
                 <button
-                    onClick={handleAutoSchedule}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white rounded-md text-sm transition-colors"
-                    title="Optimize Schedule (Welding-Centric)"
-                >
-                    <Zap size={14} />
-                    <span>Optimize</span>
-                </button>
-
-                <button
                     onClick={handleClearAll}
                     className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-md text-sm transition-colors"
                     title="Clear All Jobs"
@@ -1097,6 +1051,7 @@ Check the Gantt chart - jobs should now finish near their due dates!`);
                             onJobShiftUpdate={handleJobShiftUpdate}
                             onJobRangeUpdate={handleJobRangeUpdate}
                             onPriorityUpdate={handlePriorityUpdate}
+                            onNoGapsToggle={handleNoGapsToggle}
                             priorityDepartment={showActiveOnly && visibleDepartments.size === 1 ? Array.from(visibleDepartments)[0] : undefined}
                             visibleDepartments={visibleDepartments}
                             showActiveOnly={showActiveOnly}

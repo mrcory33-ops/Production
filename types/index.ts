@@ -58,6 +58,7 @@ export interface Job {
     lastDepartmentChange?: Date; // When currentDepartment last changed (for stall detection)
     scheduledDepartmentByDate?: Record<string, Department>; // Expected dept on each date (for slippage detection)
     priorityByDept?: Partial<Record<Department, { value: number; setAt: string; listId: string }>>;
+    noGaps?: boolean; // Override: Remove all department gaps for this job
 
     // Urgency Scoring
     urgencyScore?: number;
