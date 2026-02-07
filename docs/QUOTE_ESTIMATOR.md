@@ -1,42 +1,65 @@
-# Advanced Quote Estimator - Implementation Complete ✅
+# Advanced Quote Estimator — v2.0
+
+> **Last Updated:** February 7, 2026  
+> **Status:** Production
 
 ## Overview
-The FAB Quote Estimator now includes advanced capacity-aware scheduling with three-tier feasibility analysis.
+
+The FAB Quote Estimator is a capacity-aware scheduling simulator that answers: *"If we accept this quote, when can we realistically deliver it?"*
+
+It reads the live Firestore schedule, builds a per-department weekly capacity map, and simulates inserting the prospective job through the full 6-department pipeline. For Target Date mode, it runs a 3-tier feasibility analysis and returns a clear recommendation.
 
 ---
 
-## Features Implemented
+## Features
 
-### 1. Capacity-Aware Analysis
-- **Reads existing schedule** from Firestore jobs
-- **Builds capacity maps** showing weekly usage per department
-- **Calculates job buffers** (scheduled completion vs. real due date)
+### 1. Capacity-Aware Simulation
+
+- **Reads existing schedule** from Firestore jobs (departmentSchedule data)
+- **Builds capacity maps** showing weekly usage per department (pts/week)
+- **Sequential department scheduling** — each dept finishes before the next starts (matches real scheduler)
+- **Capacity reservation** — as each dept is placed, its load is reserved so subsequent depts see accurate availability
+- **Calculates job buffers** (scheduled completion vs. real due date) for move candidates
 - **Finds available slots** based on 850 pts/week baseline capacity
 
 ### 2. Three-Tier Feasibility Check
 
 #### Tier 1: As-Is Schedule
-- Checks if job can fit into current schedule without any changes
-- Reports bottlenecks if not achievable
-- Shows completion date if achievable
+- Checks if the new job can fit into the current schedule without any changes
+- Reports bottleneck departments and delay severity if not achievable
+- Shows projected completion date if achievable
 
 #### Tier 2: With Job Movements
-- Identifies jobs with buffer (scheduled earlier than due date)
-- Lists specific jobs that could be moved
-- Shows movement details: department, original date → new date, buffer days
-- **Any job can be moved** as long as real due date is preserved
+- Identifies existing jobs with buffer (scheduled earlier than due date)
+- Only considers **Engineering** and **Laser** departments (most impactful for freeing capacity)
+- **Actually re-simulates** the capacity map with moved jobs removed from their original slots
+- Lists specific jobs that could be moved: department, original → new date, buffer days, points relieved
+- Shows total capacity freed and projected completion date
+- **Guard:** Moves only proposed if the moved job still finishes before its due date
 
-#### Tier 3: With Overtime
-- Uses increased capacity per the shop's 4-tier OT model (see `SCHEDULING_ENGINE.md` for breakdown)
-- Base OT capacity: 956 pts/week (Tier 1) up to 1191 pts/week (Tier 4)
-- Shows which weeks would need OT
-- Provides completion date with OT
+#### Tier 3: With Overtime (4-Tier Model)
+- Uses the shop's real 4-tier OT system (aligned with `SCHEDULING_ENGINE.md`):
+
+| Tier | Label | Schedule | Weekly Capacity |
+|------|-------|----------|-----------------|
+| 1 | 9-Hour Days | Mon–Fri 6am–3pm | 956 pts/wk |
+| 2 | 10-Hour Days | Mon–Fri 6am–4pm | 1,063 pts/wk |
+| 3 | 9hr + Saturday | Mon–Fri 6am–3pm, Sat 6am–12pm | 1,084 pts/wk |
+| 4 | 10hr + Saturday | Mon–Fri 6am–4pm, Sat 6am–12pm | 1,191 pts/wk |
+
+- Tries each tier **lowest-to-highest** and picks the **minimum tier** that achieves the target
+- Applies any Tier 2 moves first, then layers OT on top
+- Reports per-week OT detail: department, excess, recommended tier, coverage status
+- If no tier works, still shows the best-possible completion date at Tier 4
 
 ### 3. Smart Recommendations
-- **ACCEPT** - Can complete as-is
-- **ACCEPT WITH MOVES** - Requires moving jobs with buffer
-- **ACCEPT WITH OT** - Requires overtime capacity
-- **DECLINE** - Cannot meet target even with moves and OT
+
+| Recommendation | Meaning |
+|---------------|---------|
+| **ACCEPT** | Can complete as-is, no changes needed |
+| **ACCEPT WITH MOVES** | Achievable by moving buffered jobs — no OT needed |
+| **ACCEPT WITH OT** | Requires overtime at the specified tier |
+| **DECLINE** | Cannot meet target even with moves + max OT (shows best-possible date) |
 
 ---
 
@@ -46,40 +69,62 @@ The FAB Quote Estimator now includes advanced capacity-aware scheduling with thr
 
 **Key Functions:**
 ```typescript
-buildCapacityMap(existingJobs: Job[]): Map<string, Map<Department, number>>
-// Reads departmentSchedule from all jobs, distributes points across weeks
+buildCapacityMap(existingJobs: Job[]): CapacityMap
+// Reads departmentSchedule, distributes welding points across weeks per dept
 
-calculateJobBuffers(existingJobs: Job[]): Map<string, number>
-// Calculates buffer = dueDate - scheduledEndDate for each job
+calculateJobBuffers(existingJobs: Job[]): Map<string, { bufferDays: number; points: number }>
+// Calculates buffer and point load for each existing job
 
 findAvailableSlot(dept, startDate, points, duration, capacityMap, weeklyCapacity): Date
-// Finds first week with enough available capacity
+// Slides day-by-day until the job's dept-load fits under the weekly cap
+
+simulateQuoteSchedule(input: QuoteInput, existingJobs: Job[]): QuoteEstimate
+// Full sequential simulation through 6 depts with capacity reservation
 
 checkAdvancedFeasibility(input: QuoteInput, existingJobs: Job[]): FeasibilityCheck
-// Main function: runs all three tier checks and returns recommendation
+// Runs all 3 tiers and returns recommendation + projected dates
 ```
 
 **Constants:**
-- `BASE_WEEKLY_CAPACITY = 850` pts/week
-- `OT_WEEKLY_CAPACITY = 1000` pts/week
+- `BASE_WEEKLY_CAPACITY = 850` pts/week (8hr × 5 days)
+- `BIG_ROCK_THRESHOLD = 70` pts (aligned with scheduler's `BIG_ROCK_CONFIG`)
 - `DOLLAR_TO_POINT_RATIO = 650` ($650 = 1 welding point)
+- `OT_TIERS` — 4-tier array with exact bonus points and weekly capacities
+
+**Key Types:**
+```typescript
+interface QuoteInput {
+    totalValue: number;
+    totalQuantity: number;
+    bigRocks: BigRockInput[];
+    isREF: boolean;
+    engineeringReadyDate: Date;
+    targetDate?: Date;
+    productType?: ProductType;  // FAB | DOORS | HARMONIC — defaults to FAB
+}
+
+interface FeasibilityCheck {
+    asIs:      { achievable, completionDate, bottlenecks[] }
+    withMoves: { achievable, completionDate, jobsToMove[], capacityFreed }
+    withOT:    { achievable, completionDate, otWeeks: OTWeekDetail[], recommendedTier }
+    recommendation: 'ACCEPT' | 'ACCEPT_WITH_MOVES' | 'ACCEPT_WITH_OT' | 'DECLINE'
+    explanation: string
+}
+```
 
 ### Frontend (`components/QuoteEstimator.tsx`)
 
-**UI Components:**
-1. **Recommendation Banner** - Color-coded by recommendation type
-2. **Tier 1 Card** - As-Is results with bottleneck list
-3. **Tier 2 Card** - Job movements with scrollable list
-4. **Tier 3 Card** - OT requirements
-
-**Display Features:**
-- Color coding: Green (Accept), Yellow (Moves), Orange (OT), Red (Decline)
-- Emoji indicators: ✅ ⚠️ 🔧 ❌
-- Detailed job movement cards showing:
-  - Job name
-  - Department
-  - Original → New date
-  - Due date and buffer days
+**UI Sections:**
+1. **Job Fundamentals** — Total value, quantity inputs
+2. **Item Complexity** — Big Rock definitions, REF toggle
+3. **Delivery Timing** — Engineering ready date, mode selector (Earliest / Target Date)
+4. **Estimation Results** — Points, urgency, projected finish
+5. **Feasibility Analysis** (Target Date mode only):
+   - Recommendation banner (color-coded gradient)
+   - Tier 1/2/3 cards in a 3-column grid
+   - Tier 2 shows capacity freed + completion date
+   - Tier 3 shows recommended OT tier, label, week count, and completion date
+6. **Execution Roadmap** — Department-by-department timeline bars
 
 ---
 
@@ -99,65 +144,81 @@ Recommendation: ACCEPT WITH MOVES
 Tier 1: As-Is
 ❌ Cannot fit into current schedule
 Bottlenecks:
-- Welding delayed by 3 days
-- Assembly delayed by 2 days
+  - Welding delayed by 3 days (capacity full)
+  - Assembly delayed by 2 days (capacity full)
 
 Tier 2: With Moves
 ✅ Can complete by February 27, 2026
-Jobs to move (5 total):
-- Job #12345 - Welding: Feb 15 → Feb 22 (Due: Mar 1, Buffer: 7 days)
-- Job #12346 - Laser: Feb 12 → Feb 19 (Due: Feb 28, Buffer: 9 days)
-...
+5 jobs • 142 pts freed
+Jobs to move:
+  - Job #12345 - Laser: Feb 15 → Feb 22 (Due: Mar 1, Buffer: 7 days, 28 pts)
+  - Job #12346 - Laser: Feb 12 → Feb 19 (Due: Feb 28, Buffer: 9 days, 15 pts)
+  ...
 
 Tier 3: With OT
-✅ Can complete by February 25, 2026
-OT needed in 2 week(s)
+No OT needed (Tier 2 sufficient)
 ```
 
 ---
 
-## Files Modified
+## Files
 
-| File | Changes |
-|------|---------|
-| `lib/quoteEstimator.ts` | Complete rewrite with capacity-aware logic |
-| `components/QuoteEstimator.tsx` | Updated to display three-tier results |
-| `app/quote-estimator/page.tsx` | No changes needed |
-| `components/PlanningBoard.tsx` | No changes needed |
+| File | Role |
+|------|------|
+| `lib/quoteEstimator.ts` | Core simulation engine — capacity maps, slot finding, 3-tier feasibility |
+| `components/QuoteEstimator.tsx` | UI component — input form + results display |
+| `app/quote-estimator/page.tsx` | Page wrapper — fetches Firestore jobs and passes to component |
+
+---
+
+## v2.0 Changelog (Feb 7, 2026)
+
+| Change | Before (v1) | After (v2) |
+|--------|-------------|-------------|
+| Dept scheduling | 25% overlap (unrealistic) | Sequential (matches scheduler) |
+| OT capacity | Flat 1000 pts/wk | 4-tier system (956–1191 pts/wk) |
+| OT tier selection | N/A | Tries lowest-to-highest, picks minimum sufficient tier |
+| Tier 2 simulation | Ignored freed capacity | Re-simulates with moved jobs removed |
+| Big Rock threshold | 50 pts | 70 pts (matches `BIG_ROCK_CONFIG`) |
+| Product type support | FAB only | FAB / DOORS / HARMONIC via `QuoteInput.productType` |
+| Capacity reservation | None | Each dept placement reserves load for subsequent depts |
+| Move detail | Job name + dates | + `pointsRelieved` per move, total `capacityFreed` |
+| OT detail | Week key strings | `OTWeekDetail` with dept, load, excess, tier, coverage |
+| DECLINE output | Just "can't meet target" | Shows best-possible date at max OT (Tier 4) |
 
 ---
 
 ## Testing Checklist
 
-- [ ] Test "Earliest Completion" mode (should work as before)
-- [ ] Test "Target Date" mode with achievable date
-- [ ] Test "Target Date" mode with tight date
-- [ ] Test "Target Date" mode with impossible date
-- [ ] Verify job movement list displays correctly
-- [ ] Verify OT week calculation
-- [ ] Test with Big Rock items
+- [ ] Test "Earliest Completion" mode — should show sequential timeline
+- [ ] Test "Target Date" mode with achievable date (expect ACCEPT)
+- [ ] Test "Target Date" mode with tight date (expect ACCEPT_WITH_MOVES)
+- [ ] Test "Target Date" mode with impossible date (expect DECLINE with best date)
+- [ ] Verify job movement list displays correctly with points relieved
+- [ ] Verify OT tier recommendation matches expected tier for given excess
+- [ ] Test with Big Rock items (≥70 pts)
 - [ ] Test with REF jobs
 - [ ] Verify capacity calculations against existing schedule
+- [ ] Test with different product types if available
 
 ---
 
 ## Known Limitations
 
-1. **Simplified capacity distribution**: Points are distributed evenly across job duration
-2. **Movement logic is basic**: Jobs are moved by 1 week increments
-3. **No actual rescheduling**: This is a simulation only, doesn't modify real schedule
-4. **Limited to FAB jobs**: Not yet extended to DOORS or other product types
+1. **Points distributed evenly** across a department's duration (no front/back-loading)
+2. **Move candidates limited to Engineering + Laser** — other depts not considered
+3. **Simulation only** — does not modify the real schedule
+4. **Single-job simulation** — does not simulate the effect of accepting multiple quotes simultaneously
 
 ---
 
 ## Future Enhancements
 
-1. **More sophisticated movement algorithm**: Optimize which jobs to move
-2. **Cost analysis**: Show impact of OT vs. job movements
-3. **Save quote history**: Track estimates for future reference
-4. **PDF export**: Generate quote reports for sales team
-5. **Integration with actual scheduler**: Option to commit changes
-6. **Multi-product support**: Extend to DOORS, NYCHA, etc.
+- [ ] Cost analysis: Show financial impact of OT vs. job movements
+- [ ] Save quote history: Track estimates for future reference
+- [ ] PDF export: Generate quote reports for sales team
+- [ ] Integration with scheduler: Option to commit accepted quotes into the live schedule
+- [ ] Batch quote simulation: Model the effect of accepting multiple quotes at once
 
 ---
 
