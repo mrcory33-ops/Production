@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInCalendarDays } from 'date-fns';
-import { Job, Department } from '@/types';
+import { Job, Department, SupervisorAlert } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
 import SegmentEditPopover from './SegmentEditPopover';
 import JobStatusSymbols from './JobStatusSymbols';
@@ -34,6 +34,7 @@ interface CustomGanttTableProps {
     showActiveOnly?: boolean;
     selectedDates?: Date[];
     onDateSelect?: (dates: Date[]) => void;
+    alertsByJobId?: Record<string, SupervisorAlert[]>;
 }
 
 export default function CustomGanttTable({
@@ -53,7 +54,8 @@ export default function CustomGanttTable({
     visibleDepartments,
     showActiveOnly = false,
     selectedDates = [],
-    onDateSelect
+    onDateSelect,
+    alertsByJobId = {}
 }: CustomGanttTableProps) {
     const [hoveredCell, setHoveredCell] = useState<{ row: number; col: number } | null>(null);
     const [editingSegment, setEditingSegment] = useState<{
@@ -649,6 +651,7 @@ export default function CustomGanttTable({
                             const segments = calculateDepartmentSegments(job);
                             const dailyDeptMap = buildDailyDeptMap(job);
                             const isSelected = selectedJob?.id === job.id;
+                            const jobAlerts = alertsByJobId[job.id] || [];
 
                             return (
                                 <tr
@@ -661,7 +664,7 @@ export default function CustomGanttTable({
                                     >
                                         <div className="job-cell-content">
                                             <div className="flex items-center gap-1.5 overflow-visible relative">
-                                                <div className="job-name flex-1 cursor-pointer text-black font-bold"
+                                                <div className="job-name flex-1 min-w-0 cursor-pointer text-black font-bold"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         onJobClick?.(job);
@@ -669,11 +672,24 @@ export default function CustomGanttTable({
                                                 >
                                                     {job.name}
                                                 </div>
+                                                {jobAlerts.length > 0 && (
+                                                    <span
+                                                        className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 border border-red-300 text-red-600 font-bold"
+                                                        title={`${jobAlerts.length} active supervisor alert${jobAlerts.length > 1 ? 's' : ''}`}
+                                                    >
+                                                        ⚠ {jobAlerts.length}
+                                                    </span>
+                                                )}
                                                 {/* Status Symbols — clickable with explanation popovers */}
                                                 <JobStatusSymbols job={job} />
                                             </div>
-                                            <div className="job-id text-black font-semibold opacity-80">{job.id}</div>
-                                            <div className="text-[10px] text-black mt-0.5 truncate max-w-[160px]">
+                                            <div
+                                                className="job-id font-extrabold tracking-wide opacity-100"
+                                                style={{ color: '#1f2937', fontSize: '12px', lineHeight: '1.1' }}
+                                            >
+                                                {job.id}
+                                            </div>
+                                            <div className="text-[11px] text-black font-semibold mt-0.5 truncate leading-tight">
                                                 {job.description || 'No description'}
                                             </div>
                                             <div className="flex justify-between items-center mt-1.5 text-[9px] text-black font-mono">
@@ -855,6 +871,29 @@ export default function CustomGanttTable({
                                                                         <span className="text-slate-400 ml-2">{format(segment.startDate, 'M/d')} – {format(segment.endDate, 'M/d')}</span>
                                                                     </div>
                                                                 </div>
+
+                                                                {jobAlerts.length > 0 && segIndex === 0 && (
+                                                                    <div className="absolute -top-1 -right-1 group/alert-tooltip">
+                                                                        <span className="w-4 h-4 rounded-full bg-red-600 border border-red-200 text-white text-[10px] font-bold flex items-center justify-center">
+                                                                            !
+                                                                        </span>
+                                                                        <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/alert-tooltip:block z-[60] pointer-events-none">
+                                                                            <div className="px-2.5 py-2 bg-slate-900 text-white rounded-lg shadow-xl text-[10px] min-w-[220px] max-w-[280px] whitespace-normal">
+                                                                                <div className="font-bold text-red-300 mb-1">
+                                                                                    {jobAlerts.length} active alert{jobAlerts.length > 1 ? 's' : ''}
+                                                                                </div>
+                                                                                {jobAlerts.slice(0, 2).map(alert => (
+                                                                                    <div key={alert.id} className="mb-1 last:mb-0">
+                                                                                        <span className="text-slate-300">{alert.department}:</span> {alert.reason}
+                                                                                    </div>
+                                                                                ))}
+                                                                                {jobAlerts.length > 2 && (
+                                                                                    <div className="text-slate-400">+{jobAlerts.length - 2} more</div>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
 
                                                                 {/* Resize handle - start */}
                                                                 {onSegmentUpdate && (

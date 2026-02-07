@@ -4,6 +4,7 @@ import "./globals.css";
 import "./frappe-gantt.css";
 import "./chart-overrides.css";
 import "./custom-gantt.css";
+import "./supervisor/supervisor.css";
 
 const outfit = Outfit({
   subsets: ["latin"],

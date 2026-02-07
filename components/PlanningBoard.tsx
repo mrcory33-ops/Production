@@ -3,19 +3,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, query, where, getDocs, limit, doc, updateDoc, deleteDoc, writeBatch, onSnapshot, Timestamp, deleteField } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Job, Department, ScheduleInsights } from '@/types';
+import { Job, Department, ScheduleInsights, SupervisorAlert } from '@/types';
 import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/scheduler';
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, format, startOfDay, differenceInDays } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator, MessageSquareWarning } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator, MessageSquareWarning, Bell, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
 import ExportModal from './export/ExportModal';
 import ScoringConfigPanel from './ScoringConfigPanel';
 import ScheduleInsightsPanel from './ScheduleInsightsPanel';
+import AlertManagementPanel from './AlertManagementPanel';
 import { calculateUrgencyScore } from '@/lib/scoring';
+import { deleteAlert, extendAlert, resolveAlert, subscribeToAlerts, updateAlert } from '@/lib/supervisorAlerts';
 
 
 
@@ -232,6 +234,8 @@ export default function PlanningBoard() {
     const [isScoringConfigOpen, setIsScoringConfigOpen] = useState(false);
     const [scheduleInsights, setScheduleInsights] = useState<ScheduleInsights | null>(null);
     const [showInsights, setShowInsights] = useState(false);
+    const [supervisorAlerts, setSupervisorAlerts] = useState<SupervisorAlert[]>([]);
+    const [showAlertPanel, setShowAlertPanel] = useState(false);
 
     const columnWidth = useMemo(() => {
         const t = Math.min(1, Math.max(0, zoomLevel / ZOOM_STEPS));
@@ -633,6 +637,28 @@ export default function PlanningBoard() {
 
         fetchJobs();
     }, []);
+
+    useEffect(() => {
+        const unsubscribe = subscribeToAlerts((alerts) => {
+            setSupervisorAlerts(alerts);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    const activeSupervisorAlerts = useMemo(
+        () => supervisorAlerts.filter(alert => alert.status === 'active'),
+        [supervisorAlerts]
+    );
+
+    const alertsByJobId = useMemo(() => {
+        const map: Record<string, SupervisorAlert[]> = {};
+        for (const alert of activeSupervisorAlerts) {
+            if (!map[alert.jobId]) map[alert.jobId] = [];
+            map[alert.jobId].push(alert);
+        }
+        return map;
+    }, [activeSupervisorAlerts]);
 
     const displayJobs = useMemo(() => {
         let filtered = showSmallRocks
@@ -1070,11 +1096,15 @@ export default function PlanningBoard() {
                                 <Calculator size={16} />
                             </Link>
 
+                            <Link href="/supervisor" className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-100 transition-all" title="Supervisor Dashboard">
+                                <ShieldAlert size={16} />
+                            </Link>
+
                             <button
                                 onClick={async () => {
                                     // Generate insights from current jobs
                                     const { analyzeScheduleFromJobs } = await import('@/lib/scheduler');
-                                    const insights = analyzeScheduleFromJobs(jobs);
+                                    const insights = analyzeScheduleFromJobs(jobs, activeSupervisorAlerts);
                                     setScheduleInsights(insights);
                                     setShowInsights(true);
                                 }}
@@ -1085,6 +1115,22 @@ export default function PlanningBoard() {
                                 title="Schedule Insights"
                             >
                                 <MessageSquareWarning size={16} />
+                            </button>
+
+                            <button
+                                onClick={() => setShowAlertPanel(true)}
+                                className={`relative p-1.5 rounded-lg border transition-all ${activeSupervisorAlerts.length > 0
+                                    ? 'text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200 bg-rose-50'
+                                    : 'text-slate-600 hover:text-black hover:bg-slate-50 border-transparent hover:border-slate-200'
+                                    }`}
+                                title="Alert Management"
+                            >
+                                <Bell size={16} />
+                                {activeSupervisorAlerts.length > 0 && (
+                                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-4 text-center">
+                                        {activeSupervisorAlerts.length > 99 ? '99+' : activeSupervisorAlerts.length}
+                                    </span>
+                                )}
                             </button>
 
                             <button onClick={() => setIsExportModalOpen(true)} className="p-1.5 text-slate-600 hover:text-black hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 transition-all" title="Export">
@@ -1142,6 +1188,7 @@ export default function PlanningBoard() {
                             showActiveOnly={showActiveOnly}
                             selectedDates={selectedDates}
                             onDateSelect={setSelectedDates}
+                            alertsByJobId={alertsByJobId}
                         />
                     ) : (
                         <div className="flex flex-1 items-center justify-center">
@@ -1255,6 +1302,31 @@ export default function PlanningBoard() {
                 <ScheduleInsightsPanel
                     insights={scheduleInsights}
                     onClose={() => setShowInsights(false)}
+                />
+            )}
+
+            {showAlertPanel && (
+                <AlertManagementPanel
+                    alerts={supervisorAlerts}
+                    jobs={jobs}
+                    onClose={() => setShowAlertPanel(false)}
+                    onResolve={async (alertId) => {
+                        await resolveAlert(alertId);
+                    }}
+                    onExtend={async (alertId, newDate) => {
+                        await extendAlert(alertId, new Date(newDate));
+                    }}
+                    onEdit={async (alertId, update) => {
+                        await updateAlert(alertId, {
+                            reason: update.reason,
+                            estimatedResolutionDate: update.estimatedResolutionDate
+                                ? new Date(update.estimatedResolutionDate)
+                                : undefined
+                        });
+                    }}
+                    onDelete={async (alertId) => {
+                        await deleteAlert(alertId);
+                    }}
                 />
             )}
         </div>

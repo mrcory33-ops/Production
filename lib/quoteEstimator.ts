@@ -248,6 +248,14 @@ function distributeLoadByWorkday(
 
 type CapacityMap = Map<string, Map<Department, number>>;
 
+function cloneCapacityMap(capacityMap: CapacityMap): CapacityMap {
+    const clone: CapacityMap = new Map();
+    for (const [weekKey, deptMap] of capacityMap.entries()) {
+        clone.set(weekKey, new Map(deptMap));
+    }
+    return clone;
+}
+
 /**
  * Build capacity usage map from existing jobs.
  * For each department, distributes the job's WELDING POINTS
@@ -357,6 +365,36 @@ function calculateJobBuffers(existingJobs: Job[]): Map<string, { bufferDays: num
     return buffers;
 }
 
+function applyMovesToCapacityMap(
+    baseCapacityMap: CapacityMap,
+    jobsToMove: JobMovement[],
+    existingJobsById: Map<string, Job>
+): CapacityMap {
+    const movedCapacityMap = cloneCapacityMap(baseCapacityMap);
+
+    for (const move of jobsToMove) {
+        const job = existingJobsById.get(move.jobId);
+        if (!job?.departmentSchedule) continue;
+
+        const schedule = (job.departmentSchedule as Record<string, { start: string; end: string }>)[move.department];
+        if (!schedule) continue;
+
+        const startDate = new Date(schedule.start);
+        const endDate = new Date(schedule.end);
+        const points = Number(job.weldingPoints) || 0;
+        const dist = distributeLoadByWorkday(startDate, endDate, points);
+
+        for (const [wk, pts] of dist.entries()) {
+            const weekMap = movedCapacityMap.get(wk);
+            if (!weekMap) continue;
+            const current = weekMap.get(move.department) || 0;
+            weekMap.set(move.department, Math.max(0, current - pts));
+        }
+    }
+
+    return movedCapacityMap;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Sequential Timeline Simulation
 // ─────────────────────────────────────────────────────────────
@@ -461,6 +499,8 @@ export async function checkAdvancedFeasibility(
     // ═══════════════════════════════════════════════════════════
 
     const baseCapacityMap = buildCapacityMap(existingJobs);
+    const existingJobsById = new Map<string, Job>();
+    for (const job of existingJobs) existingJobsById.set(job.id, job);
     let asIsDate = new Date(input.engineeringReadyDate);
     const asIsBottlenecks: string[] = [];
 
@@ -524,44 +564,20 @@ export async function checkAdvancedFeasibility(
         }
     }
 
+    const capacityMapAfterMoves = jobsToMove.length > 0
+        ? applyMovesToCapacityMap(baseCapacityMap, jobsToMove, existingJobsById)
+        : baseCapacityMap;
+
     // Build capacity map WITH moves applied (simulate the freed capacity)
     let withMovesCompletion = asIsCompletion;
     let withMovesAchievable = asIsAchievable;
 
     if (jobsToMove.length > 0 && !asIsAchievable) {
-        // Clone the capacity map and reduce load for moved jobs
-        const movedCapacityMap: CapacityMap = new Map();
-        for (const [wk, deptMap] of baseCapacityMap.entries()) {
-            movedCapacityMap.set(wk, new Map(deptMap));
-        }
-
-        // Remove moved jobs' load from their original weeks
-        for (const move of jobsToMove) {
-            const job = existingJobs.find(j => j.id === move.jobId);
-            if (!job?.departmentSchedule) continue;
-
-            const schedule = (job.departmentSchedule as Record<string, { start: string; end: string }>)[move.department];
-            if (!schedule) continue;
-
-            const startDate = new Date(schedule.start);
-            const endDate = new Date(schedule.end);
-            const points = Number(job.weldingPoints) || 0;
-            const dist = distributeLoadByWorkday(startDate, endDate, points);
-
-            for (const [wk, pts] of dist.entries()) {
-                const weekMap = movedCapacityMap.get(wk);
-                if (weekMap) {
-                    const current = weekMap.get(move.department) || 0;
-                    weekMap.set(move.department, Math.max(0, current - pts));
-                }
-            }
-        }
-
         // Re-simulate with freed capacity
         let moveDate = new Date(input.engineeringReadyDate);
         for (const dept of DEPARTMENTS) {
             const duration = calculateDeptDuration(dept, totalPoints, productType);
-            const slotStart = findAvailableSlot(dept, moveDate, totalPoints, duration, movedCapacityMap, BASE_WEEKLY_CAPACITY);
+            const slotStart = findAvailableSlot(dept, moveDate, totalPoints, duration, capacityMapAfterMoves, BASE_WEEKLY_CAPACITY);
             const endDate = getEndDateForDuration(slotStart, duration);
             moveDate = addWorkDays(endDate, Math.ceil(gap));
         }
@@ -578,35 +594,13 @@ export async function checkAdvancedFeasibility(
     let otCompletion: Date | null = null;
     const otWeekDetails: OTWeekDetail[] = [];
     let bestOTTier: 1 | 2 | 3 | 4 | null = null;
+    const otBaseCapacityMap = jobsToMove.length > 0 ? capacityMapAfterMoves : baseCapacityMap;
 
     if (!asIsAchievable && !withMovesAchievable) {
         // Try each OT tier from lowest to highest until one works
         for (const otTier of OT_TIERS) {
             let otDate = new Date(input.engineeringReadyDate);
-            const otCapacityMap = buildCapacityMap(existingJobs);
-
-            // Apply moves first if any
-            if (jobsToMove.length > 0) {
-                for (const move of jobsToMove) {
-                    const job = existingJobs.find(j => j.id === move.jobId);
-                    if (!job?.departmentSchedule) continue;
-                    const schedule = (job.departmentSchedule as Record<string, { start: string; end: string }>)[move.department];
-                    if (!schedule) continue;
-
-                    const startDate = new Date(schedule.start);
-                    const endDate = new Date(schedule.end);
-                    const points = Number(job.weldingPoints) || 0;
-                    const dist = distributeLoadByWorkday(startDate, endDate, points);
-
-                    for (const [wk, pts] of dist.entries()) {
-                        const weekMap = otCapacityMap.get(wk);
-                        if (weekMap) {
-                            const current = weekMap.get(move.department) || 0;
-                            weekMap.set(move.department, Math.max(0, current - pts));
-                        }
-                    }
-                }
-            }
+            const otCapacityMap = cloneCapacityMap(otBaseCapacityMap);
 
             // Simulate with OT capacity
             for (const dept of DEPARTMENTS) {
@@ -660,7 +654,7 @@ export async function checkAdvancedFeasibility(
         if (!withOTAchievable) {
             const maxTier = OT_TIERS[OT_TIERS.length - 1];
             let otDate = new Date(input.engineeringReadyDate);
-            const otCapacityMap = buildCapacityMap(existingJobs);
+            const otCapacityMap = cloneCapacityMap(otBaseCapacityMap);
 
             for (const dept of DEPARTMENTS) {
                 const duration = calculateDeptDuration(dept, totalPoints, productType);

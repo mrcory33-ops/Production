@@ -35,7 +35,7 @@ export default function ScheduleInsightsPanel({ insights, onClose }: Props) {
         setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
     };
 
-    const { summary, lateJobs, overloadedWeeks, moveOptions, otRecommendations, projectedWithMoves, projectedWithMovesAndOT } = insights;
+    const { summary, lateJobs, overloadedWeeks, moveOptions, otRecommendations, projectedWithMoves, projectedWithMovesAndOT, alertImpact } = insights;
 
     // Group OT recommendations by week
     const otByWeek = otRecommendations.reduce((acc, ot) => {
@@ -151,6 +151,16 @@ export default function ScheduleInsightsPanel({ insights, onClose }: Props) {
                         </div>
                     </div>
                 </div>
+
+                {alertImpact && (
+                    <div className="px-6 py-2.5 border-b border-slate-800 bg-rose-950/20 shrink-0">
+                        <p className="text-xs text-rose-200">
+                            <span className="font-bold">{alertImpact.activeAlertCount} active alert{alertImpact.activeAlertCount === 1 ? '' : 's'}</span>
+                            {' '}· {alertImpact.blockedJobCount} blocked job{alertImpact.blockedJobCount === 1 ? '' : 's'}
+                            {' '}· {alertImpact.blockedPointsTotal} pts currently unavailable for move optimization
+                        </p>
+                    </div>
+                )}
 
                 {/* ════ Scrollable Content ════ */}
                 <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
@@ -448,6 +458,7 @@ function MoveOptionCard({ move, isSO }: { move: MoveOption; isSO?: boolean }) {
     const [expanded, setExpanded] = useState(false);
     const accentColor = isSO ? 'purple' : 'cyan';
     const recovers = move.lateJobsRecovered.length;
+    const noLateJobImprovement = recovers === 0;
 
     return (
         <div className={`bg-${accentColor}-950/15 border border-${accentColor}-500/15 rounded-lg overflow-hidden`}
@@ -486,7 +497,9 @@ function MoveOptionCard({ move, isSO }: { move: MoveOption; isSO?: boolean }) {
                                 ↑{recovers} recovered
                             </span>
                         ) : (
-                            <span className="text-xs text-slate-500">No recoveries</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">
+                                No late-job improvement
+                            </span>
                         )}
                         <span className="text-xs font-bold text-emerald-400/70">
                             -{move.pointsRelieved}pts
@@ -510,6 +523,11 @@ function MoveOptionCard({ move, isSO }: { move: MoveOption; isSO?: boolean }) {
             {expanded && (
                 <div className="px-2.5 pb-2.5 border-t border-slate-800/50 pt-2 space-y-1.5">
                     <p className="text-[11px] text-slate-300 leading-relaxed">{move.impactSummary}</p>
+                    {noLateJobImprovement && (
+                        <div className="text-[10px] text-amber-300">
+                            Capacity relief only: this move does not reduce late-job count.
+                        </div>
+                    )}
                     {move.lateJobsRecovered.length > 0 && (
                         <div className="text-[10px] text-emerald-400">
                             Jobs recovered: {move.lateJobsRecovered.join(', ')}

@@ -648,11 +648,12 @@
                 <a href="#s13"><span class="num">13.</span> Progress Tracking</a>
                 <a href="#s14"><span class="num">14.</span> Due Date Change Detection</a>
                 <a href="#s15"><span class="num">15.</span> The Planning Board</a>
-                <a href="#s16"><span class="num">16.</span> Export Function</a>
-                <a href="#s17"><span class="num">17.</span> Complete Daily Flow</a>
-                <a href="#s18"><span class="num">18.</span> Key Benefits Summary</a>
-                <a href="#s19"><span class="num">19.</span> Technical Details</a>
-                <a href="#s20"><span class="num">20.</span> February 2026 Updates <span class="tag new">NEW</span></a>
+                <a href="#s16"><span class="num">16.</span> Supervisor Dashboard <span class="tag new">NEW</span></a>
+                <a href="#s17"><span class="num">17.</span> Export Function</a>
+                <a href="#s18"><span class="num">18.</span> Complete Daily Flow</a>
+                <a href="#s19"><span class="num">19.</span> Key Benefits Summary</a>
+                <a href="#s20"><span class="num">20.</span> Technical Details</a>
+                <a href="#s21"><span class="num">21.</span> February 2026 Updates <span class="tag new">NEW</span></a>
             </div>
         </div>
 
@@ -1467,9 +1468,108 @@
             </table>
         </section>
 
-        <!-- Section 16: Export Function -->
+        <!-- Section 16: Supervisor Dashboard -->
         <section class="section" id="s16">
-            <h2><span class="num">16</span> Export Function</h2>
+            <h2><span class="num">16</span> Supervisor Dashboard <span class="tag new">NEW</span></h2>
+            <p>The <strong>Supervisor Dashboard</strong> (<code>/supervisor</code>) is a dedicated interface for shop
+                floor supervisors to report and track production blockers in real time. It feeds directly into the
+                scheduling engine.</p>
+
+            <div class="highlight-box">
+                <h4>Key Principle</h4>
+                <p>Supervisors <strong>report</strong> blockers (machine down, material missing, worker absent). The
+                    plant manager handles all <strong>reschedule decisions</strong>.</p>
+            </div>
+
+            <h3>KPI Summary Cards</h3>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>🔔 Active Alerts</h4>
+                    <p>Total open (unresolved) alerts across all departments</p>
+                </div>
+                <div class="feature-card">
+                    <h4>🛡️ Depts Affected</h4>
+                    <p>How many of the 6 departments currently have at least 1 alert</p>
+                </div>
+                <div class="feature-card">
+                    <h4>⚠️ Blocked Points</h4>
+                    <p>Total welding points tied up in jobs with active alerts</p>
+                </div>
+            </div>
+
+            <h3>Department Status Grid</h3>
+            <p>A 6-card grid showing each department's real-time health: alert count, blocked jobs, blocked points, and
+                the top issue description. <span class="tag green">Green</span> = healthy, <span
+                    class="tag yellow">Amber</span> = has alerts.</p>
+
+            <h3>Active Alert Feed</h3>
+            <p>A scrollable list of all open alerts showing Work Order ID, job name, affected department, reason for
+                delay, estimated resolution date, and business days blocked.</p>
+
+            <h3>Creating an Alert</h3>
+            <p>Click <strong>"Report Issue"</strong> to open the alert creation modal:</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Required</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Job</strong></td>
+                        <td>✓</td>
+                        <td>Search and select from all active jobs (by WO#, name, or description)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Department</strong></td>
+                        <td>✓</td>
+                        <td>Which department is affected</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Reason</strong></td>
+                        <td>✓</td>
+                        <td>Free-text (e.g., "Welder #3 out sick, can't start until Thursday")</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Est. Resolution Date</strong></td>
+                        <td>✓</td>
+                        <td>When the supervisor expects the issue to clear</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Reported By</strong></td>
+                        <td>✓</td>
+                        <td>Supervisor's name</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Alert Lifecycle</h3>
+            <div class="flow-diagram">
+                <div class="flow-step">Created</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step" style="border-color: #f59e0b;">Active</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step" style="border-color: #10b981;">Resolved</div>
+            </div>
+            <p>Available actions: <strong>Resolve</strong> (mark cleared), <strong>Extend</strong> (push resolution
+                date), <strong>Update</strong> (edit reason/reporter), <strong>Delete</strong> (remove entirely).</p>
+
+            <h3>Impact on Scheduling</h3>
+            <div class="highlight-box new-feature">
+                <h4>Alert-Aware Schedule Insights</h4>
+                <p>Active alerts are passed into the Schedule Insights engine. When alerts exist, the Insights panel
+                    shows an <strong>Alert Impact</strong> section with: blocked job count, blocked points by
+                    department, available capacity after subtracting blocked points, and a human-readable summary. This
+                    ensures overtime recommendations and move suggestions account for real-world issues, not just
+                    theoretical schedule data.</p>
+            </div>
+        </section>
+
+        <!-- Section 17: Export Function -->
+        <section class="section" id="s17">
+            <h2><span class="num">17</span> Export Function</h2>
             <p>Click <strong>"Export"</strong> to download a PDF of the current schedule.</p>
             <p><strong>Fields included:</strong></p>
             <ul>
@@ -1480,9 +1580,9 @@
             </ul>
         </section>
 
-        <!-- Section 17: Complete Daily Flow -->
-        <section class="section" id="s17">
-            <h2><span class="num">17</span> Complete Flow: First Import to Next Day</h2>
+        <!-- Section 18: Complete Daily Flow -->
+        <section class="section" id="s18">
+            <h2><span class="num">18</span> Complete Flow: First Import to Next Day</h2>
 
             <h3>Day 1 (Monday) - Initial Import</h3>
             <ol>
@@ -1514,9 +1614,9 @@
             </ol>
         </section>
 
-        <!-- Section 18: Key Benefits Summary -->
-        <section class="section" id="s18">
-            <h2><span class="num">18</span> Key Benefits Summary</h2>
+        <!-- Section 19: Key Benefits Summary -->
+        <section class="section" id="s19">
+            <h2><span class="num">19</span> Key Benefits Summary</h2>
 
             <div class="comparison-table">
                 <div class="comparison-col before">
@@ -1546,9 +1646,9 @@
             </div>
         </section>
 
-        <!-- Section 19: Technical Details -->
-        <section class="section" id="s19">
-            <h2><span class="num">19</span> Technical Details</h2>
+        <!-- Section 20: Technical Details -->
+        <section class="section" id="s20">
+            <h2><span class="num">20</span> Technical Details</h2>
 
             <h3>Technology Stack</h3>
             <table>
@@ -1623,9 +1723,9 @@
             </table>
         </section>
 
-        <!-- Section 20: February 2026 Updates -->
-        <section class="section" id="s20">
-            <h2><span class="num">20</span> February 2026 Updates <span class="tag new">NEW</span></h2>
+        <!-- Section 21: February 2026 Updates -->
+        <section class="section" id="s21">
+            <h2><span class="num">21</span> February 2026 Updates <span class="tag new">NEW</span></h2>
 
             <div class="version-badge">v7.3.0 — February 6, 2026</div>
 
@@ -1655,6 +1755,11 @@
                         <td><strong>Analytics Panel Fix</strong></td>
                         <td>Gantt chart vertical scrollbar now remains visible when Department Analytics panel is open
                         </td>
+                    </tr>
+                    <tr style="background: #ecfdf5;">
+                        <td><strong>Supervisor Dashboard</strong></td>
+                        <td>Real-time shop floor feedback system — supervisors report blockers, system adjusts
+                            scheduling insights accordingly</td>
                     </tr>
                 </tbody>
             </table>

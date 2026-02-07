@@ -1,4 +1,4 @@
-import { Job, Department, ProductType, ScheduleInsights, LateJob, OverloadedWeek, MoveOption, OTRecommendation } from '@/types';
+import { Job, Department, ProductType, ScheduleInsights, LateJob, OverloadedWeek, MoveOption, OTRecommendation, SupervisorAlert } from '@/types';
 import { addDays, isSaturday, isSunday, subDays, startOfDay, isBefore, startOfWeek } from 'date-fns';
 import { DEPARTMENT_CONFIG, calculateDeptDuration } from './departmentConfig';
 import { calculateUrgencyScore } from './scoring';
@@ -2153,11 +2153,21 @@ const cloneWeeklyLoad = (wl: WeeklyCapacityMap): WeeklyCapacityMap => {
 const removeJobFromLoad = (simLoad: WeeklyCapacityMap, jobId: string) => {
     for (const [, depts] of Object.entries(simLoad)) {
         for (const [, load] of Object.entries(depts)) {
-            const contribs = load.contributions.filter(c => c.jobId === jobId);
-            for (const c of contribs) {
-                load.total -= c.pts;
+            let removedPoints = 0;
+            const kept: { jobId: string; pts: number }[] = [];
+
+            for (const contribution of load.contributions) {
+                if (contribution.jobId === jobId) {
+                    removedPoints += contribution.pts;
+                } else {
+                    kept.push(contribution);
+                }
             }
-            load.contributions = load.contributions.filter(c => c.jobId !== jobId);
+
+            if (removedPoints > 0) {
+                load.total -= removedPoints;
+                load.contributions = kept;
+            }
         }
     }
 };
@@ -2169,13 +2179,13 @@ const estimateLateJobsAfterRelief = (
     originalLateJobs: LateJob[],
     originalLoad: WeeklyCapacityMap,
     simulatedLoad: WeeklyCapacityMap,
-    jobs: Job[]
+    jobsById: Map<string, Job>
 ): { recoveredIds: string[]; stillLate: LateJob[] } => {
     const recoveredIds: string[] = [];
     const stillLate: LateJob[] = [];
 
     for (const lj of originalLateJobs) {
-        const job = jobs.find(j => j.id === lj.jobId);
+        const job = jobsById.get(lj.jobId);
         if (!job?.departmentSchedule) { stillLate.push(lj); continue; }
 
         // Check if this job's bottleneck weeks have been sufficiently relieved
@@ -2224,8 +2234,18 @@ const estimateLateJobsAfterRelief = (
  * Hard constraint: NEVER push a job more than 2 weeks. Never 3 weeks late.
  * ═══════════════════════════════════════════════════════════════════════════
  */
-const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
+const analyzeSchedule = (
+    jobs: Job[],
+    activeAlerts: SupervisorAlert[] = []
+): ScheduleInsights => {
     const weeklyLoad = computeWeeklyLoad(jobs);
+    const jobsById = new Map<string, Job>();
+    for (const job of jobs) jobsById.set(job.id, job);
+    const blockedJobIds = new Set(
+        activeAlerts
+            .filter(alert => alert.status === 'active')
+            .map(alert => alert.jobId)
+    );
 
     // ══════════════════════════════════════════════
     // 1. BASELINE
@@ -2253,8 +2273,8 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
 
     // Tier A: non-late, non-overdue jobs with forward slack
     const tierAJobs = Array.from(candidateJobIds)
-        .map(id => jobs.find(j => j.id === id))
-        .filter((j): j is Job => !!j && !j.isOverdue && !lateJobIds.has(j.id))
+        .map(id => jobsById.get(id))
+        .filter((j): j is Job => !!j && !j.isOverdue && !lateJobIds.has(j.id) && !blockedJobIds.has(j.id))
         .sort((a, b) => (b.weldingPoints || 0) - (a.weldingPoints || 0));
 
     // For each candidate, try +1wk and +2wk pushes and evaluate impact
@@ -2291,7 +2311,7 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
 
             // Estimate recovery
             const { recoveredIds, stillLate } = estimateLateJobsAfterRelief(
-                lateJobs, weeklyLoad, simLoad, jobs
+                lateJobs, weeklyLoad, simLoad, jobsById
             );
 
             // Check if pushing this job makes it late itself
@@ -2375,7 +2395,7 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
             if (totalRelieved === 0) continue;
 
             const { recoveredIds, stillLate } = estimateLateJobsAfterRelief(
-                lateJobs, weeklyLoad, simLoad, jobs
+                lateJobs, weeklyLoad, simLoad, jobsById
             );
 
             const recoveredCount = recoveredIds.length;
@@ -2476,10 +2496,9 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
             appliedMoveJobIds.add(jid);
         }
     }
-    const projectedLateAfterMoves = findLateJobs(jobs.filter(j => !appliedMoveJobIds.has(j.id)), simLoadAfterMoves);
     // Re-add late jobs that are still in the schedule but weren't moved
     const unmovableLate = lateJobs.filter(lj => !appliedMoveJobIds.has(lj.jobId));
-    const afterMovesLate = estimateLateJobsAfterRelief(unmovableLate, weeklyLoad, simLoadAfterMoves, jobs);
+    const afterMovesLate = estimateLateJobsAfterRelief(unmovableLate, weeklyLoad, simLoadAfterMoves, jobsById);
     const projectedOverloadedAfterMoves = findOverloadedWeeks(simLoadAfterMoves);
 
     // Project WITH MOVES + OT: add OT bonus to remaining overloaded weeks
@@ -2491,13 +2510,49 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
             load.total = Math.max(0, load.total - ot.bonusPoints);
         }
     }
-    const afterOTLate = estimateLateJobsAfterRelief(afterMovesLate.stillLate, simLoadAfterMoves, simLoadAfterOT, jobs);
+    const afterOTLate = estimateLateJobsAfterRelief(afterMovesLate.stillLate, simLoadAfterMoves, simLoadAfterOT, jobsById);
     const projectedOverloadedAfterOT = findOverloadedWeeks(simLoadAfterOT);
 
     // ══════════════════════════════════════════════
     // 5. BUILD FINAL RESULT
     // ══════════════════════════════════════════════
     const totalExcessPoints = overloadedWeeks.reduce((sum, w) => sum + w.excess, 0);
+
+    let alertImpact: ScheduleInsights['alertImpact'] | undefined;
+    if (blockedJobIds.size > 0) {
+        const blockedPointsByDepartment: Record<string, number> = {};
+
+        for (const [, departments] of Object.entries(weeklyLoad)) {
+            for (const [department, load] of Object.entries(departments)) {
+                const blockedPoints = load.contributions
+                    .filter(contribution => blockedJobIds.has(contribution.jobId))
+                    .reduce((sum, contribution) => sum + contribution.pts, 0);
+
+                if (blockedPoints > 0) {
+                    blockedPointsByDepartment[department] =
+                        (blockedPointsByDepartment[department] || 0) + blockedPoints;
+                }
+            }
+        }
+
+        const availableCapacityByDepartment: Record<string, number> = {};
+        for (const [department, points] of Object.entries(blockedPointsByDepartment)) {
+            availableCapacityByDepartment[department] = Math.round(points);
+        }
+
+        const blockedPointsTotal = Object.values(availableCapacityByDepartment)
+            .reduce((sum, value) => sum + value, 0);
+
+        alertImpact = {
+            activeAlertCount: activeAlerts.filter(alert => alert.status === 'active').length,
+            blockedJobCount: blockedJobIds.size,
+            blockedJobIds: Array.from(blockedJobIds),
+            blockedPointsTotal,
+            blockedPointsByDepartment: availableCapacityByDepartment,
+            availableCapacityByDepartment,
+            note: 'Blocked jobs are excluded from move suggestions while active alerts remain unresolved.'
+        };
+    }
 
     return {
         lateJobs,
@@ -2520,7 +2575,8 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
             totalExcessPoints: Math.round(totalExcessPoints),
             projectedLateAfterMoves: afterMovesLate.stillLate.length,
             projectedLateAfterOT: afterOTLate.stillLate.length
-        }
+        },
+        alertImpact
     };
 };
 
@@ -2635,8 +2691,8 @@ export const scheduleAllJobs = (jobs: Job[], existingJobs: Job[] = []): { jobs: 
  * Analyze already-scheduled jobs to generate insights without re-running the pipeline.
  * Used by the Planning Board to show insights on-demand.
  */
-export const analyzeScheduleFromJobs = (jobs: Job[]): ScheduleInsights => {
-    return analyzeSchedule(jobs);
+export const analyzeScheduleFromJobs = (jobs: Job[], activeAlerts: SupervisorAlert[] = []): ScheduleInsights => {
+    return analyzeSchedule(jobs, activeAlerts);
 };
 
 /**

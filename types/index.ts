@@ -9,6 +9,47 @@ export type Department =
     | 'Assembly';
 
 export type JobStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'HOLD';
+export type AlertStatus = 'active' | 'resolved';
+
+export interface SupervisorAlert {
+    id: string;
+
+    // Core 4 fields
+    jobId: string;
+    department: Department;
+    reason: string;
+    estimatedResolutionDate: string; // ISO date
+
+    // Auto-populated
+    jobName: string;
+    salesOrder?: string;
+    status: AlertStatus;
+    reportedBy: string;
+    daysBlocked: number; // Business days until the issue is expected to clear
+
+    // Timestamps
+    createdAt: string;
+    updatedAt: string;
+    resolvedAt?: string;
+}
+
+export interface DepartmentLiveStatus {
+    department: Department;
+    activeAlerts: number;
+    blockedJobs: string[];
+    totalBlockedPoints: number;
+    topIssue?: string;
+}
+
+export interface ScheduleAlertImpact {
+    activeAlertCount: number;
+    blockedJobCount: number;
+    blockedJobIds: string[];
+    blockedPointsTotal: number;
+    blockedPointsByDepartment: Record<string, number>;
+    availableCapacityByDepartment: Record<string, number>;
+    note: string;
+}
 
 export interface Job {
     id: string; // WO_NUM
@@ -213,5 +254,8 @@ export interface ScheduleInsights {
         projectedLateAfterMoves: number;
         projectedLateAfterOT: number;
     };
+
+    // Alert-aware context (present when active supervisor alerts are provided)
+    alertImpact?: ScheduleAlertImpact;
 }
 
