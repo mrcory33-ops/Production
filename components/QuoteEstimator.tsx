@@ -432,10 +432,13 @@ export default function QuoteEstimator({ existingJobs }: QuoteEstimatorProps) {
                                                 <p className="text-sm font-bold text-slate-900 mb-2">Affected Scale:</p>
                                                 <p className="text-sm text-slate-600">
                                                     {feasibility.withMoves.achievable
-                                                        ? `${feasibility.withMoves.totalJobsAffected} jobs require shifting`
-                                                        : 'Constraint limit exceeded'
+                                                        ? `${feasibility.withMoves.totalJobsAffected} jobs • ${Math.round(feasibility.withMoves.capacityFreed)} pts freed`
+                                                        : 'Moves alone not sufficient'
                                                     }
                                                 </p>
+                                                {feasibility.withMoves.achievable && feasibility.withMoves.completionDate && (
+                                                    <p className="text-xs text-emerald-600 font-bold mt-2">✓ Complete by {format(feasibility.withMoves.completionDate, 'MMM dd')}</p>
+                                                )}
                                             </div>
 
                                             {/* Tier 3 */}
@@ -445,15 +448,26 @@ export default function QuoteEstimator({ existingJobs }: QuoteEstimatorProps) {
                                                 </div>
                                                 <div className="flex items-center gap-2 mb-6">
                                                     <div className={`w-2 h-2 rounded-full ${feasibility.withOT.achievable ? 'bg-orange-500 shadow-[0_0_8px_#f97316]' : 'bg-slate-700'}`}></div>
-                                                    <span className="text-xs font-black uppercase tracking-widest text-slate-500">Peak Overtime</span>
+                                                    <span className="text-xs font-black uppercase tracking-widest text-slate-500">Overtime Required</span>
                                                 </div>
-                                                <p className="text-sm font-bold text-slate-300 mb-2">OT Overhead:</p>
-                                                <p className="text-sm text-slate-400">
-                                                    {feasibility.withOT.achievable
-                                                        ? `${feasibility.withOT.otWeeks.length} weeks at max volume`
-                                                        : 'Beyond physical capacity'
-                                                    }
-                                                </p>
+                                                {feasibility.withOT.recommendedTier ? (
+                                                    <>
+                                                        <p className="text-sm font-bold text-slate-300 mb-1">Recommended: Tier {feasibility.withOT.recommendedTier}</p>
+                                                        <p className="text-sm text-slate-400">
+                                                            {feasibility.withOT.otWeeks.length > 0
+                                                                ? `${feasibility.withOT.otWeeks[0]?.tierLabel} · ${feasibility.withOT.otWeeks.length} week(s)`
+                                                                : 'No additional OT weeks needed'}
+                                                        </p>
+                                                        {feasibility.withOT.achievable && feasibility.withOT.completionDate && (
+                                                            <p className="text-xs text-emerald-400 font-bold mt-2">✓ Complete by {format(feasibility.withOT.completionDate, 'MMM dd')}</p>
+                                                        )}
+                                                        {!feasibility.withOT.achievable && feasibility.withOT.completionDate && (
+                                                            <p className="text-xs text-red-400 font-bold mt-2">✕ Best possible: {format(feasibility.withOT.completionDate, 'MMM dd')}</p>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <p className="text-sm text-emerald-400 font-bold">No OT needed</p>
+                                                )}
                                             </div>
                                         </div>
                                     </section>

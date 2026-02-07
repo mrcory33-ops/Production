@@ -2,10 +2,38 @@ import { Department, ProductType, Job } from '@/types';
 import { addDays, isWeekend, startOfWeek, format, differenceInDays, startOfDay } from 'date-fns';
 import { calculateDeptDuration } from './departmentConfig';
 
-// Formula: $650 = 1 welding point
+// ─────────────────────────────────────────────────────────────
+// Constants — aligned with scheduler.ts and SCHEDULING_ENGINE.md
+// ─────────────────────────────────────────────────────────────
+
+/** $650 in quoted fabrication value ≈ 1 welding point */
 const DOLLAR_TO_POINT_RATIO = 650;
+
+/** Standard weekly capacity per department */
 const BASE_WEEKLY_CAPACITY = 850;
-const OT_WEEKLY_CAPACITY = 1000;
+
+/**
+ * OT Tiers — derived from real shop hours (21.25 pts/hr)
+ * Base: 8hr/day × 5 days = 40hr/wk → 850 pts
+ */
+const OT_TIERS = [
+    { tier: 1 as const, label: '9-Hour Days', bonusPoints: 106, weeklyCapacity: 956, weekdayHours: '6am–3pm', saturdayHours: 'N/A' },
+    { tier: 2 as const, label: '10-Hour Days', bonusPoints: 213, weeklyCapacity: 1063, weekdayHours: '6am–4pm', saturdayHours: 'N/A' },
+    { tier: 3 as const, label: '9hr + Saturday', bonusPoints: 234, weeklyCapacity: 1084, weekdayHours: '6am–3pm', saturdayHours: '6am–12pm' },
+    { tier: 4 as const, label: '10hr + Saturday', bonusPoints: 341, weeklyCapacity: 1191, weekdayHours: '6am–4pm', saturdayHours: '6am–12pm' },
+] as const;
+
+/** Departments in pipeline order */
+const DEPARTMENTS: Department[] = [
+    'Engineering', 'Laser', 'Press Brake', 'Welding', 'Polishing', 'Assembly',
+];
+
+/** Big Rock threshold — consistent with BIG_ROCK_CONFIG */
+const BIG_ROCK_THRESHOLD = 70;
+
+// ─────────────────────────────────────────────────────────────
+// Public Types
+// ─────────────────────────────────────────────────────────────
 
 export interface BigRockInput {
     value: number;
@@ -19,6 +47,7 @@ export interface QuoteInput {
     isREF: boolean;
     engineeringReadyDate: Date;
     targetDate?: Date;
+    productType?: ProductType; // NEW — defaults to 'FAB' if omitted
 }
 
 export interface QuoteEstimate {
@@ -38,6 +67,8 @@ export interface DepartmentTimeline {
     startDate: Date;
     endDate: Date;
     duration: number;
+    /** Actual capacity used in each week by this dept */
+    weeklyLoad?: Record<string, number>;
 }
 
 export interface JobMovement {
@@ -48,6 +79,19 @@ export interface JobMovement {
     newDate: Date;
     dueDate: Date;
     bufferDays: number;
+    pointsRelieved: number;
+}
+
+export interface OTWeekDetail {
+    weekKey: string;
+    department: Department;
+    currentLoad: number;
+    baseCapacity: number;
+    excess: number;
+    recommendedTier: 1 | 2 | 3 | 4;
+    tierLabel: string;
+    bonusPoints: number;
+    covered: boolean;
 }
 
 export interface FeasibilityCheck {
@@ -64,29 +108,31 @@ export interface FeasibilityCheck {
         completionDate: Date | null;
         jobsToMove: JobMovement[];
         totalJobsAffected: number;
+        capacityFreed: number;
     };
 
-    // Tier 3: With OT
+    // Tier 3: With OT (now uses tiered system)
     withOT: {
         achievable: boolean;
         completionDate: Date | null;
-        otWeeks: string[];
+        otWeeks: OTWeekDetail[];
+        recommendedTier: 1 | 2 | 3 | 4 | null;
     };
 
     recommendation: 'ACCEPT' | 'ACCEPT_WITH_MOVES' | 'ACCEPT_WITH_OT' | 'DECLINE';
     explanation: string;
 }
 
-/**
- * Convert dollar value to welding points
- */
+// ─────────────────────────────────────────────────────────────
+// Core Helpers
+// ─────────────────────────────────────────────────────────────
+
+/** Convert dollar value to welding points */
 export function convertDollarToPoints(dollarValue: number): number {
     return Math.round((dollarValue / DOLLAR_TO_POINT_RATIO) * 10) / 10;
 }
 
-/**
- * Calculate total points from quote inputs
- */
+/** Calculate total points from quote inputs */
 export function calculateQuotePoints(input: QuoteInput): {
     totalPoints: number;
     bigRockPoints: number;
@@ -112,39 +158,65 @@ export function calculateQuotePoints(input: QuoteInput): {
     };
 }
 
-/**
- * Skip weekends when calculating dates
- */
+// ─────────────────────────────────────────────────────────────
+// Date Utilities
+// ─────────────────────────────────────────────────────────────
+
+/** Advance by N workdays (skip weekends) */
 function addWorkDays(startDate: Date, days: number): Date {
     let current = new Date(startDate);
-    let remainingDays = days;
+    let remaining = Math.ceil(days);
+    // Handle fractional days: round up to nearest half-day boundary
+    if (remaining <= 0) return current;
 
-    while (remainingDays > 0) {
+    while (remaining > 0) {
         current = addDays(current, 1);
         if (!isWeekend(current)) {
-            remainingDays--;
+            remaining--;
         }
     }
 
     return current;
 }
 
+/** Count workdays between two dates (inclusive) */
 function countWorkdaysBetween(startDate: Date, endDate: Date): number {
     let current = startOfDay(startDate);
     const end = startOfDay(endDate);
     let count = 0;
 
     while (current <= end) {
-        if (!isWeekend(current)) {
-            count++;
-        }
+        if (!isWeekend(current)) count++;
         current = addDays(current, 1);
     }
 
     return count;
 }
 
-function distributePointsByWorkday(
+/** Get ISO week key for capacity tracking (Monday-based) */
+function getWeekKey(date: Date): string {
+    const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+    return format(weekStart, 'yyyy-MM-dd');
+}
+
+/** Calculate end date from start + duration in workdays */
+function getEndDateForDuration(startDate: Date, duration: number): Date {
+    const daySpan = Math.max(0, Math.ceil(duration) - 1);
+    return addWorkDays(startDate, daySpan);
+}
+
+/** Department gap based on job size — matches scheduler constants */
+function getDepartmentGap(points: number): number {
+    if (points >= BIG_ROCK_THRESHOLD) return 1;    // Big Rock: 1 day gap
+    if (points >= 8) return 0.5;                    // Medium: half-day gap
+    return 0;                                       // Small: no gap
+}
+
+/**
+ * Distribute a dept's DAILY capacity contribution across weeks
+ * Uses the dept's actual duration, not raw welding points
+ */
+function distributeLoadByWorkday(
     startDate: Date,
     endDate: Date,
     points: number
@@ -161,8 +233,8 @@ function distributePointsByWorkday(
 
     while (current <= end) {
         if (!isWeekend(current)) {
-            const weekKey = getWeekKey(current);
-            distribution.set(weekKey, (distribution.get(weekKey) || 0) + pointsPerDay);
+            const wk = getWeekKey(current);
+            distribution.set(wk, (distribution.get(wk) || 0) + pointsPerDay);
         }
         current = addDays(current, 1);
     }
@@ -170,53 +242,41 @@ function distributePointsByWorkday(
     return distribution;
 }
 
-function getEndDateForDuration(startDate: Date, duration: number): Date {
-    const daySpan = Math.max(0, Math.ceil(duration) - 1);
-    return addWorkDays(startDate, daySpan);
-}
+// ─────────────────────────────────────────────────────────────
+// Capacity Map — uses dept-level load, not raw welding points
+// ─────────────────────────────────────────────────────────────
+
+type CapacityMap = Map<string, Map<Department, number>>;
 
 /**
- * Calculate department gap based on job size
+ * Build capacity usage map from existing jobs.
+ * For each department, distributes the job's WELDING POINTS
+ * proportionally across the workdays that dept occupies.
+ *
+ * This gives an accurate per-week load per department.
  */
-function getDepartmentGap(points: number): number {
-    if (points >= 50) return 1; // Big Rock: 1 day gap
-    if (points >= 8) return 0.5; // Medium: 0.5 day gap
-    return 0; // Small: no gap
-}
-
-/**
- * Get week key for capacity tracking
- */
-function getWeekKey(date: Date): string {
-    const weekStart = startOfWeek(date, { weekStartsOn: 1 });
-    return format(weekStart, 'yyyy-MM-dd');
-}
-
-/**
- * Build capacity usage map from existing jobs
- */
-function buildCapacityMap(existingJobs: Job[]): Map<string, Map<Department, number>> {
-    const capacityMap = new Map<string, Map<Department, number>>();
+function buildCapacityMap(existingJobs: Job[]): CapacityMap {
+    const capacityMap: CapacityMap = new Map();
 
     for (const job of existingJobs) {
         if (!job.departmentSchedule) continue;
+        const points = Number(job.weldingPoints) || 0;
+        if (points <= 0) continue;
 
         for (const [deptKey, schedule] of Object.entries(job.departmentSchedule)) {
             const dept = deptKey as Department;
             const startDate = new Date(schedule.start);
             const endDate = new Date(schedule.end);
-            const points = Number(job.weldingPoints) || 0;
-            if (points <= 0) continue;
 
-            const weekDistribution = distributePointsByWorkday(startDate, endDate, points);
-            for (const [weekKey, weekPoints] of weekDistribution.entries()) {
+            // Each department contributes the full welding points to its capacity bucket
+            // (this is how the scheduler's computeWeeklyLoad works)
+            const weekDist = distributeLoadByWorkday(startDate, endDate, points);
+            for (const [weekKey, weekPoints] of weekDist.entries()) {
                 if (!capacityMap.has(weekKey)) {
                     capacityMap.set(weekKey, new Map());
                 }
-
                 const weekMap = capacityMap.get(weekKey)!;
-                const currentUsage = weekMap.get(dept) || 0;
-                weekMap.set(dept, currentUsage + weekPoints);
+                weekMap.set(dept, (weekMap.get(dept) || 0) + weekPoints);
             }
         }
     }
@@ -225,26 +285,26 @@ function buildCapacityMap(existingJobs: Job[]): Map<string, Map<Department, numb
 }
 
 /**
- * Find first available slot for a department with given capacity
+ * Find the first workday where a job's dept-load fits under the weekly capacity.
+ * Slides day-by-day until it finds a window where every week the job spans
+ * has room.
  */
 function findAvailableSlot(
     dept: Department,
     startDate: Date,
     points: number,
     duration: number,
-    capacityMap: Map<string, Map<Department, number>>,
+    capacityMap: CapacityMap,
     weeklyCapacity: number
 ): Date {
     let current = startOfDay(startDate);
-    while (isWeekend(current)) {
-        current = addDays(current, 1);
-    }
-    let attempts = 0;
-    const maxAttempts = 140; // Prevent infinite loop (~28 weeks of workdays)
+    while (isWeekend(current)) current = addDays(current, 1);
 
-    while (attempts < maxAttempts) {
+    const maxAttempts = 140; // ~28 weeks
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const endDate = getEndDateForDuration(current, duration);
-        const distribution = distributePointsByWorkday(current, endDate, points);
+        const distribution = distributeLoadByWorkday(current, endDate, points);
 
         let fits = true;
         for (const [weekKey, weekPoints] of distribution.entries()) {
@@ -258,48 +318,56 @@ function findAvailableSlot(
 
         if (fits) return current;
 
-        // Move to next workday
+        // Slide to next workday
         current = addDays(current, 1);
-        while (isWeekend(current)) {
-            current = addDays(current, 1);
-        }
-        attempts++;
+        while (isWeekend(current)) current = addDays(current, 1);
     }
 
-    // Fallback: return original date if no slot found
+    // Fallback: return original date
     return startDate;
 }
 
-/**
- * Calculate buffer for existing jobs
- */
-function calculateJobBuffers(existingJobs: Job[]): Map<string, number> {
-    const buffers = new Map<string, number>();
+// ─────────────────────────────────────────────────────────────
+// Job Buffer Calculation
+// ─────────────────────────────────────────────────────────────
+
+/** For each existing job, calculate how many days of buffer it has (due - scheduled end) */
+function calculateJobBuffers(existingJobs: Job[]): Map<string, { bufferDays: number; points: number }> {
+    const buffers = new Map<string, { bufferDays: number; points: number }>();
 
     for (const job of existingJobs) {
         if (!job.departmentSchedule || !job.dueDate) continue;
 
-        // Find latest scheduled end date
         let latestEnd: Date | null = null;
         for (const schedule of Object.values(job.departmentSchedule)) {
             const endDate = new Date(schedule.end);
-            if (!latestEnd || endDate > latestEnd) {
-                latestEnd = endDate;
-            }
+            if (!latestEnd || endDate > latestEnd) latestEnd = endDate;
         }
 
         if (latestEnd) {
             const dueDate = new Date(job.dueDate);
             const bufferDays = differenceInDays(dueDate, latestEnd);
-            buffers.set(job.id, bufferDays);
+            buffers.set(job.id, {
+                bufferDays,
+                points: Number(job.weldingPoints) || 0,
+            });
         }
     }
 
     return buffers;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Sequential Timeline Simulation
+// ─────────────────────────────────────────────────────────────
+
 /**
- * Simulate scheduling with capacity awareness
+ * Simulate scheduling a new quote through the 6-dept pipeline.
+ *
+ * IMPORTANT: Uses SEQUENTIAL scheduling (each dept completes before
+ * the next starts, plus department gap). This matches the actual
+ * scheduler behavior. The old overlapping (25%) timeline was
+ * misleadingly optimistic.
  */
 export async function simulateQuoteSchedule(
     input: QuoteInput,
@@ -307,43 +375,54 @@ export async function simulateQuoteSchedule(
 ): Promise<QuoteEstimate> {
     const pointsCalc = calculateQuotePoints(input);
     const totalPoints = pointsCalc.totalPoints;
+    const productType: ProductType = input.productType || 'FAB';
+    const gap = getDepartmentGap(totalPoints);
+
+    // Build capacity map from existing scheduled jobs
+    const capacityMap = buildCapacityMap(existingJobs);
 
     // Calculate urgency score
     let urgencyScore = 0;
     if (input.isREF) urgencyScore += 10;
-    if (totalPoints >= 50) urgencyScore += 10;
-
-    const departments: Department[] = [
-        'Engineering',
-        'Laser',
-        'Press Brake',
-        'Welding',
-        'Polishing',
-        'Assembly',
-    ];
+    if (totalPoints >= BIG_ROCK_THRESHOLD) urgencyScore += 10;
 
     const timeline: DepartmentTimeline[] = [];
     let currentDate = new Date(input.engineeringReadyDate);
 
-    // Overlapping timeline: next dept starts after ~20-25% of current dept completes
-    // This reflects reality where items flow through as they're completed
-    for (let i = 0; i < departments.length; i++) {
-        const dept = departments[i];
-        const duration = calculateDeptDuration(dept, totalPoints, 'FAB');
-        const startDate = new Date(currentDate);
-        const endDate = getEndDateForDuration(startDate, duration);
+    // Sequential scheduling: each dept finds its first available slot,
+    // then the next dept starts after this one ends + gap
+    for (let i = 0; i < DEPARTMENTS.length; i++) {
+        const dept = DEPARTMENTS[i];
+        const duration = calculateDeptDuration(dept, totalPoints, productType);
+
+        // Find earliest slot where this dept has capacity
+        const slotStart = findAvailableSlot(
+            dept, currentDate, totalPoints, duration, capacityMap, BASE_WEEKLY_CAPACITY
+        );
+        const endDate = getEndDateForDuration(slotStart, duration);
+
+        // Record weekly load for this dept leg
+        const weeklyLoad: Record<string, number> = {};
+        const dist = distributeLoadByWorkday(slotStart, endDate, totalPoints);
+        for (const [wk, pts] of dist.entries()) weeklyLoad[wk] = Math.round(pts);
 
         timeline.push({
             department: dept,
-            startDate,
+            startDate: slotStart,
             endDate,
             duration,
+            weeklyLoad,
         });
 
-        // Calculate overlap: next dept can start after ~25% of current dept
-        // Minimum overlap of 1 day for small jobs, more for larger jobs
-        const overlapDays = Math.max(1, Math.ceil(duration * 0.25));
-        currentDate = addWorkDays(startDate, overlapDays);
+        // "Reserve" this job's load in the capacity map for subsequent depts
+        for (const [wk, pts] of dist.entries()) {
+            if (!capacityMap.has(wk)) capacityMap.set(wk, new Map());
+            const weekMap = capacityMap.get(wk)!;
+            weekMap.set(dept, (weekMap.get(dept) || 0) + pts);
+        }
+
+        // Next dept starts after this dept ends + gap (sequential, not overlapping)
+        currentDate = addWorkDays(endDate, Math.ceil(gap));
     }
 
     const estimatedCompletion = timeline[timeline.length - 1]?.endDate || addDays(input.engineeringReadyDate, 30);
@@ -357,209 +436,297 @@ export async function simulateQuoteSchedule(
         estimatedCompletion,
         timeline,
         urgencyScore,
-        isBigRock: pointsCalc.totalPoints >= 50,
+        isBigRock: pointsCalc.totalPoints >= BIG_ROCK_THRESHOLD,
     };
 }
 
-/**
- * Advanced feasibility check with capacity analysis
- */
+// ─────────────────────────────────────────────────────────────
+// Advanced Feasibility Check — 3 Tiers
+// ─────────────────────────────────────────────────────────────
+
 export async function checkAdvancedFeasibility(
     input: QuoteInput,
     existingJobs: Job[]
 ): Promise<FeasibilityCheck> {
     const pointsCalc = calculateQuotePoints(input);
     const totalPoints = pointsCalc.totalPoints;
+    const productType: ProductType = input.productType || 'FAB';
     const targetDate = input.targetDate;
-
-    if (!targetDate) {
-        throw new Error('Target date required for feasibility check');
-    }
-
-    const departments: Department[] = [
-        'Engineering',
-        'Laser',
-        'Press Brake',
-        'Welding',
-        'Polishing',
-        'Assembly',
-    ];
+    if (!targetDate) throw new Error('Target date required for feasibility check');
 
     const gap = getDepartmentGap(totalPoints);
 
-    // Build capacity maps
-    const baseCapacityMap = buildCapacityMap(existingJobs);
-    const jobBuffers = calculateJobBuffers(existingJobs);
+    // ═══════════════════════════════════════════════════════════
+    // TIER 1: AS-IS — can the new job fit without changes?
+    // ═══════════════════════════════════════════════════════════
 
-    // Tier 1: As-Is Check
+    const baseCapacityMap = buildCapacityMap(existingJobs);
     let asIsDate = new Date(input.engineeringReadyDate);
     const asIsBottlenecks: string[] = [];
 
-    for (const dept of departments) {
-        const duration = calculateDeptDuration(dept, totalPoints, 'FAB');
+    for (const dept of DEPARTMENTS) {
+        const duration = calculateDeptDuration(dept, totalPoints, productType);
         const slotStart = findAvailableSlot(dept, asIsDate, totalPoints, duration, baseCapacityMap, BASE_WEEKLY_CAPACITY);
 
         if (slotStart > asIsDate) {
-            asIsBottlenecks.push(`${dept} delayed by ${differenceInDays(slotStart, asIsDate)} days`);
+            const delayDays = differenceInDays(slotStart, asIsDate);
+            asIsBottlenecks.push(`${dept} delayed by ${delayDays} days (capacity full)`);
         }
 
-        asIsDate = getEndDateForDuration(slotStart, duration);
-        asIsDate = addWorkDays(asIsDate, Math.ceil(gap));
+        const endDate = getEndDateForDuration(slotStart, duration);
+        asIsDate = addWorkDays(endDate, Math.ceil(gap));
     }
 
-    const asIsAchievable = asIsDate <= targetDate;
+    // asIsDate is now the projected completion under Tier 1
+    const asIsCompletion = asIsDate;
+    const asIsAchievable = asIsCompletion <= targetDate;
 
-    // Tier 2: With Moves Check
-    const jobsToMove: JobMovement[] = [];
+    // ═══════════════════════════════════════════════════════════
+    // TIER 2: WITH MOVES — free up capacity by pushing buffer jobs
+    // ═══════════════════════════════════════════════════════════
 
-    // Only consider jobs with future start dates and available buffer
-    // Focus on Engineering and Laser - moving later depts doesn't help new jobs entering system
+    const jobBuffers = calculateJobBuffers(existingJobs);
     const today = startOfDay(new Date());
+    const MOVE_DAYS = 7; // 1 week push
     const movableDepts: Department[] = ['Engineering', 'Laser'];
-    const MOVE_DAYS = 7; // How many workdays we propose to move jobs
+
+    // Find jobs that can be safely pushed
+    const jobsToMove: JobMovement[] = [];
+    let totalCapacityFreed = 0;
 
     for (const job of existingJobs) {
-        const buffer = jobBuffers.get(job.id);
-        // Only consider jobs where buffer >= move days (ensures they won't miss due date)
-        if (buffer && buffer >= MOVE_DAYS && job.departmentSchedule) {
-            // Prefer earliest departments first
-            for (const dept of movableDepts) {
-                const schedule = (job.departmentSchedule as any)[dept];
-                if (!schedule) continue;
+        const bufferInfo = jobBuffers.get(job.id);
+        if (!bufferInfo || bufferInfo.bufferDays < MOVE_DAYS || !job.departmentSchedule) continue;
 
-                const scheduleStart = new Date(schedule.start);
-                const proposedNewDate = addWorkDays(scheduleStart, MOVE_DAYS);
-                const dueDate = new Date(job.dueDate);
+        for (const dept of movableDepts) {
+            const schedule = (job.departmentSchedule as Record<string, { start: string; end: string }>)[dept];
+            if (!schedule) continue;
 
-                // Only include if: future date AND new date before due date
-                if (scheduleStart > today && proposedNewDate < dueDate) {
-                    jobsToMove.push({
-                        jobId: job.id,
-                        jobName: job.name,
-                        department: dept,
-                        originalDate: scheduleStart,
-                        newDate: proposedNewDate,
-                        dueDate: dueDate,
-                        bufferDays: buffer,
-                    });
-                    break;
+            const scheduleStart = new Date(schedule.start);
+            const proposedNewDate = addWorkDays(scheduleStart, MOVE_DAYS);
+            const dueDate = new Date(job.dueDate);
+
+            // Must be in the future and new date must still be before due date
+            if (scheduleStart > today && proposedNewDate < dueDate) {
+                jobsToMove.push({
+                    jobId: job.id,
+                    jobName: job.name,
+                    department: dept,
+                    originalDate: scheduleStart,
+                    newDate: proposedNewDate,
+                    dueDate,
+                    bufferDays: bufferInfo.bufferDays,
+                    pointsRelieved: bufferInfo.points,
+                });
+                totalCapacityFreed += bufferInfo.points;
+                break; // One move per job
+            }
+        }
+    }
+
+    // Build capacity map WITH moves applied (simulate the freed capacity)
+    let withMovesCompletion = asIsCompletion;
+    let withMovesAchievable = asIsAchievable;
+
+    if (jobsToMove.length > 0 && !asIsAchievable) {
+        // Clone the capacity map and reduce load for moved jobs
+        const movedCapacityMap: CapacityMap = new Map();
+        for (const [wk, deptMap] of baseCapacityMap.entries()) {
+            movedCapacityMap.set(wk, new Map(deptMap));
+        }
+
+        // Remove moved jobs' load from their original weeks
+        for (const move of jobsToMove) {
+            const job = existingJobs.find(j => j.id === move.jobId);
+            if (!job?.departmentSchedule) continue;
+
+            const schedule = (job.departmentSchedule as Record<string, { start: string; end: string }>)[move.department];
+            if (!schedule) continue;
+
+            const startDate = new Date(schedule.start);
+            const endDate = new Date(schedule.end);
+            const points = Number(job.weldingPoints) || 0;
+            const dist = distributeLoadByWorkday(startDate, endDate, points);
+
+            for (const [wk, pts] of dist.entries()) {
+                const weekMap = movedCapacityMap.get(wk);
+                if (weekMap) {
+                    const current = weekMap.get(move.department) || 0;
+                    weekMap.set(move.department, Math.max(0, current - pts));
                 }
             }
         }
-    }
 
-    // Calculate actual completion using overlapping timeline (same as displayed timeline)
-    let timelineCompletion = new Date(input.engineeringReadyDate);
-    for (let i = 0; i < departments.length; i++) {
-        const dept = departments[i];
-        const duration = calculateDeptDuration(dept, totalPoints, 'FAB');
-        const startDate = new Date(timelineCompletion);
-        const endDate = getEndDateForDuration(startDate, duration);
-
-        // Last department's end date is the completion
-        if (i === departments.length - 1) {
-            timelineCompletion = endDate;
-        } else {
-            // Next dept starts after ~25% of current
-            const overlapDays = Math.max(1, Math.ceil(duration * 0.25));
-            timelineCompletion = addWorkDays(startDate, overlapDays);
+        // Re-simulate with freed capacity
+        let moveDate = new Date(input.engineeringReadyDate);
+        for (const dept of DEPARTMENTS) {
+            const duration = calculateDeptDuration(dept, totalPoints, productType);
+            const slotStart = findAvailableSlot(dept, moveDate, totalPoints, duration, movedCapacityMap, BASE_WEEKLY_CAPACITY);
+            const endDate = getEndDateForDuration(slotStart, duration);
+            moveDate = addWorkDays(endDate, Math.ceil(gap));
         }
+
+        withMovesCompletion = moveDate;
+        withMovesAchievable = withMovesCompletion <= targetDate;
     }
 
-    // If we can move jobs, we assume some capacity freed up - but completion is still timeline-based
-    const withMovesAchievable = jobsToMove.length > 0 ? timelineCompletion <= targetDate : asIsAchievable;
-    const withMovesCompletionDate = timelineCompletion;
+    // ═══════════════════════════════════════════════════════════
+    // TIER 3: WITH OT — use increased weekly capacity
+    // ═══════════════════════════════════════════════════════════
 
-    // Tier 3: With OT Check
-    // OT means we work at 1000 pts/week instead of 850 pts/week
-    // This effectively reduces the duration by the ratio (850/1000 = 85%)
-    const OT_SPEED_FACTOR = BASE_WEEKLY_CAPACITY / OT_WEEKLY_CAPACITY; // 0.85
-
-    let otDate = new Date(input.engineeringReadyDate);
-    const otWeeks: string[] = [];
     let withOTAchievable = false;
-    let otNeeded = false;
+    let otCompletion: Date | null = null;
+    const otWeekDetails: OTWeekDetail[] = [];
+    let bestOTTier: 1 | 2 | 3 | 4 | null = null;
 
-    if (asIsAchievable || withMovesAchievable) {
-        // If Tier 1 or Tier 2 achieved it, no OT needed
-        withOTAchievable = true;
-        otNeeded = false;
-    } else {
-        // Calculate OT scenario - faster timeline due to higher capacity
-        otNeeded = true;
+    if (!asIsAchievable && !withMovesAchievable) {
+        // Try each OT tier from lowest to highest until one works
+        for (const otTier of OT_TIERS) {
+            let otDate = new Date(input.engineeringReadyDate);
+            const otCapacityMap = buildCapacityMap(existingJobs);
 
-        let otCurrentDate = new Date(input.engineeringReadyDate);
-        for (let i = 0; i < departments.length; i++) {
-            const dept = departments[i];
-            const baseDuration = calculateDeptDuration(dept, totalPoints, 'FAB');
-            // OT reduces duration (more work done per day)
-            const otDuration = Math.ceil(baseDuration * OT_SPEED_FACTOR);
+            // Apply moves first if any
+            if (jobsToMove.length > 0) {
+                for (const move of jobsToMove) {
+                    const job = existingJobs.find(j => j.id === move.jobId);
+                    if (!job?.departmentSchedule) continue;
+                    const schedule = (job.departmentSchedule as Record<string, { start: string; end: string }>)[move.department];
+                    if (!schedule) continue;
 
-            const startDate = new Date(otCurrentDate);
-            const endDate = getEndDateForDuration(startDate, otDuration);
+                    const startDate = new Date(schedule.start);
+                    const endDate = new Date(schedule.end);
+                    const points = Number(job.weldingPoints) || 0;
+                    const dist = distributeLoadByWorkday(startDate, endDate, points);
 
-            // Track which weeks need OT
-            const weekKey = getWeekKey(startDate);
-            if (!otWeeks.includes(weekKey)) {
-                otWeeks.push(weekKey);
+                    for (const [wk, pts] of dist.entries()) {
+                        const weekMap = otCapacityMap.get(wk);
+                        if (weekMap) {
+                            const current = weekMap.get(move.department) || 0;
+                            weekMap.set(move.department, Math.max(0, current - pts));
+                        }
+                    }
+                }
             }
 
-            // Last department's end date is the completion
-            if (i === departments.length - 1) {
-                otDate = endDate;
-            } else {
-                // Next dept starts after ~25% of current
-                const overlapDays = Math.max(1, Math.ceil(otDuration * 0.25));
-                otCurrentDate = addWorkDays(startDate, overlapDays);
+            // Simulate with OT capacity
+            for (const dept of DEPARTMENTS) {
+                const duration = calculateDeptDuration(dept, totalPoints, productType);
+                const slotStart = findAvailableSlot(
+                    dept, otDate, totalPoints, duration, otCapacityMap, otTier.weeklyCapacity
+                );
+                const endDate = getEndDateForDuration(slotStart, duration);
+
+                // Reserve capacity
+                const dist = distributeLoadByWorkday(slotStart, endDate, totalPoints);
+                for (const [wk, pts] of dist.entries()) {
+                    if (!otCapacityMap.has(wk)) otCapacityMap.set(wk, new Map());
+                    const weekMap = otCapacityMap.get(wk)!;
+                    weekMap.set(dept, (weekMap.get(dept) || 0) + pts);
+                }
+
+                otDate = addWorkDays(endDate, Math.ceil(gap));
+            }
+
+            if (otDate <= targetDate) {
+                withOTAchievable = true;
+                otCompletion = otDate;
+                bestOTTier = otTier.tier;
+
+                // Build OT week breakdown for this tier
+                // Identify which weeks actually needed OT (exceeded base 850)
+                for (const [wk, deptMap] of otCapacityMap.entries()) {
+                    for (const [dept, load] of deptMap.entries()) {
+                        if (load > BASE_WEEKLY_CAPACITY) {
+                            const excess = Math.round(load - BASE_WEEKLY_CAPACITY);
+                            otWeekDetails.push({
+                                weekKey: wk,
+                                department: dept as Department,
+                                currentLoad: Math.round(load),
+                                baseCapacity: BASE_WEEKLY_CAPACITY,
+                                excess,
+                                recommendedTier: otTier.tier,
+                                tierLabel: otTier.label,
+                                bonusPoints: otTier.bonusPoints,
+                                covered: excess <= otTier.bonusPoints,
+                            });
+                        }
+                    }
+                }
+                break; // Found the lowest tier that works
             }
         }
 
-        withOTAchievable = otDate <= targetDate;
+        // If no tier works, try Tier 4 anyway to show the best possible
+        if (!withOTAchievable) {
+            const maxTier = OT_TIERS[OT_TIERS.length - 1];
+            let otDate = new Date(input.engineeringReadyDate);
+            const otCapacityMap = buildCapacityMap(existingJobs);
+
+            for (const dept of DEPARTMENTS) {
+                const duration = calculateDeptDuration(dept, totalPoints, productType);
+                const slotStart = findAvailableSlot(
+                    dept, otDate, totalPoints, duration, otCapacityMap, maxTier.weeklyCapacity
+                );
+                const endDate = getEndDateForDuration(slotStart, duration);
+                otDate = addWorkDays(endDate, Math.ceil(gap));
+            }
+
+            otCompletion = otDate;
+            bestOTTier = 4;
+        }
     }
 
-    // Determine recommendation
+    // ═══════════════════════════════════════════════════════════
+    // Determine Recommendation
+    // ═══════════════════════════════════════════════════════════
+
     let recommendation: 'ACCEPT' | 'ACCEPT_WITH_MOVES' | 'ACCEPT_WITH_OT' | 'DECLINE';
     let explanation: string;
 
     if (asIsAchievable) {
         recommendation = 'ACCEPT';
-        explanation = `Can complete by ${format(asIsDate, 'MMM d, yyyy')} without any changes to existing schedule.`;
+        explanation = `Can complete by ${format(asIsCompletion, 'MMM d, yyyy')} without any changes to the existing schedule. No overtime required.`;
     } else if (withMovesAchievable) {
         recommendation = 'ACCEPT_WITH_MOVES';
-        explanation = `Can complete by ${format(timelineCompletion, 'MMM d, yyyy')} by moving ${jobsToMove.length} job(s) with available buffer.`;
-    } else if (withOTAchievable) {
+        explanation = `Can complete by ${format(withMovesCompletion, 'MMM d, yyyy')} by shifting ${jobsToMove.length} existing job(s) that have buffer. No overtime needed — simply reschedule ${jobsToMove.length} job(s) with available slack.`;
+    } else if (withOTAchievable && otCompletion) {
+        const tierInfo = OT_TIERS.find(t => t.tier === bestOTTier)!;
         recommendation = 'ACCEPT_WITH_OT';
-        explanation = `Can complete by ${format(otDate, 'MMM d, yyyy')} with overtime (15% faster).`;
+        explanation = `Can complete by ${format(otCompletion, 'MMM d, yyyy')} with ${tierInfo.label} overtime (${tierInfo.weekdayHours}${tierInfo.saturdayHours !== 'N/A' ? ` + Sat ${tierInfo.saturdayHours}` : ''}). adds +${tierInfo.bonusPoints}pts/week capacity.`;
     } else {
         recommendation = 'DECLINE';
-        explanation = `Cannot meet target date of ${format(targetDate, 'MMM d, yyyy')} even with moves and OT.`;
+        const bestDate = otCompletion ? format(otCompletion, 'MMM d, yyyy') : 'unknown';
+        explanation = `Cannot meet target date of ${format(targetDate, 'MMM d, yyyy')} even with job moves and max overtime (Tier 4). Earliest possible: ${bestDate}.`;
     }
 
     return {
         asIs: {
             achievable: asIsAchievable,
-            completionDate: asIsDate,
+            completionDate: asIsCompletion,
             bottlenecks: asIsBottlenecks,
         },
         withMoves: {
             achievable: withMovesAchievable,
-            completionDate: withMovesCompletionDate,
-            jobsToMove: jobsToMove.slice(0, 10), // Limit to first 10 for display
+            completionDate: withMovesCompletion,
+            jobsToMove: jobsToMove.slice(0, 10),
             totalJobsAffected: jobsToMove.length,
+            capacityFreed: totalCapacityFreed,
         },
         withOT: {
             achievable: withOTAchievable,
-            completionDate: otNeeded ? otDate : null,
-            otWeeks,
+            completionDate: otCompletion,
+            otWeeks: otWeekDetails,
+            recommendedTier: bestOTTier,
         },
         recommendation,
         explanation,
     };
 }
 
-/**
- * Simple feasibility check (backwards compatible)
- */
+// ─────────────────────────────────────────────────────────────
+// Simple Feasibility Check (backwards-compatible)
+// ─────────────────────────────────────────────────────────────
+
 export function checkTargetFeasibility(
     estimate: QuoteEstimate,
     targetDate: Date
