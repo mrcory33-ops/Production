@@ -1,7 +1,7 @@
 import { db } from './firebase';
 import { scheduleAllJobs, trackJobProgress } from './scheduler';
 import { collection, doc, writeBatch, getDocs, query, where, Timestamp } from 'firebase/firestore';
-import { Job } from '@/types';
+import { Job, ScheduleInsights } from '@/types';
 
 // Collection reference
 const jobsCollection = collection(db, 'jobs');
@@ -41,6 +41,7 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{
     completed: number;
     dueDateChanged: Job[];  // Jobs with due date changes needing reschedule
     ahead: Job[];           // Jobs that jumped ahead of schedule
+    insights: ScheduleInsights | null; // Schedule analysis from the pipeline
 }> => {
     const CHUNK_SIZE = 450; // Firestore batch limit is 500, keeping it safe
 
@@ -86,10 +87,13 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{
 
     // 3. Schedule NEW jobs only (with capacity awareness)
     let scheduledNewJobs: Job[] = [];
+    let scheduleInsights: ScheduleInsights | null = null;
     if (newJobs.length > 0) {
         console.log("Scheduling new jobs with capacity-aware algorithm...");
         const existingJobsArray = Array.from(existingJobsMap.values());
-        scheduledNewJobs = scheduleAllJobs(newJobs, existingJobsArray);
+        const result = scheduleAllJobs(newJobs, existingJobsArray);
+        scheduledNewJobs = result.jobs;
+        scheduleInsights = result.insights;
         addedCount = scheduledNewJobs.length;
     }
 
@@ -175,6 +179,7 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{
         updated: updatedCount,
         completed: completedCount,
         dueDateChanged: dueDateChangedJobs,
-        ahead: aheadJobs
+        ahead: aheadJobs,
+        insights: scheduleInsights
     };
 };

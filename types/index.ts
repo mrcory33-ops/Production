@@ -41,6 +41,7 @@ export interface Job {
     // Details
     partNumber: string; // PART
     customerPartAndName: string[]; // Combined PART_CUSTOMER + Master/Sub distinction
+    customerName?: string; // Name_Customer from XLSX (column M) — used for customer-specific scheduling rules
     description: string; // PART_DESCRIPTION
     notes: string; // USER_7
 
@@ -105,4 +106,54 @@ export interface WeeklyTarget {
     fabTarget: number;
     doorsTarget: number;
     harmonicTarget: number;
+}
+
+// ---- Schedule Insights (returned from pipeline alongside jobs) ----
+
+export interface LateJob {
+    jobId: string;
+    jobName: string;
+    salesOrder?: string;
+    dueDate: string;           // ISO date
+    estimatedCompletion: string; // ISO date — without OT
+    estimatedWithOT: string;    // ISO date — with Saturday OT
+    daysLate: number;
+    daysLateWithOT: number;
+    points: number;
+    bottleneckDept: string;     // Department causing the delay
+}
+
+export interface OverloadedWeek {
+    weekKey: string;         // e.g. "2026-W07"
+    weekStart: string;       // ISO date
+    department: string;
+    scheduledPoints: number;
+    capacity: number;        // 850
+    excess: number;
+    estimatedOTHours: number;
+    jobCount: number;
+}
+
+export interface MoveSuggestion {
+    type: 'work_order' | 'sales_order';
+    id: string;              // WO number or SO number
+    name: string;            // Job/project name
+    currentDueDate: string;  // ISO date
+    suggestedDueDate: string;// Moving to this date relieves pressure
+    pointsRelieved: number;
+    benefitDescription: string; // "Frees 120pts from Welding W07"
+    jobsAffected: string[];  // Job IDs in this sales order (for SO moves)
+}
+
+export interface ScheduleInsights {
+    lateJobs: LateJob[];
+    overloadedWeeks: OverloadedWeek[];
+    moveSuggestions: MoveSuggestion[];
+    summary: {
+        totalJobs: number;
+        onTimeJobs: number;
+        lateJobCount: number;
+        weeksRequiringOT: number;
+        totalExcessPoints: number;
+    };
 }

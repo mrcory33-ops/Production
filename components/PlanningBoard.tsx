@@ -3,17 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, query, where, getDocs, limit, doc, updateDoc, deleteDoc, writeBatch, onSnapshot, Timestamp, deleteField } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Job, Department } from '@/types';
+import { Job, Department, ScheduleInsights } from '@/types';
 import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/scheduler';
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, format, startOfDay, differenceInDays } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator, MessageSquareWarning } from 'lucide-react';
 import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
 import ExportModal from './export/ExportModal';
 import ScoringConfigPanel from './ScoringConfigPanel';
+import ScheduleInsightsPanel from './ScheduleInsightsPanel';
 import { calculateUrgencyScore } from '@/lib/scoring';
 
 
@@ -229,6 +230,8 @@ export default function PlanningBoard() {
     const [priorityListIdByDept, setPriorityListIdByDept] = useState<Record<string, string>>({});
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [isScoringConfigOpen, setIsScoringConfigOpen] = useState(false);
+    const [scheduleInsights, setScheduleInsights] = useState<ScheduleInsights | null>(null);
+    const [showInsights, setShowInsights] = useState(false);
 
     const columnWidth = useMemo(() => {
         const t = Math.min(1, Math.max(0, zoomLevel / ZOOM_STEPS));
@@ -461,7 +464,7 @@ export default function PlanningBoard() {
                     j.id === jobId ? { ...j, noGaps } : j
                 );
                 // Re-schedule all jobs to apply gap changes
-                return scheduleAllJobs(updated);
+                return scheduleAllJobs(updated).jobs;
             });
         } catch (error) {
             console.error('Failed to toggle noGaps:', error);
@@ -1067,6 +1070,23 @@ export default function PlanningBoard() {
                                 <Calculator size={16} />
                             </Link>
 
+                            <button
+                                onClick={async () => {
+                                    // Generate insights from current jobs
+                                    const { analyzeScheduleFromJobs } = await import('@/lib/scheduler');
+                                    const insights = analyzeScheduleFromJobs(jobs);
+                                    setScheduleInsights(insights);
+                                    setShowInsights(true);
+                                }}
+                                className={`p-1.5 rounded-lg border transition-all ${scheduleInsights && (scheduleInsights.lateJobs.length > 0 || scheduleInsights.overloadedWeeks.length > 0)
+                                    ? 'text-amber-600 hover:text-amber-800 hover:bg-amber-50 border-amber-200 bg-amber-50'
+                                    : 'text-slate-600 hover:text-black hover:bg-slate-50 border-transparent hover:border-slate-200'
+                                    }`}
+                                title="Schedule Insights"
+                            >
+                                <MessageSquareWarning size={16} />
+                            </button>
+
                             <button onClick={() => setIsExportModalOpen(true)} className="p-1.5 text-slate-600 hover:text-black hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 transition-all" title="Export">
                                 <FileDown size={16} />
                             </button>
@@ -1230,6 +1250,13 @@ export default function PlanningBoard() {
                 onClose={() => setIsScoringConfigOpen(false)}
                 onSave={handleScoringSave}
             />
+
+            {showInsights && scheduleInsights && (
+                <ScheduleInsightsPanel
+                    insights={scheduleInsights}
+                    onClose={() => setShowInsights(false)}
+                />
+            )}
         </div>
     );
 }

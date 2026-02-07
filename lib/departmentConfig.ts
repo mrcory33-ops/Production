@@ -93,6 +93,38 @@ export const PRODUCT_TYPE_ICONS: Record<ProductType, string> = {
   HARMONIC: '〰️'
 };
 
+// Customer-specific scheduling multipliers
+// outputMultiplier < 1 means workers produce LESS per hour (job takes longer)
+// engineeringMaxDays caps Engineering duration for pre-engineered items
+export interface CustomerMultiplier {
+  outputMultiplier: number;       // Applied to all depts except Engineering
+  engineeringMaxDays: number;     // Cap Engineering duration
+}
+
+export const CUSTOMER_MULTIPLIERS: Record<string, CustomerMultiplier> = {
+  'GERMFREE': { outputMultiplier: 0.8, engineeringMaxDays: 1 }
+};
+
+/**
+ * Look up customer multiplier by name (case-insensitive, partial match)
+ */
+export const getCustomerMultiplier = (customerName?: string): CustomerMultiplier | null => {
+  if (!customerName) return null;
+  const upper = customerName.toUpperCase().trim();
+  for (const [key, config] of Object.entries(CUSTOMER_MULTIPLIERS)) {
+    if (upper.includes(key)) return config;
+  }
+  return null;
+};
+
+// Batch efficiency discounts
+// When similar jobs are batched together, setup time is shared
+export const BATCH_EFFICIENCY = {
+  twoItems: 0.10,   // 10% discount for 2 batched items
+  threeOrMore: 0.15, // 15% discount for 3+ batched items
+  maxDiscount: 0.15  // Cap at 15%
+} as const;
+
 /**
  * Get the applicable worker pool for a job's product type
  */
@@ -117,7 +149,9 @@ export const calculateDeptDuration = (
   productType: ProductType,
   description?: string,
   jobName?: string,
-  requiresPainting?: boolean
+  requiresPainting?: boolean,
+  customerName?: string,
+  batchSize?: number
 ): number => {
   const config = DEPARTMENT_CONFIG[dept];
   if (!config || !points) return 0;
@@ -125,18 +159,43 @@ export const calculateDeptDuration = (
   const pool = getPoolForJob(dept, productType);
   if (!pool) return 0;
 
+  // =========================================================================
+  // BATCH EFFICIENCY — reduce effective points when jobs are batched
+  // =========================================================================
+  let effectivePoints = points;
+  if (batchSize && batchSize >= 2) {
+    const discount = batchSize >= 3 ? BATCH_EFFICIENCY.threeOrMore : BATCH_EFFICIENCY.twoItems;
+    effectivePoints = points * (1 - discount);
+  }
+
   // Effective workers for this job
   const effectiveWorkers = Math.min(pool.maxPerProject, pool.count);
 
   // Daily output for this job
-  const dailyOutput = effectiveWorkers * pool.outputPerDay;
+  let dailyOutput = effectiveWorkers * pool.outputPerDay;
 
-  // Base duration
-  let rawDays = points / dailyOutput;
+  // =========================================================================
+  // CUSTOMER MULTIPLIER — adjust output rate for specific customers
+  // =========================================================================
+  const custMultiplier = getCustomerMultiplier(customerName);
+  if (custMultiplier && dept !== 'Engineering') {
+    // outputMultiplier < 1 means workers produce less → job takes longer
+    dailyOutput *= custMultiplier.outputMultiplier;
+  }
+
+  // Base duration (using effective points after batch discount)
+  let rawDays = effectivePoints / dailyOutput;
 
   // Apply time multiplier (Assembly = 1.25x)
   if (config.timeMultiplier) {
     rawDays *= config.timeMultiplier;
+  }
+
+  // =========================================================================
+  // CUSTOMER ENGINEERING CAP
+  // =========================================================================
+  if (custMultiplier && dept === 'Engineering') {
+    rawDays = Math.min(rawDays, custMultiplier.engineeringMaxDays);
   }
 
   // Rule: Door leaf jobs (not frames) require at least 2 days in Welding

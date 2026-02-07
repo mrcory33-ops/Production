@@ -2,11 +2,12 @@
 
 import { useState, useCallback } from 'react';
 import { parseGlobalShopExport } from '@/lib/parser';
-import { Job } from '@/types';
-import { Upload, FileUp, AlertCircle, CheckCircle, ArrowLeft, Database } from 'lucide-react';
+import { Job, ScheduleInsights } from '@/types';
+import { Upload, FileUp, AlertCircle, CheckCircle, ArrowLeft, Database, MessageSquareWarning } from 'lucide-react';
 import Link from 'next/link';
 import clsx from 'clsx';
 import PaintingPrompt from '@/components/PaintingPrompt';
+import ScheduleInsightsPanel from '@/components/ScheduleInsightsPanel';
 
 export default function UploadPage() {
     const [dragActive, setDragActive] = useState(false);
@@ -15,6 +16,8 @@ export default function UploadPage() {
     const [loading, setLoading] = useState(false);
     const [showPaintingPrompt, setShowPaintingPrompt] = useState(false);
     const [jobsRequiringPainting, setJobsRequiringPainting] = useState<Set<string>>(new Set());
+    const [scheduleInsights, setScheduleInsights] = useState<ScheduleInsights | null>(null);
+    const [showInsights, setShowInsights] = useState(false);
 
     const handleFile = useCallback(async (file: File) => {
         setLoading(true);
@@ -96,6 +99,16 @@ export default function UploadPage() {
             }
 
             alert(summaryLines.join('\n'));
+
+            // Show insights panel if there are issues
+            if (stats.insights) {
+                setScheduleInsights(stats.insights);
+                const hasIssues = stats.insights.lateJobs.length > 0 || stats.insights.overloadedWeeks.length > 0;
+                if (hasIssues) {
+                    setShowInsights(true);
+                }
+            }
+
             setParsedJobs([]); // Clear after save
             setJobsRequiringPainting(new Set()); // Clear painting flags
         } catch (err) {
@@ -127,6 +140,33 @@ export default function UploadPage() {
 
     return (
         <div className="min-h-screen bg-grid bg-fixed p-8 relative">
+            {/* Schedule Insights Panel */}
+            {showInsights && scheduleInsights && (
+                <ScheduleInsightsPanel
+                    insights={scheduleInsights}
+                    onClose={() => setShowInsights(false)}
+                />
+            )}
+
+            {/* Insights Trigger Button (floating) */}
+            {scheduleInsights && !showInsights && (
+                <button
+                    onClick={() => setShowInsights(true)}
+                    className={`fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-xl shadow-xl transition-all hover:scale-105 active:scale-95 ${(scheduleInsights.lateJobs.length > 0 || scheduleInsights.overloadedWeeks.length > 0)
+                            ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/30 text-white'
+                            : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/30 text-white'
+                        }`}
+                >
+                    <MessageSquareWarning className="w-5 h-5" />
+                    <span className="text-sm font-bold">Schedule Insights</span>
+                    {scheduleInsights.summary.lateJobCount > 0 && (
+                        <span className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+                            {scheduleInsights.summary.lateJobCount}
+                        </span>
+                    )}
+                </button>
+            )}
+
             {/* Background Gradient */}
             <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-[100px] pointer-events-none" />
 

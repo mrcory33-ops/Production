@@ -29,7 +29,7 @@ export default function QuoteEstimatorPage() {
                     updatedAt: toDate(doc.data().updatedAt) || new Date(),
                     dueDate: toDate(doc.data().dueDate) || new Date(),
                     schedule: doc.data().schedule || {},
-                })) as Job[];
+                })) as unknown as Job[];
 
                 setJobs(jobsData);
             } catch (error) {

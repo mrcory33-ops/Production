@@ -1,4 +1,4 @@
-import { Job, Department, ProductType } from '@/types';
+import { Job, Department, ProductType, ScheduleInsights, LateJob, OverloadedWeek, MoveSuggestion } from '@/types';
 import { addDays, isSaturday, isSunday, subDays, startOfDay, isBefore, startOfWeek } from 'date-fns';
 import { DEPARTMENT_CONFIG, calculateDeptDuration } from './departmentConfig';
 import { calculateUrgencyScore } from './scoring';
@@ -8,7 +8,7 @@ import { BIG_ROCK_CONFIG } from './scoringConfig';
 export type SchedulingMode = 'IMPORT' | 'OPTIMIZE';
 
 // Configuration Constants
-const BUFFER_DAYS = 2; // Days before due date to finish Assembly
+const BUFFER_DAYS = 1; // Days before due date to finish Assembly
 const MAX_DEPTS_PER_DAY_PER_JOB = 2;
 const SMALL_JOB_THRESHOLD = 7; // Jobs < 7 points can have same-day dept transitions
 const BATCH_WEEK_STARTS_ON = 1; // Monday
@@ -732,9 +732,8 @@ export const reserveCapacity = (
         } else {
             deptStartDate = new Date(dayDate);
         }
-    }
+    };
 };
-
 
 /**
  * Calculates the number of work days needed for a job in a specific department.
@@ -746,9 +745,11 @@ export const calculateDuration = (
     productType: ProductType = 'FAB',
     description?: string,
     jobName?: string,
-    requiresPainting?: boolean
+    requiresPainting?: boolean,
+    customerName?: string,
+    batchSize?: number
 ): number => {
-    return calculateDeptDuration(dept, points, productType, description, jobName, requiresPainting);
+    return calculateDeptDuration(dept, points, productType, description, jobName, requiresPainting, customerName, batchSize);
 };
 
 const normalizeWorkStart = (date: Date, allowSaturday: boolean = false): Date => {
@@ -840,20 +841,23 @@ export const addWorkDays = (date: Date, days: number, allowSaturday: boolean = f
 
 /**
  * Calculate durations for all departments for a given job
+ * @param job - The job to calculate durations for
+ * @param batchSize - Optional batch size for efficiency discount
  */
-const calculateAllDurations = (job: Job): Record<Department, number> => {
+const calculateAllDurations = (job: Job, batchSize?: number): Record<Department, number> => {
     const points = job.weldingPoints || 0;
     const productType = job.productType || 'FAB';
     const hasRef = (job.description || '').toUpperCase().includes('REF');
+    const custName = job.customerName;
 
     return {
-        Engineering: calculateDuration(points, 'Engineering', productType, job.description, job.name, job.requiresPainting),
-        Laser: calculateDuration(points, 'Laser', productType, job.description, job.name, job.requiresPainting),
-        'Press Brake': calculateDuration(points, 'Press Brake', productType, job.description, job.name, job.requiresPainting),
-        Welding: calculateDuration(points, 'Welding', productType, job.description, job.name, job.requiresPainting),
-        Polishing: calculateDuration(points, 'Polishing', productType, job.description, job.name, job.requiresPainting),
+        Engineering: calculateDuration(points, 'Engineering', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
+        Laser: calculateDuration(points, 'Laser', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
+        'Press Brake': calculateDuration(points, 'Press Brake', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
+        Welding: calculateDuration(points, 'Welding', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
+        Polishing: calculateDuration(points, 'Polishing', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
         Assembly: Math.max(
-            calculateDuration(points, 'Assembly', productType, job.description, job.name, job.requiresPainting),
+            calculateDuration(points, 'Assembly', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
             hasRef ? 4 : 0
         )
     };
@@ -887,46 +891,7 @@ export const scheduleJobs = (jobs: Job[], mode: SchedulingMode = 'IMPORT'): Job[
  * with high priority (scheduled first, most overdue jobs get priority)
  */
 const scheduleJobsImportMode = (jobs: Job[]): Job[] => {
-    const buckets = initBuckets(
-        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-        new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
-    );
-
-    // Separate overdue vs on-time jobs
-    const overdueJobs = jobs.filter(j => isJobOverdue(j));
-    const onTimeJobs = jobs.filter(j => !isJobOverdue(j));
-
-    // Sort overdue: most days overdue first, then by size (largest first)
-    overdueJobs.sort((a, b) => {
-        const aOverdue = getDaysOverdue(a);
-        const bOverdue = getDaysOverdue(b);
-        if (aOverdue !== bOverdue) return bOverdue - aOverdue; // Most overdue first
-        return (b.weldingPoints || 0) - (a.weldingPoints || 0);
-    });
-
-    // Sort on-time: by due date (earliest first), then by size (largest first)
-    onTimeJobs.sort((a, b) => {
-        const aDue = new Date(a.dueDate).getTime();
-        const bDue = new Date(b.dueDate).getTime();
-        if (aDue !== bDue) return aDue - bDue;
-        return (b.weldingPoints || 0) - (a.weldingPoints || 0);
-    });
-
-    const scheduledJobs: Job[] = [];
-
-    // 1. Schedule OVERDUE jobs FIRST (forward from today)
-    for (const job of overdueJobs) {
-        const scheduled = scheduleForwardFromToday(job, buckets);
-        scheduledJobs.push(scheduled);
-    }
-
-    // 2. Schedule ON-TIME jobs (backward from due date)
-    for (const job of onTimeJobs) {
-        const scheduled = scheduleBackwardFromDue(job, buckets);
-        scheduledJobs.push(scheduled);
-    }
-
-    return scheduledJobs;
+    return schedulePipeline(jobs).jobs;
 };
 
 /**
@@ -976,13 +941,13 @@ const scheduleJobsOptimizeMode = (jobs: Job[]): Job[] => {
 
     // Phase 1: Schedule big rocks first (priority)
     for (const job of bigRocks) {
-        const scheduled = scheduleBackwardFromDue(job, buckets);
+        const scheduled = scheduleBackwardFromDue(job, buckets, scheduledJobs);
         scheduledJobs.push(scheduled);
     }
 
     // Phase 2: Fill remaining capacity with smaller jobs
     for (const job of orderedSmallerJobs) {
-        const scheduled = scheduleBackwardFromDue(job, buckets);
+        const scheduled = scheduleBackwardFromDue(job, buckets, scheduledJobs);
         scheduledJobs.push(scheduled);
     }
 
@@ -1289,14 +1254,21 @@ const reserveDepartmentCapacity = (
 /**
  * Schedule a job backward from its due date
  * Assembly finishes on (or just before) due date, then work backwards through departments
+ * 
+ * Three-tier capacity resolution:
+ * Tier 1: Shift backward (up to 60 attempts)
+ * Tier 2: Today-floor — never schedule remaining depts before today
+ * Tier 3: Forward-scan — find first available slot from today
  */
 const scheduleBackwardFromDue = (
     job: Job,
-    buckets: CapacityBuckets
+    buckets: CapacityBuckets,
+    scheduledJobs?: Job[],
+    batchSize?: number
 ): Job => {
     const dueDate = normalizeWorkEnd(new Date(job.dueDate));
     const today = normalizeWorkStart(new Date());
-    const durations = calculateAllDurations(job);
+    const durations = calculateAllDurations(job, batchSize);
     const productType = job.productType || 'FAB';
 
     // Determine which departments to schedule (only remaining if job is in progress)
@@ -1307,8 +1279,6 @@ const scheduleBackwardFromDue = (
         ? DEPARTMENTS.slice(currentDeptIndex)
         : DEPARTMENTS;
 
-
-
     const departmentSchedule: Record<string, { start: string; end: string }> = {};
     const scheduledDepartmentByDate: Record<string, Department> = {};
     let hasConflict = false;
@@ -1316,6 +1286,7 @@ const scheduleBackwardFromDue = (
 
     // Start from the end (Assembly) and work backwards
     let currentEnd = new Date(dueDate);
+    let hitTodayFloor = false;
 
     // Schedule each department backwards
     for (let i = remainingDepts.length - 1; i >= 0; i--) {
@@ -1328,40 +1299,108 @@ const scheduleBackwardFromDue = (
         let deptStart = subtractWorkDays(currentEnd, Math.max(duration - 1, 0));
         let deptEnd = new Date(currentEnd);
 
-        // Check if this slot has capacity
-        let attempts = 0;
-        const maxAttempts = 60; // Try up to 60 days earlier
+        // =====================================================================
+        // BIDIRECTIONAL CAPACITY SEARCH
+        // Try ideal position first, then alternate forward/backward to find
+        // the closest available slot. This minimizes inter-department gaps.
+        // Forward bounded by previous dept's end, backward bounded by today.
+        // =====================================================================
+        const maxSearchRadius = 30; // Max work days to search in each direction
+        let foundSlot = false;
 
+        // Compute the forward bound: this dept cannot end AFTER the next dept's start
+        // (the next dept = the one already scheduled, i+1 in remainingDepts since we go in reverse)
+        // For the last dept (Assembly, i = remainingDepts.length - 1), the bound is the due date
+        const nextDeptIndex = i + 1;
+        const forwardBound = nextDeptIndex < remainingDepts.length
+            ? (() => {
+                const nextDept = remainingDepts[nextDeptIndex];
+                const nextSchedule = departmentSchedule[nextDept];
+                if (nextSchedule) {
+                    // This dept's end must be before the next dept's start
+                    return subtractWorkDays(new Date(nextSchedule.start), 1);
+                }
+                return new Date(dueDate);
+            })()
+            : new Date(dueDate);
 
-
-        while (attempts < maxAttempts) {
+        // Try ideal position first
+        {
             const capacityOk = canFitDepartment(dept, deptStart, deptEnd, duration, job.weldingPoints || 0, buckets, productType);
             const limitOk = !exceedsDailyDeptLimit(deptStart, deptEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
-            if (capacityOk && limitOk) break;
-
-            // Shift this department block earlier by 1 work day
-            deptStart = subtractWorkDays(deptStart, 1);
-            deptEnd = subtractWorkDays(deptEnd, 1);
-            attempts++;
+            if (capacityOk && limitOk) {
+                foundSlot = true;
+            }
         }
 
-        // Check if we had to push before today
-        if (isBefore(deptStart, today)) {
-            hasConflict = true;
+        // Alternate forward/backward from ideal
+        if (!foundSlot) {
+            const idealStart = new Date(deptStart);
+            const idealEnd = new Date(deptEnd);
+
+            for (let offset = 1; offset <= maxSearchRadius && !foundSlot; offset++) {
+                // Try FORWARD first (toward due date — keeps departments tight)
+                const fwdStart = addWorkDays(idealStart, offset);
+                const fwdEnd = addWorkDays(fwdStart, Math.max(duration - 1, 0));
+
+                // Forward bound: don't overlap into the next department
+                if (!isBefore(forwardBound, fwdEnd)) {
+                    const fwdCapOk = canFitDepartment(dept, fwdStart, fwdEnd, duration, job.weldingPoints || 0, buckets, productType);
+                    const fwdLimOk = !exceedsDailyDeptLimit(fwdStart, fwdEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
+                    if (fwdCapOk && fwdLimOk) {
+                        deptStart = fwdStart;
+                        deptEnd = fwdEnd;
+                        foundSlot = true;
+                        break;
+                    }
+                }
+
+                // Try BACKWARD (away from due date)
+                const bwdStart = subtractWorkDays(idealStart, offset);
+                const bwdEnd = subtractWorkDays(idealEnd, offset);
+
+                // Backward bound: don't go before today
+                if (!isBefore(bwdStart, today)) {
+                    const bwdCapOk = canFitDepartment(dept, bwdStart, bwdEnd, duration, job.weldingPoints || 0, buckets, productType);
+                    const bwdLimOk = !exceedsDailyDeptLimit(bwdStart, bwdEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
+                    if (bwdCapOk && bwdLimOk) {
+                        deptStart = bwdStart;
+                        deptEnd = bwdEnd;
+                        foundSlot = true;
+                        break;
+                    }
+                } else {
+                    // We've hit the today floor going backward — if forward also exhausted, stop
+                    hitTodayFloor = true;
+                }
+            }
         }
 
-        const capacityOk = canFitDepartment(dept, deptStart, deptEnd, duration, job.weldingPoints || 0, buckets, productType);
-        const limitOk = !exceedsDailyDeptLimit(deptStart, deptEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
-
-        if (!limitOk) {
+        // FALLBACK: If bidirectional search failed, do a forward scan from today
+        if (!foundSlot) {
             hasConflict = true;
+            deptStart = new Date(today);
+            deptEnd = addWorkDays(deptStart, Math.max(duration - 1, 0));
+
+            for (let fwd = 0; fwd < 60; fwd++) {
+                const capOk = canFitDepartment(dept, deptStart, deptEnd, duration, job.weldingPoints || 0, buckets, productType);
+                const limOk = !exceedsDailyDeptLimit(deptStart, deptEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
+                if (capOk && limOk) {
+                    foundSlot = true;
+                    break;
+                }
+                deptStart = addWorkDays(deptStart, 1);
+                deptEnd = addWorkDays(deptStart, Math.max(duration - 1, 0));
+            }
         }
 
         // Reserve capacity for this department
-        if (capacityOk && limitOk) {
+        if (foundSlot) {
             reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
         } else {
-            hasConflict = true; // Couldn't find capacity even after shifting
+            hasConflict = true;
+            // Still reserve at best-effort position to prevent infinite stacking
+            reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
         }
 
         // Record the schedule
@@ -1380,26 +1419,109 @@ const scheduleBackwardFromDue = (
         }
 
         // Next department (going backwards) - gap depends on job size
-        // Small (≤7 pts) = 0 gap, Medium (8-49) = 1/2 day, Big Rock (≥50) = 1 day
         const points = job.weldingPoints || 0;
         let gapDays = 0;
-        if (!job.noGaps) { // Respect no-gaps override
+        if (!job.noGaps) {
             if (points >= BIG_ROCK_CONFIG.threshold) {
-                gapDays = 1; // Big rock: 1 day gap
+                gapDays = 1;
             } else if (points > SMALL_JOB_THRESHOLD) {
-                gapDays = 0.5; // Medium: 1/2 day gap
+                gapDays = 0.5;
             }
         }
-        // else: Small job - no gap (same day OK)
 
-        if (gapDays > 0) {
+        if (hitTodayFloor) {
+            // If we hit the today floor, all subsequent depts (going backward = earlier in flow)
+            // must also be scheduled forward from where this one ends
+            currentEnd = new Date(deptStart); // For backward iteration, this becomes the "before" boundary
+        } else if (gapDays > 0) {
             currentEnd = subtractWorkDays(deptStart, gapDays);
         } else {
             currentEnd = new Date(deptStart);
         }
     }
 
-    // The overall start date is the first department's start
+    // =========================================================================
+    // POST-PROCESSING: If we hit the today floor, the backward-scheduled depts
+    // may be out of order. Re-sort them forward from today to ensure sequential flow.
+    // =========================================================================
+    if (hitTodayFloor) {
+        // Re-schedule all departments forward from today to ensure correct ordering
+        let forwardCursor = new Date(today);
+        const reorderedSchedule: Record<string, { start: string; end: string }> = {};
+        const reorderedByDate: Record<string, Department> = {};
+        const fwdJobDayCounts: Record<string, number> = {};
+
+        for (const dept of remainingDepts) {
+            const duration = Math.ceil(durations[dept] || 0);
+            if (duration <= 0) continue;
+
+            // Skip weekends
+            while (isSaturday(forwardCursor) || isSunday(forwardCursor)) {
+                forwardCursor = addDays(forwardCursor, 1);
+            }
+
+            let deptStart = new Date(forwardCursor);
+            let deptEnd = addWorkDays(deptStart, Math.max(duration - 1, 0));
+
+            // Find capacity slot going forward
+            let fwdAttempts = 0;
+            while (fwdAttempts < 60) {
+                const capOk = canFitDepartment(dept, deptStart, deptEnd, duration, job.weldingPoints || 0, buckets, productType);
+                const limOk = !exceedsDailyDeptLimit(deptStart, deptEnd, fwdJobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
+                if (capOk && limOk) break;
+                deptStart = addWorkDays(deptStart, 1);
+                deptEnd = addWorkDays(deptStart, Math.max(duration - 1, 0));
+                fwdAttempts++;
+            }
+
+            // Reserve
+            const capOk = canFitDepartment(dept, deptStart, deptEnd, duration, job.weldingPoints || 0, buckets, productType);
+            const limOk = !exceedsDailyDeptLimit(deptStart, deptEnd, fwdJobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
+            if (capOk && limOk) {
+                reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
+            }
+
+            reorderedSchedule[dept] = {
+                start: deptStart.toISOString(),
+                end: deptEnd.toISOString()
+            };
+            addDeptToDayCounts(deptStart, deptEnd, fwdJobDayCounts);
+
+            let dc = new Date(deptStart);
+            while (dc <= deptEnd) {
+                const dk = dc.toISOString().split('T')[0];
+                reorderedByDate[dk] = dept;
+                dc = addDays(dc, 1);
+            }
+
+            // Next dept starts after gap
+            const pts = job.weldingPoints || 0;
+            let gap = 0;
+            if (!job.noGaps) {
+                if (pts >= BIG_ROCK_CONFIG.threshold) gap = 1;
+                else if (pts > SMALL_JOB_THRESHOLD) gap = 0.5;
+            }
+            forwardCursor = addWorkDays(deptEnd, gap + 1);
+        }
+
+        // Use the forward-scheduled result
+        const firstDept = remainingDepts[0];
+        const scheduledStartDate = reorderedSchedule[firstDept]
+            ? new Date(reorderedSchedule[firstDept].start)
+            : today;
+
+        return {
+            ...job,
+            scheduledStartDate,
+            isOverdue: false, // Not overdue — just capacity-constrained
+            departmentSchedule: reorderedSchedule,
+            scheduledDepartmentByDate: reorderedByDate,
+            schedulingConflict: true,
+            progressStatus: 'ON_TRACK'
+        };
+    }
+
+    // Normal backward-scheduled result (no floor hit)
     const firstDept = remainingDepts[0];
     const scheduledStartDate = departmentSchedule[firstDept]
         ? new Date(departmentSchedule[firstDept].start)
@@ -1589,86 +1711,689 @@ const assignScheduleFromStart = (
     };
 };
 
-/**
- * Unified Backward Scheduler - All jobs scheduled from due date backwards
- * Priority: Due Date (ASC), then Size (DESC)
- */
-export const scheduleAllJobs = (jobs: Job[], existingJobs: Job[] = []): Job[] => {
-    console.log('🔥 NEW SCHEDULER RUNNING - Backward from Due Date Algorithm');
-    console.log(`Scheduling ${jobs.length} jobs...`);
+// ============================================================================
+// 4-PHASE WEEKLY SCHEDULING PIPELINE (v2.0)
+// See docs/SCHEDULING_ENGINE.md for full design documentation
+// ============================================================================
 
-    // Initialize capacity buckets for next 120 days
-    const today = startOfDay(new Date());
-    const endDate = addDays(today, 120);
-    const buckets = initBuckets(today, endDate);
+const WEEKLY_TARGET = 850;
+const FROZEN_WEEKS = 2;
 
-    // Reserve capacity for existing scheduled jobs (if preserving)
-    for (const existingJob of existingJobs) {
-        if (existingJob.scheduledStartDate && existingJob.departmentSchedule) {
-            reserveCapacity(existingJob, existingJob.scheduledStartDate, buckets);
+// ---- Phase 1 Helper: Place a single job backward from due date (NO capacity) ----
+
+const placeIdeal = (job: Job, batchSize?: number): Job => {
+    const dueDate = normalizeWorkEnd(new Date(job.dueDate));
+    const today = normalizeWorkStart(new Date());
+    const durations = calculateAllDurations(job, batchSize);
+
+    const currentDeptIndex = job.currentDepartment
+        ? DEPARTMENTS.indexOf(job.currentDepartment as Department)
+        : 0;
+    const remainingDepts = currentDeptIndex >= 0
+        ? DEPARTMENTS.slice(currentDeptIndex)
+        : DEPARTMENTS;
+
+    const departmentSchedule: Record<string, { start: string; end: string }> = {};
+    const jobDayCounts: Record<string, number> = {};
+
+    // Start from Assembly end (due date minus buffer)
+    let currentEnd = subtractWorkDays(dueDate, BUFFER_DAYS);
+
+    // Schedule each department backwards — NO capacity checking
+    for (let i = remainingDepts.length - 1; i >= 0; i--) {
+        const dept = remainingDepts[i];
+        const duration = Math.ceil(durations[dept] || 0);
+        if (duration <= 0) continue;
+
+        let deptStart = subtractWorkDays(currentEnd, Math.max(duration - 1, 0));
+        let deptEnd = new Date(currentEnd);
+
+        // Respect daily dept limit for the job itself (max 2 depts per day)
+        while (exceedsDailyDeptLimit(deptStart, deptEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB)) {
+            deptStart = subtractWorkDays(deptStart, 1);
+            deptEnd = subtractWorkDays(deptEnd, 1);
+        }
+
+        departmentSchedule[dept] = {
+            start: deptStart.toISOString(),
+            end: deptEnd.toISOString()
+        };
+        addDeptToDayCounts(deptStart, deptEnd, jobDayCounts);
+
+        // Next department gap
+        const points = job.weldingPoints || 0;
+        let gapDays = 0;
+        if (!job.noGaps) {
+            if (points >= BIG_ROCK_CONFIG.threshold) gapDays = 1;
+            else if (points > SMALL_JOB_THRESHOLD) gapDays = 0.5;
+        }
+
+        currentEnd = gapDays > 0
+            ? subtractWorkDays(deptStart, gapDays)
+            : new Date(deptStart);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // TODAY FLOOR: If any department starts before today, shift
+    // the entire job forward so earliest dept starts today.
+    // This means the job may finish AFTER its due date — that's OK,
+    // Phase 4 will flag it as a conflict.
+    // ═══════════════════════════════════════════════════════════
+    const allStarts = Object.values(departmentSchedule).map(s => new Date(s.start));
+    const earliestStart = allStarts.length > 0
+        ? new Date(Math.min(...allStarts.map(d => d.getTime())))
+        : today;
+
+    if (isBefore(earliestStart, today)) {
+        // Calculate how many work days to shift forward
+        let shiftDays = 0;
+        let cursor = new Date(earliestStart);
+        while (isBefore(cursor, today)) {
+            if (!isSaturday(cursor) && !isSunday(cursor)) shiftDays++;
+            cursor = addDays(cursor, 1);
+        }
+
+        if (shiftDays > 0) {
+            // Shift ALL departments forward by shiftDays
+            for (const [dept, sched] of Object.entries(departmentSchedule)) {
+                const newStart = addWorkDays(new Date(sched.start), shiftDays);
+                const newEnd = addWorkDays(new Date(sched.end), shiftDays);
+                departmentSchedule[dept] = {
+                    start: newStart.toISOString(),
+                    end: newEnd.toISOString()
+                };
+            }
         }
     }
 
-    // Sort ALL jobs: Score DESC (Primary), then Due Date ASC (Secondary)
-    // First, populate scores
-    jobs.forEach(job => {
+    const firstDept = remainingDepts[0];
+    const scheduledStartDate = departmentSchedule[firstDept]
+        ? new Date(departmentSchedule[firstDept].start)
+        : today;
+
+    // Check if we'll miss the due date after clamping
+    const allEnds = Object.values(departmentSchedule).map(s => new Date(s.end));
+    const latestEnd = allEnds.length > 0
+        ? new Date(Math.max(...allEnds.map(d => d.getTime())))
+        : today;
+    const willMissDueDate = isBefore(dueDate, latestEnd);
+
+    return {
+        ...job,
+        scheduledStartDate,
+        isOverdue: false,
+        departmentSchedule,
+        schedulingConflict: willMissDueDate,
+        progressStatus: willMissDueDate ? 'SLIPPING' : 'ON_TRACK'
+    };
+};
+
+// ---- Phase 2: Weekly Capacity Audit ----
+
+interface WeekDeptLoad {
+    total: number;
+    bigRockPts: number;
+    smallRockPts: number;
+    contributions: { jobId: string; pts: number }[];
+}
+
+type WeeklyCapacityMap = Record<string, Record<string, WeekDeptLoad>>;
+
+const computeWeeklyLoad = (jobs: Job[]): WeeklyCapacityMap => {
+    const capacity: WeeklyCapacityMap = {};
+
+    for (const job of jobs) {
+        if (!job.departmentSchedule) continue;
+        const points = job.weldingPoints || 0;
+        const isBigRock = points >= BIG_ROCK_CONFIG.threshold;
+
+        for (const [dept, schedule] of Object.entries(job.departmentSchedule)) {
+            const start = new Date(schedule.start);
+            const end = new Date(schedule.end);
+
+            // Count total work days for this department span
+            let totalWorkDays = 0;
+            let cursor = new Date(start);
+            while (cursor <= end) {
+                if (!isSaturday(cursor) && !isSunday(cursor)) totalWorkDays++;
+                cursor = addDays(cursor, 1);
+            }
+            totalWorkDays = Math.max(totalWorkDays, 1);
+            const dailyLoad = points / totalWorkDays;
+
+            // Distribute points across weeks proportionally
+            const weekContribs: Record<string, number> = {};
+            cursor = new Date(start);
+            while (cursor <= end) {
+                if (!isSaturday(cursor) && !isSunday(cursor)) {
+                    const wk = getWeekKey(cursor);
+                    weekContribs[wk] = (weekContribs[wk] || 0) + dailyLoad;
+                }
+                cursor = addDays(cursor, 1);
+            }
+
+            for (const [wk, pts] of Object.entries(weekContribs)) {
+                if (!capacity[wk]) capacity[wk] = {};
+                if (!capacity[wk][dept]) {
+                    capacity[wk][dept] = { total: 0, bigRockPts: 0, smallRockPts: 0, contributions: [] };
+                }
+                capacity[wk][dept].total += pts;
+                if (isBigRock) capacity[wk][dept].bigRockPts += pts;
+                else capacity[wk][dept].smallRockPts += pts;
+                capacity[wk][dept].contributions.push({ jobId: job.id, pts });
+            }
+        }
+    }
+
+    return capacity;
+};
+
+// ---- Phase 3 Helpers ----
+
+/** Calculate FORWARD slack: work days between last dept end and due date.
+ *  This tells us how far the job can be pushed LATER without missing its deadline. */
+const getJobForwardSlack = (job: Job): number => {
+    if (!job.departmentSchedule || job.isOverdue) return 0;
+
+    const dueDate = new Date(job.dueDate);
+    const allEnds = Object.values(job.departmentSchedule).map(s => new Date(s.end));
+    if (allEnds.length === 0) return 0;
+    const latestEnd = new Date(Math.max(...allEnds.map(d => d.getTime())));
+
+    // Count work days between latest end and due date
+    let slack = 0;
+    let cursor = addDays(latestEnd, 1);
+    while (isBefore(cursor, dueDate)) {
+        if (!isSaturday(cursor) && !isSunday(cursor)) slack++;
+        cursor = addDays(cursor, 1);
+    }
+    return slack;
+};
+
+// ---- Phase 3: Shift Helper ----
+
+/** Shift all departments of a job by N work days (positive = earlier, negative = later) */
+const shiftJobSchedule = (job: Job, shiftWorkDays: number): Job => {
+    if (!job.departmentSchedule || shiftWorkDays === 0) return job;
+
+    const newSchedule: Record<string, { start: string; end: string }> = {};
+
+    for (const [dept, schedule] of Object.entries(job.departmentSchedule)) {
+        const start = new Date(schedule.start);
+        const end = new Date(schedule.end);
+
+        const newStart = shiftWorkDays > 0
+            ? subtractWorkDays(start, shiftWorkDays)
+            : addWorkDays(start, Math.abs(shiftWorkDays));
+        const newEnd = shiftWorkDays > 0
+            ? subtractWorkDays(end, shiftWorkDays)
+            : addWorkDays(end, Math.abs(shiftWorkDays));
+
+        newSchedule[dept] = { start: newStart.toISOString(), end: newEnd.toISOString() };
+    }
+
+    const allStarts = Object.values(newSchedule).map(s => new Date(s.start));
+    const scheduledStartDate = allStarts.length > 0
+        ? new Date(Math.min(...allStarts.map(d => d.getTime())))
+        : job.scheduledStartDate;
+
+    return { ...job, departmentSchedule: newSchedule, scheduledStartDate };
+};
+
+// ---- Phase 3: Compression ----
+// Strategy: Push flexible jobs LATER (toward their due date) to free up
+// overloaded near-term weeks. Small jobs are moved first since they're
+// easier to shift without disrupting the schedule.
+
+const compressSchedule = (jobs: Job[]): Job[] => {
+    const today = normalizeWorkStart(new Date());
+    const jobMap = new Map<string, Job>();
+    for (const job of jobs) jobMap.set(job.id, { ...job });
+
+    // Iterative compression: up to 10 passes
+    for (let pass = 0; pass < 10; pass++) {
+        const currentJobs = Array.from(jobMap.values());
+        const weeklyLoad = computeWeeklyLoad(currentJobs);
+
+        // Find overloaded week-dept pairs
+        const overloaded: { weekKey: string; dept: string; excess: number }[] = [];
+        for (const [wk, depts] of Object.entries(weeklyLoad)) {
+            for (const [dept, load] of Object.entries(depts)) {
+                if (load.total > WEEKLY_TARGET) {
+                    overloaded.push({ weekKey: wk, dept, excess: load.total - WEEKLY_TARGET });
+                }
+            }
+        }
+
+        if (overloaded.length === 0) {
+            console.log(`[SCHEDULER] Phase 3: Balanced after ${pass + 1} pass(es)`);
+            break;
+        }
+
+        overloaded.sort((a, b) => b.excess - a.excess);
+        let movedAny = false;
+
+        for (const { weekKey, dept } of overloaded) {
+            const load = weeklyLoad[weekKey]?.[dept];
+            if (!load || load.total <= WEEKLY_TARGET) continue;
+
+            // Find moveable jobs: most FORWARD SLACK first, smallest jobs first
+            const contributors = load.contributions
+                .map(c => {
+                    const j = jobMap.get(c.jobId)!;
+                    return { job: j, pts: c.pts, fwdSlack: j ? getJobForwardSlack(j) : 0, points: j?.weldingPoints || 0 };
+                })
+                .filter(c => c.job && c.fwdSlack >= 3 && !c.job.isOverdue)
+                .sort((a, b) => {
+                    if (b.fwdSlack !== a.fwdSlack) return b.fwdSlack - a.fwdSlack;
+                    return a.points - b.points;
+                });
+
+            for (const { job: candidate, pts } of contributors) {
+                if (!candidate) continue;
+                const currentLoad = weeklyLoad[weekKey]?.[dept]?.total || 0;
+                if (currentLoad <= WEEKLY_TARGET) break;
+
+                // Try shifting 5, 3, or 1 work days LATER (toward due date)
+                let shifted: Job | null = null;
+                for (const tryDays of [5, 3, 1]) {
+                    const attempt = shiftJobSchedule(candidate, -tryDays);
+                    const newEnds = Object.values(attempt.departmentSchedule || {}).map(s => new Date(s.end));
+                    const latestNew = newEnds.length > 0 ? new Date(Math.max(...newEnds.map(d => d.getTime()))) : today;
+                    if (!isBefore(new Date(candidate.dueDate), latestNew)) {
+                        shifted = attempt;
+                        break;
+                    }
+                }
+
+                if (shifted) {
+                    jobMap.set(candidate.id, shifted);
+                    if (weeklyLoad[weekKey]?.[dept]) weeklyLoad[weekKey][dept].total -= pts;
+                    movedAny = true;
+                }
+            }
+        }
+
+        if (!movedAny) {
+            console.log(`[SCHEDULER] Phase 3: No more moves possible after ${pass + 1} pass(es)`);
+            break;
+        }
+    }
+
+    return Array.from(jobMap.values());
+};
+
+// ---- Phase 4: Validation ----
+
+const validateSchedule = (jobs: Job[]): Job[] => {
+    return jobs.map(job => {
+        if (!job.departmentSchedule || job.isOverdue) return job;
+
+        // Check last department ends before due date
+        const allEnds = Object.values(job.departmentSchedule).map(s => new Date(s.end));
+        const latestEnd = allEnds.length > 0
+            ? new Date(Math.max(...allEnds.map(d => d.getTime())))
+            : new Date();
+        const missedDueDate = isBefore(new Date(job.dueDate), latestEnd);
+
+        // Check departments are in sequential order
+        const deptOrder = DEPARTMENTS.filter(d => job.departmentSchedule?.[d]);
+        let outOfOrder = false;
+        for (let i = 1; i < deptOrder.length; i++) {
+            const prevEnd = new Date(job.departmentSchedule![deptOrder[i - 1]].end);
+            const currStart = new Date(job.departmentSchedule![deptOrder[i]].start);
+            if (isBefore(currStart, prevEnd)) { outOfOrder = true; break; }
+        }
+
+        return {
+            ...job,
+            schedulingConflict: missedDueDate || outOfOrder,
+            progressStatus: missedDueDate ? 'SLIPPING' : outOfOrder ? 'STALLED' : 'ON_TRACK'
+        };
+    });
+};
+
+// ---- Phase 5: Schedule Analysis (Insights Generation) ----
+
+const OT_POINTS_PER_HOUR = 20; // Approx points achievable per OT hour (Saturday shift)
+const SATURDAY_OT_HOURS = 8;   // Standard Saturday OT shift
+const SATURDAY_OT_POINTS = OT_POINTS_PER_HOUR * SATURDAY_OT_HOURS; // 160 pts/Saturday
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * SCHEDULE ANALYSIS — Insight Generation Parameters & Decision Logic
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * This function analyzes already-scheduled jobs and produces three types of
+ * insights, each governed by specific parameters:
+ *
+ * ── 1. LATE JOBS ──
+ * Criteria: A job is "late" when its latest department end date > its due date.
+ * - Only considers jobs WITH a departmentSchedule (unscheduled jobs are skipped)
+ * - Skips already-overdue/completed jobs (isOverdue flag)
+ * - OT estimation: Each Saturday adds ~160pts capacity (OT_POINTS_PER_HOUR × 8h)
+ *   The formula reduces late days by ~1 day per 5 work days (1 Saturday/week)
+ * - Bottleneck dept: The department whose scheduled end date is the latest
+ *
+ * ── 2. OVERLOADED WEEKS ──
+ * Criteria: Any week × department combo where total scheduled points > WEEKLY_TARGET
+ * - WEEKLY_TARGET = 850 points (configurable constant at top of file)
+ * - Excess = scheduledPoints - 850
+ * - Estimated OT hours = excess ÷ 20 (OT_POINTS_PER_HOUR)
+ * - Sorted by excess descending (worst weeks first)
+ *
+ * ── 3. MOVE SUGGESTIONS ──
+ * Work Order (individual job) moves:
+ * - Considers the top 10 most overloaded weeks
+ * - Within each overloaded week, picks the top 3 highest-point jobs
+ * - EXCLUDES overdue jobs (they're urgent and can't be delayed)
+ * - Suggests pushing the due date +5 work days (1 week later)
+ * - Deduplication: If the same job appears in multiple weeks, keeps highest relief
+ * - Cap: Max 10 individual WO suggestions
+ *
+ * Sales Order (grouped project) moves:
+ * - Groups all overloaded-week contributions by sales order number
+ * - Only suggests SO moves for projects with 2+ jobs (multi-job projects)
+ * - Suggests pushing the earliest due date of the SO +5 work days
+ * - Sorted by total points contribution descending
+ * - Cap: Top 5 sales orders
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
+    const today = normalizeWorkStart(new Date());
+    const weeklyLoad = computeWeeklyLoad(jobs);
+
+    // ── 1. Identify Late Jobs ──
+    const lateJobs: LateJob[] = [];
+    for (const job of jobs) {
+        if (!job.departmentSchedule || job.isOverdue) continue;
+
+        const dueDate = new Date(job.dueDate);
+        const allEnds = Object.values(job.departmentSchedule).map(s => new Date(s.end));
+        if (allEnds.length === 0) continue;
+        const latestEnd = new Date(Math.max(...allEnds.map(d => d.getTime())));
+
+        if (isBefore(dueDate, latestEnd)) {
+            // Calculate days late
+            let daysLate = 0;
+            let cursor = addDays(dueDate, 1);
+            while (isBefore(cursor, latestEnd) || cursor.getTime() === latestEnd.getTime()) {
+                if (!isSaturday(cursor) && !isSunday(cursor)) daysLate++;
+                cursor = addDays(cursor, 1);
+            }
+
+            // Estimate with OT: each Saturday adds ~160pts capacity.
+            // OT reduces late days by ~1 day per Saturday worked
+            const daysLateWithOT = Math.max(0, daysLate - Math.ceil(daysLate / 5)); // 1 bonus day per work-week
+            const estWithOT = subtractWorkDays(latestEnd, daysLate - daysLateWithOT);
+
+            // Identify bottleneck department (largest portion of weeks overloaded)
+            let bottleneckDept = 'Unknown';
+            let maxExcess = 0;
+            for (const [dept, sched] of Object.entries(job.departmentSchedule)) {
+                const wk = getWeekKey(new Date(sched.start));
+                const load = weeklyLoad[wk]?.[dept];
+                if (load && load.total > WEEKLY_TARGET && (load.total - WEEKLY_TARGET) > maxExcess) {
+                    maxExcess = load.total - WEEKLY_TARGET;
+                    bottleneckDept = dept;
+                }
+            }
+
+            lateJobs.push({
+                jobId: job.id,
+                jobName: job.name,
+                salesOrder: job.salesOrder,
+                dueDate: dueDate.toISOString().split('T')[0],
+                estimatedCompletion: latestEnd.toISOString().split('T')[0],
+                estimatedWithOT: estWithOT.toISOString().split('T')[0],
+                daysLate,
+                daysLateWithOT,
+                points: job.weldingPoints || 0,
+                bottleneckDept
+            });
+        }
+    }
+
+    // ── 2. Identify Overloaded Weeks ──
+    const overloadedWeeks: OverloadedWeek[] = [];
+    for (const [wk, depts] of Object.entries(weeklyLoad)) {
+        for (const [dept, load] of Object.entries(depts)) {
+            if (load.total > WEEKLY_TARGET) {
+                const excess = Math.round(load.total - WEEKLY_TARGET);
+                const estimatedOTHours = Math.ceil(excess / OT_POINTS_PER_HOUR);
+                const weekStartDate = wk; // Already formatted as W-key
+
+                overloadedWeeks.push({
+                    weekKey: wk,
+                    weekStart: weekStartDate,
+                    department: dept,
+                    scheduledPoints: Math.round(load.total),
+                    capacity: WEEKLY_TARGET,
+                    excess,
+                    estimatedOTHours,
+                    jobCount: load.contributions.length
+                });
+            }
+        }
+    }
+    overloadedWeeks.sort((a, b) => b.excess - a.excess);
+
+    // ── 3. Generate Move Suggestions ──
+    const moveSuggestions: MoveSuggestion[] = [];
+
+    // For each overloaded week, find jobs with most points that could be pushed
+    for (const ow of overloadedWeeks.slice(0, 10)) { // Top 10 worst overloads
+        const weekLoad = weeklyLoad[ow.weekKey]?.[ow.department];
+        if (!weekLoad) continue;
+
+        // Work order suggestions: individual jobs that are flexible
+        const jobsInWeek = weekLoad.contributions
+            .map(c => ({ job: jobs.find(j => j.id === c.jobId), pts: c.pts }))
+            .filter(c => c.job && !c.job.isOverdue)
+            .sort((a, b) => b.pts - a.pts);
+
+        for (const { job: candidate, pts } of jobsInWeek.slice(0, 3)) {
+            if (!candidate) continue;
+            // Suggest moving due date 1 week later
+            const currentDue = new Date(candidate.dueDate);
+            const suggestedDue = addWorkDays(currentDue, 5);
+
+            moveSuggestions.push({
+                type: 'work_order',
+                id: candidate.id,
+                name: candidate.name,
+                currentDueDate: currentDue.toISOString().split('T')[0],
+                suggestedDueDate: suggestedDue.toISOString().split('T')[0],
+                pointsRelieved: Math.round(pts),
+                benefitDescription: `Frees ~${Math.round(pts)}pts from ${ow.department} (${ow.weekKey})`,
+                jobsAffected: [candidate.id]
+            });
+        }
+    }
+
+    // Sales order grouping: find SO#s that contribute most to overloads
+    const soOverloadMap = new Map<string, { points: number; jobs: Job[]; weeks: Set<string> }>();
+    for (const ow of overloadedWeeks) {
+        const weekLoad = weeklyLoad[ow.weekKey]?.[ow.department];
+        if (!weekLoad) continue;
+        for (const c of weekLoad.contributions) {
+            const job = jobs.find(j => j.id === c.jobId);
+            if (!job?.salesOrder || job.isOverdue) continue;
+            const so = job.salesOrder;
+            if (!soOverloadMap.has(so)) soOverloadMap.set(so, { points: 0, jobs: [], weeks: new Set() });
+            const entry = soOverloadMap.get(so)!;
+            entry.points += c.pts;
+            entry.weeks.add(ow.weekKey);
+            if (!entry.jobs.find(j => j.id === job.id)) entry.jobs.push(job);
+        }
+    }
+
+    // Top sales orders contributing to overloads
+    const soEntries = Array.from(soOverloadMap.entries())
+        .sort((a, b) => b[1].points - a[1].points)
+        .slice(0, 5);
+
+    for (const [so, data] of soEntries) {
+        if (data.jobs.length < 2) continue; // Only suggest SO moves for multi-job projects
+        const earliestDue = new Date(Math.min(...data.jobs.map(j => new Date(j.dueDate).getTime())));
+        const suggestedDue = addWorkDays(earliestDue, 5);
+        const weeksList = Array.from(data.weeks).slice(0, 3).join(', ');
+
+        moveSuggestions.push({
+            type: 'sales_order',
+            id: so,
+            name: `SO ${so} (${data.jobs.length} jobs)`,
+            currentDueDate: earliestDue.toISOString().split('T')[0],
+            suggestedDueDate: suggestedDue.toISOString().split('T')[0],
+            pointsRelieved: Math.round(data.points),
+            benefitDescription: `Relieves ~${Math.round(data.points)}pts across ${weeksList}`,
+            jobsAffected: data.jobs.map(j => j.id)
+        });
+    }
+
+    // Deduplicate WO suggestions (keep highest point relief)
+    const woSuggestions = moveSuggestions
+        .filter(s => s.type === 'work_order')
+        .reduce((acc, s) => {
+            const existing = acc.find(e => e.id === s.id);
+            if (existing) { if (s.pointsRelieved > existing.pointsRelieved) Object.assign(existing, s); }
+            else acc.push(s);
+            return acc;
+        }, [] as MoveSuggestion[]);
+
+    const soSuggestions = moveSuggestions.filter(s => s.type === 'sales_order');
+    const finalSuggestions = [...woSuggestions.slice(0, 10), ...soSuggestions];
+
+    // ── 4. Build Summary ──
+    const totalExcessPoints = overloadedWeeks.reduce((sum, w) => sum + w.excess, 0);
+
+    return {
+        lateJobs: lateJobs.sort((a, b) => b.daysLate - a.daysLate),
+        overloadedWeeks,
+        moveSuggestions: finalSuggestions,
+        summary: {
+            totalJobs: jobs.length,
+            onTimeJobs: jobs.length - lateJobs.length,
+            lateJobCount: lateJobs.length,
+            weeksRequiringOT: new Set(overloadedWeeks.map(w => w.weekKey)).size,
+            totalExcessPoints: Math.round(totalExcessPoints)
+        }
+    };
+};
+
+// ---- Pipeline Orchestrator ----
+
+const schedulePipeline = (jobs: Job[]): { jobs: Job[]; insights: ScheduleInsights } => {
+    const today = normalizeWorkStart(new Date());
+
+    console.log(`[SCHEDULER] ========= 4-Phase Pipeline: ${jobs.length} jobs =========`);
+
+    // --- Phase 1: Ideal Placement ---
+    console.log(`[SCHEDULER] Phase 1: Ideal placement...`);
+    const overdueJobs = jobs.filter(j => isJobOverdue(j));
+    const onTimeJobs = jobs.filter(j => !isJobOverdue(j));
+
+    const placed: Job[] = [];
+
+    // Overdue jobs: forward from today (capacity-aware to avoid stacking)
+    if (overdueJobs.length > 0) {
+        overdueJobs.sort((a, b) => getDaysOverdue(b) - getDaysOverdue(a));
+        const buckets = initBuckets(subDays(today, 30), addDays(today, 180));
+        for (const job of overdueJobs) {
+            placed.push(scheduleForwardFromToday(job, buckets));
+        }
+        console.log(`[SCHEDULER]   ${overdueJobs.length} overdue → forward from today`);
+    }
+
+    // On-time jobs: compute batch sizes, then place backward from due date
+    onTimeJobs.sort(compareByDueDateAndSize);
+    const ordered = orderJobsForBatching(onTimeJobs, compareByDueDateAndSize);
+
+    // Compute batch sizes
+    const batchSizeMap = new Map<string, number>();
+    const batchGroupCounts = new Map<string, number>();
+    for (const job of ordered) {
+        const text = normalizeBatchText(job.description || '');
+        const cat = getBatchCategory(text);
+        if (!cat) { batchSizeMap.set(job.id, 1); continue; }
+        const gauge = extractGauge(text) || 'none';
+        const material = extractMaterial(text) || 'none';
+        const weekStart = getDueWeekStart(new Date(job.dueDate)).toISOString();
+        const key = `${cat}|${gauge}|${material}|${weekStart}`;
+        batchGroupCounts.set(key, (batchGroupCounts.get(key) || 0) + 1);
+    }
+    for (const job of ordered) {
+        if (batchSizeMap.has(job.id)) continue;
+        const text = normalizeBatchText(job.description || '');
+        const cat = getBatchCategory(text);
+        if (!cat) { batchSizeMap.set(job.id, 1); continue; }
+        const gauge = extractGauge(text) || 'none';
+        const material = extractMaterial(text) || 'none';
+        const weekStart = getDueWeekStart(new Date(job.dueDate)).toISOString();
+        const key = `${cat}|${gauge}|${material}|${weekStart}`;
+        batchSizeMap.set(job.id, batchGroupCounts.get(key) || 1);
+    }
+
+    // Populate urgency scores
+    ordered.forEach(job => {
         const scoreResult = calculateUrgencyScore(job);
         job.urgencyScore = scoreResult.score;
         job.urgencyFactors = scoreResult.factors;
     });
 
-    const bigRocks = jobs.filter(j => (j.weldingPoints || 0) >= BIG_ROCK_CONFIG.threshold);
-    const smallerJobs = jobs.filter(j => (j.weldingPoints || 0) < BIG_ROCK_CONFIG.threshold);
-
-    bigRocks.sort(compareByUrgencyDueSize);
-    const orderedSmallerJobs = orderJobsForBatching(smallerJobs, compareByUrgencyDueSize);
-
-    const scheduled: Job[] = [];
-
-    // =========================================================================
-    // OVERDUE HANDLING - START (Delete this block to remove overdue priority)
-    // =========================================================================
-    const overdueBigRocks = bigRocks.filter(j => isJobOverdue(j));
-    const onTimeBigRocks = bigRocks.filter(j => !isJobOverdue(j));
-    const overdueSmaller = orderedSmallerJobs.filter(j => isJobOverdue(j));
-    const onTimeSmaller = orderedSmallerJobs.filter(j => !isJobOverdue(j));
-
-    // Sort overdue by most days late first
-    const sortByMostOverdue = (a: Job, b: Job) => {
-        const aOverdue = getDaysOverdue(a);
-        const bOverdue = getDaysOverdue(b);
-        if (aOverdue !== bOverdue) return bOverdue - aOverdue;
-        return (b.weldingPoints || 0) - (a.weldingPoints || 0);
-    };
-    overdueBigRocks.sort(sortByMostOverdue);
-    overdueSmaller.sort(sortByMostOverdue);
-
-    // Schedule ALL overdue jobs first (forward from today)
-    for (const job of overdueBigRocks) {
-        const result = scheduleForwardFromToday(job, buckets);
-        scheduled.push(result);
+    for (const job of ordered) {
+        placed.push(placeIdeal(job, batchSizeMap.get(job.id) || 1));
     }
-    for (const job of overdueSmaller) {
-        const result = scheduleForwardFromToday(job, buckets);
-        scheduled.push(result);
-    }
-    // =========================================================================
-    // OVERDUE HANDLING - END
-    // =========================================================================
+    console.log(`[SCHEDULER]   ${onTimeJobs.length} on-time → backward from due date`);
 
-    // Schedule on-time big rocks first
-    for (const job of onTimeBigRocks) {
-        const result = scheduleBackwardFromDue(job, buckets);
-        scheduled.push(result);
+    // --- Phase 2: Capacity Audit ---
+    console.log(`[SCHEDULER] Phase 2: Capacity audit...`);
+    const initialLoad = computeWeeklyLoad(placed);
+    let overloadCount = 0;
+    for (const depts of Object.values(initialLoad)) {
+        for (const load of Object.values(depts)) {
+            if (load.total > WEEKLY_TARGET) overloadCount++;
+        }
     }
+    console.log(`[SCHEDULER]   ${overloadCount} overloaded week-dept pairs`);
 
-    // Then fill gaps with on-time smaller jobs (batched by description + due week)
-    for (const job of onTimeSmaller) {
-        const result = scheduleBackwardFromDue(job, buckets);
-        scheduled.push(result);
-    }
+    // --- Phase 3: Compression ---
+    console.log(`[SCHEDULER] Phase 3: Compressing...`);
+    const compressed = compressSchedule(placed);
 
-    return scheduled;
+    // --- Phase 4: Validation ---
+    console.log(`[SCHEDULER] Phase 4: Validating...`);
+    const validated = validateSchedule(compressed);
+    const conflicts = validated.filter(j => j.schedulingConflict).length;
+    console.log(`[SCHEDULER]   ${conflicts} jobs with conflicts`);
+
+    // --- Phase 5: Analysis ---
+    console.log(`[SCHEDULER] Phase 5: Analyzing...`);
+    const insights = analyzeSchedule(validated);
+    console.log(`[SCHEDULER]   ${insights.summary.lateJobCount} late jobs, ${insights.summary.weeksRequiringOT} weeks needing OT`);
+    console.log(`[SCHEDULER]   ${insights.moveSuggestions.length} move suggestions`);
+    console.log(`[SCHEDULER] ========= Pipeline Complete =========`);
+
+    return { jobs: validated, insights };
+};
+
+// ---- Public Entry Points (updated to use pipeline) ----
+
+/**
+ * Unified Backward Scheduler — 4-Phase Weekly Pipeline
+ * Used by the import page for initial and subsequent XLSX imports
+ */
+export const scheduleAllJobs = (jobs: Job[], existingJobs: Job[] = []): { jobs: Job[]; insights: ScheduleInsights } => {
+    console.log('🔥 4-PHASE WEEKLY PIPELINE — Scheduling', jobs.length, 'jobs');
+    return schedulePipeline(jobs);
+};
+
+/**
+ * Analyze already-scheduled jobs to generate insights without re-running the pipeline.
+ * Used by the Planning Board to show insights on-demand.
+ */
+export const analyzeScheduleFromJobs = (jobs: Job[]): ScheduleInsights => {
+    return analyzeSchedule(jobs);
 };
 
 /**

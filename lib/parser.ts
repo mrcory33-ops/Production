@@ -187,6 +187,7 @@ export const parseGlobalShopExport = async (fileBuffer: ArrayBuffer): Promise<Jo
 
             partNumber: masterRow['PART'] || '',
             customerPartAndName: Array.from(customerParts),
+            customerName: String(masterRow['Name_Customer'] || masterRow['NAME_CUSTOMER'] || masterRow['name_customer'] || '').trim(),
             description: masterRow['PART_DESCRIPTION'] || '',
             notes: masterRow['USER_7'] || '',
 

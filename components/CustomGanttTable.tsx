@@ -5,7 +5,7 @@ import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunda
 import { Job, Department } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
 import SegmentEditPopover from './SegmentEditPopover';
-import ScoreBreakdown from './ScoreBreakdown';
+import JobStatusSymbols from './JobStatusSymbols';
 
 interface DepartmentSegment {
     department: Department;
@@ -660,56 +660,17 @@ export default function CustomGanttTable({
                                         onClick={() => onJobClick?.(job)}
                                     >
                                         <div className="job-cell-content">
-                                            <div className="flex items-center gap-1.5 overflow-visible relative group/tooltip">
-                                                <div className="job-name flex-1 cursor-help underline decoration-dotted decoration-black underline-offset-2 text-black font-bold">
+                                            <div className="flex items-center gap-1.5 overflow-visible relative">
+                                                <div className="job-name flex-1 cursor-pointer text-black font-bold"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onJobClick?.(job);
+                                                    }}
+                                                >
                                                     {job.name}
                                                 </div>
-                                                {/* Tooltip */}
-                                                <div className="absolute left-full top-0 ml-2 z-50 hidden group-hover/tooltip:block pointer-events-none">
-                                                    <ScoreBreakdown score={job.urgencyScore || 0} factors={job.urgencyFactors} />
-                                                </div>
-                                                {/* Scheduling Conflict Indicator */}
-                                                {job.schedulingConflict && (
-                                                    <div
-                                                        className="flex items-center justify-center w-5 h-5 bg-red-100 border border-red-300 rounded"
-                                                        title="Scheduling Conflict: Could not meet due date within capacity limits"
-                                                    >
-                                                        <span className="text-[10px] text-red-600 font-bold">!</span>
-                                                    </div>
-                                                )}
-                                                {/* Progress Status Indicator */}
-                                                {job.progressStatus === 'STALLED' && (
-                                                    <div
-                                                        className="px-1.5 py-0.5 bg-orange-100 border border-orange-300 rounded"
-                                                        title="Job Stalled: No progress for 2+ days and behind schedule"
-                                                    >
-                                                        <span className="text-[9px] text-orange-600 font-bold uppercase tracking-wide">OT?</span>
-                                                    </div>
-                                                )}
-                                                {job.progressStatus === 'SLIPPING' && (
-                                                    <div
-                                                        className="px-1.5 py-0.5 bg-yellow-100 border border-yellow-300 rounded"
-                                                        title="Job Slipping: Behind schedule"
-                                                    >
-                                                        <span className="text-[9px] text-yellow-600 font-bold">⚠</span>
-                                                    </div>
-                                                )}
-                                                {job.progressStatus === 'AHEAD' && (
-                                                    <div
-                                                        className="px-1.5 py-0.5 bg-emerald-100 border border-emerald-300 rounded"
-                                                        title="🚀 Ahead of Schedule! Job has advanced past expected department"
-                                                    >
-                                                        <span className="text-[9px]">🚀</span>
-                                                    </div>
-                                                )}
-                                                {job.needsReschedule && (
-                                                    <div
-                                                        className="px-1.5 py-0.5 bg-purple-100 border border-purple-300 rounded animate-pulse"
-                                                        title={`📅 Due date changed! Was: ${job.previousDueDate ? new Date(job.previousDueDate).toLocaleDateString() : '?'} → Now: ${new Date(job.dueDate).toLocaleDateString()}`}
-                                                    >
-                                                        <span className="text-[9px]">📅</span>
-                                                    </div>
-                                                )}
+                                                {/* Status Symbols — clickable with explanation popovers */}
+                                                <JobStatusSymbols job={job} />
                                             </div>
                                             <div className="job-id text-black font-semibold opacity-80">{job.id}</div>
                                             <div className="text-[10px] text-black mt-0.5 truncate max-w-[160px]">
@@ -887,9 +848,12 @@ export default function CustomGanttTable({
                                                                     }
                                                                 }}
                                                             >
-                                                                {/* Bar Tooltip */}
+                                                                {/* Bar Tooltip — department & dates */}
                                                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover/bar-tooltip:block pointer-events-none w-max">
-                                                                    <ScoreBreakdown score={job.urgencyScore || 0} factors={job.urgencyFactors} />
+                                                                    <div className="px-2.5 py-1.5 bg-slate-800 text-white rounded shadow-xl text-xs whitespace-nowrap">
+                                                                        <span className="font-bold">{segment.department}</span>
+                                                                        <span className="text-slate-400 ml-2">{format(segment.startDate, 'M/d')} – {format(segment.endDate, 'M/d')}</span>
+                                                                    </div>
                                                                 </div>
 
                                                                 {/* Resize handle - start */}
