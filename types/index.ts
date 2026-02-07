@@ -108,19 +108,17 @@ export interface WeeklyTarget {
     harmonicTarget: number;
 }
 
-// ---- Schedule Insights (returned from pipeline alongside jobs) ----
+// ---- Schedule Insights v2 (Decision-Support Model) ----
 
 export interface LateJob {
     jobId: string;
     jobName: string;
     salesOrder?: string;
-    dueDate: string;           // ISO date
-    estimatedCompletion: string; // ISO date — without OT
-    estimatedWithOT: string;    // ISO date — with Saturday OT
-    daysLate: number;
-    daysLateWithOT: number;
+    dueDate: string;              // ISO date
+    estimatedCompletion: string;  // ISO date — current schedule (no OT)
+    daysLate: number;             // Work days past due
     points: number;
-    bottleneckDept: string;     // Department causing the delay
+    bottleneckDept: string;       // Department causing the delay
 }
 
 export interface OverloadedWeek {
@@ -130,30 +128,90 @@ export interface OverloadedWeek {
     scheduledPoints: number;
     capacity: number;        // 850
     excess: number;
-    estimatedOTHours: number;
     jobCount: number;
 }
 
-export interface MoveSuggestion {
+/**
+ * OT Tier Breakdown — shows exactly what level of overtime is needed
+ * and why, for each overloaded week × department.
+ *
+ * Normal day:   8 hrs (6am–2:30pm)  → base capacity = 850pts/wk (40hrs)
+ * Tier 1:       9 hrs Mon-Fri       → +5hrs/wk   ≈ +106pts
+ * Tier 2:      10 hrs Mon-Fri       → +10hrs/wk  ≈ +213pts
+ * Tier 3:       9 hrs Mon-Fri + Sat → +11hrs/wk  ≈ +234pts
+ * Tier 4:      10 hrs Mon-Fri + Sat → +16hrs/wk  ≈ +341pts
+ */
+export interface OTRecommendation {
+    weekKey: string;
+    weekStart: string;
+    department: string;
+    currentLoad: number;
+    baseCapacity: number;        // 850
+    excess: number;              // currentLoad - 850
+    recommendedTier: 1 | 2 | 3 | 4;
+    tierLabel: string;
+    bonusPoints: number;         // Points added by this tier
+    remainingExcess: number;     // excess - bonusPoints (negative = cleared)
+    explanation: string;         // Human-readable WHY
+    weekdayHours: string;        // "6:00am – 3:30pm" etc.
+    saturdayHours: string;       // "N/A" or "6:00am – 12:00pm"
+}
+
+/**
+ * A single move option — the system presents BOTH WO-level and SO-level
+ * versions with impact analysis. The user decides which to apply.
+ */
+export interface MoveOption {
     type: 'work_order' | 'sales_order';
-    id: string;              // WO number or SO number
-    name: string;            // Job/project name
-    currentDueDate: string;  // ISO date
-    suggestedDueDate: string;// Moving to this date relieves pressure
-    pointsRelieved: number;
-    benefitDescription: string; // "Frees 120pts from Welding W07"
-    jobsAffected: string[];  // Job IDs in this sales order (for SO moves)
+    id: string;                   // WO# or SO#
+    name: string;
+    jobIds: string[];             // Jobs affected (1 for WO, multiple for SO)
+    currentDueDate: string;
+    pushWeeks: 1 | 2;            // Max 2 weeks — never 3
+    suggestedDueDate: string;
+    pointsRelieved: number;      // Total points removed from overloaded weeks
+    affectedWeeks: string[];     // Which week keys get relief
+    affectedDepartments: string[];
+    riskLevel: 'safe' | 'moderate';
+    // safe = moved job(s) won't be late after push
+    // moderate = moved job(s) may cut it close
+
+    // Impact Analysis
+    lateJobsBefore: number;      // Total late jobs BEFORE this move
+    lateJobsAfter: number;       // Total late jobs AFTER this move (projected)
+    lateJobsRecovered: string[]; // Which job IDs come back on-time
+    impactSummary: string;       // "Recovers 3 late jobs, relieves 240pts from Engineering Feb 10"
 }
 
 export interface ScheduleInsights {
+    // ── Current State ──
     lateJobs: LateJob[];
     overloadedWeeks: OverloadedWeek[];
-    moveSuggestions: MoveSuggestion[];
+
+    // ── Decision Options ──
+    moveOptions: MoveOption[];       // Both WO and SO options, with impact analysis
+    otRecommendations: OTRecommendation[];
+
+    // ── Projected Outcome ──
+    projectedWithMoves: {
+        lateJobs: LateJob[];         // Late jobs remaining after best moves
+        overloadedWeeks: OverloadedWeek[];
+    };
+    projectedWithMovesAndOT: {
+        lateJobs: LateJob[];         // Late jobs remaining after moves + OT
+        overloadedWeeks: OverloadedWeek[];
+    };
+
+    // ── Summary Stats ──
     summary: {
         totalJobs: number;
         onTimeJobs: number;
         lateJobCount: number;
         weeksRequiringOT: number;
         totalExcessPoints: number;
+        // Projected
+        projectedLateAfterMoves: number;
+        projectedLateAfterOT: number;
     };
 }
+

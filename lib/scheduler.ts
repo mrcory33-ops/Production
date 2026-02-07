@@ -1,4 +1,4 @@
-import { Job, Department, ProductType, ScheduleInsights, LateJob, OverloadedWeek, MoveSuggestion } from '@/types';
+import { Job, Department, ProductType, ScheduleInsights, LateJob, OverloadedWeek, MoveOption, OTRecommendation } from '@/types';
 import { addDays, isSaturday, isSunday, subDays, startOfDay, isBefore, startOfWeek } from 'date-fns';
 import { DEPARTMENT_CONFIG, calculateDeptDuration } from './departmentConfig';
 import { calculateUrgencyScore } from './scoring';
@@ -2053,57 +2053,19 @@ const validateSchedule = (jobs: Job[]): Job[] => {
     });
 };
 
-// ---- Phase 5: Schedule Analysis (Insights Generation) ----
+// ---- Phase 5: Schedule Analysis v2 (Decision-Support Model) ----
 
-const OT_POINTS_PER_HOUR = 20; // Approx points achievable per OT hour (Saturday shift)
-const SATURDAY_OT_HOURS = 8;   // Standard Saturday OT shift
-const SATURDAY_OT_POINTS = OT_POINTS_PER_HOUR * SATURDAY_OT_HOURS; // 160 pts/Saturday
+// OT capacity constants — derived from base: 850pts / 40hrs = 21.25 pts/hr
+const PTS_PER_HOUR = 21.25;
+const OT_TIERS = [
+    { tier: 1 as const, label: '9-Hour Days', weekdayHrs: '6:00am – 3:30pm', satHrs: 'N/A', extraHrs: 5, satHrs6: 0, bonusPts: Math.round(5 * PTS_PER_HOUR) },  // +106
+    { tier: 2 as const, label: '10-Hour Days', weekdayHrs: '6:00am – 4:30pm', satHrs: 'N/A', extraHrs: 10, satHrs6: 0, bonusPts: Math.round(10 * PTS_PER_HOUR) }, // +213
+    { tier: 3 as const, label: '9-Hour Days + Saturday', weekdayHrs: '6:00am – 3:30pm', satHrs: '6:00am – 12:00pm', extraHrs: 5, satHrs6: 6, bonusPts: Math.round(11 * PTS_PER_HOUR) }, // +234
+    { tier: 4 as const, label: '10-Hour Days + Saturday', weekdayHrs: '6:00am – 4:30pm', satHrs: '6:00am – 12:00pm', extraHrs: 10, satHrs6: 6, bonusPts: Math.round(16 * PTS_PER_HOUR) }, // +340
+] as const;
 
-/**
- * ═══════════════════════════════════════════════════════════════════════════
- * SCHEDULE ANALYSIS — Insight Generation Parameters & Decision Logic
- * ═══════════════════════════════════════════════════════════════════════════
- *
- * This function analyzes already-scheduled jobs and produces three types of
- * insights, each governed by specific parameters:
- *
- * ── 1. LATE JOBS ──
- * Criteria: A job is "late" when its latest department end date > its due date.
- * - Only considers jobs WITH a departmentSchedule (unscheduled jobs are skipped)
- * - Skips already-overdue/completed jobs (isOverdue flag)
- * - OT estimation: Each Saturday adds ~160pts capacity (OT_POINTS_PER_HOUR × 8h)
- *   The formula reduces late days by ~1 day per 5 work days (1 Saturday/week)
- * - Bottleneck dept: The department whose scheduled end date is the latest
- *
- * ── 2. OVERLOADED WEEKS ──
- * Criteria: Any week × department combo where total scheduled points > WEEKLY_TARGET
- * - WEEKLY_TARGET = 850 points (configurable constant at top of file)
- * - Excess = scheduledPoints - 850
- * - Estimated OT hours = excess ÷ 20 (OT_POINTS_PER_HOUR)
- * - Sorted by excess descending (worst weeks first)
- *
- * ── 3. MOVE SUGGESTIONS ──
- * Work Order (individual job) moves:
- * - Considers the top 10 most overloaded weeks
- * - Within each overloaded week, picks the top 3 highest-point jobs
- * - EXCLUDES overdue jobs (they're urgent and can't be delayed)
- * - Suggests pushing the due date +5 work days (1 week later)
- * - Deduplication: If the same job appears in multiple weeks, keeps highest relief
- * - Cap: Max 10 individual WO suggestions
- *
- * Sales Order (grouped project) moves:
- * - Groups all overloaded-week contributions by sales order number
- * - Only suggests SO moves for projects with 2+ jobs (multi-job projects)
- * - Suggests pushing the earliest due date of the SO +5 work days
- * - Sorted by total points contribution descending
- * - Cap: Top 5 sales orders
- * ═══════════════════════════════════════════════════════════════════════════
- */
-const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
-    const today = normalizeWorkStart(new Date());
-    const weeklyLoad = computeWeeklyLoad(jobs);
-
-    // ── 1. Identify Late Jobs ──
+// ── Helper: find late jobs from a weekly load map ──
+const findLateJobs = (jobs: Job[], weeklyLoad: WeeklyCapacityMap): LateJob[] => {
     const lateJobs: LateJob[] = [];
     for (const job of jobs) {
         if (!job.departmentSchedule || job.isOverdue) continue;
@@ -2114,7 +2076,7 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
         const latestEnd = new Date(Math.max(...allEnds.map(d => d.getTime())));
 
         if (isBefore(dueDate, latestEnd)) {
-            // Calculate days late
+            // Count work days late
             let daysLate = 0;
             let cursor = addDays(dueDate, 1);
             while (isBefore(cursor, latestEnd) || cursor.getTime() === latestEnd.getTime()) {
@@ -2122,12 +2084,7 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
                 cursor = addDays(cursor, 1);
             }
 
-            // Estimate with OT: each Saturday adds ~160pts capacity.
-            // OT reduces late days by ~1 day per Saturday worked
-            const daysLateWithOT = Math.max(0, daysLate - Math.ceil(daysLate / 5)); // 1 bonus day per work-week
-            const estWithOT = subtractWorkDays(latestEnd, daysLate - daysLateWithOT);
-
-            // Identify bottleneck department (largest portion of weeks overloaded)
+            // Identify bottleneck department
             let bottleneckDept = 'Unknown';
             let maxExcess = 0;
             for (const [dept, sched] of Object.entries(job.departmentSchedule)) {
@@ -2145,138 +2102,424 @@ const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
                 salesOrder: job.salesOrder,
                 dueDate: dueDate.toISOString().split('T')[0],
                 estimatedCompletion: latestEnd.toISOString().split('T')[0],
-                estimatedWithOT: estWithOT.toISOString().split('T')[0],
                 daysLate,
-                daysLateWithOT,
                 points: job.weldingPoints || 0,
                 bottleneckDept
             });
         }
     }
+    return lateJobs.sort((a, b) => b.daysLate - a.daysLate);
+};
 
-    // ── 2. Identify Overloaded Weeks ──
-    const overloadedWeeks: OverloadedWeek[] = [];
+// ── Helper: find overloaded weeks ──
+const findOverloadedWeeks = (weeklyLoad: WeeklyCapacityMap): OverloadedWeek[] => {
+    const overloaded: OverloadedWeek[] = [];
     for (const [wk, depts] of Object.entries(weeklyLoad)) {
         for (const [dept, load] of Object.entries(depts)) {
             if (load.total > WEEKLY_TARGET) {
-                const excess = Math.round(load.total - WEEKLY_TARGET);
-                const estimatedOTHours = Math.ceil(excess / OT_POINTS_PER_HOUR);
-                const weekStartDate = wk; // Already formatted as W-key
-
-                overloadedWeeks.push({
+                overloaded.push({
                     weekKey: wk,
-                    weekStart: weekStartDate,
+                    weekStart: wk,
                     department: dept,
                     scheduledPoints: Math.round(load.total),
                     capacity: WEEKLY_TARGET,
-                    excess,
-                    estimatedOTHours,
+                    excess: Math.round(load.total - WEEKLY_TARGET),
                     jobCount: load.contributions.length
                 });
             }
         }
     }
-    overloadedWeeks.sort((a, b) => b.excess - a.excess);
+    return overloaded.sort((a, b) => b.excess - a.excess);
+};
 
-    // ── 3. Generate Move Suggestions ──
-    const moveSuggestions: MoveSuggestion[] = [];
+// ── Helper: deep-clone a weekly load map for simulation ──
+const cloneWeeklyLoad = (wl: WeeklyCapacityMap): WeeklyCapacityMap => {
+    const clone: WeeklyCapacityMap = {};
+    for (const [wk, depts] of Object.entries(wl)) {
+        clone[wk] = {};
+        for (const [dept, load] of Object.entries(depts)) {
+            clone[wk][dept] = {
+                total: load.total,
+                bigRockPts: load.bigRockPts,
+                smallRockPts: load.smallRockPts,
+                contributions: [...load.contributions]
+            };
+        }
+    }
+    return clone;
+};
 
-    // For each overloaded week, find jobs with most points that could be pushed
-    for (const ow of overloadedWeeks.slice(0, 10)) { // Top 10 worst overloads
-        const weekLoad = weeklyLoad[ow.weekKey]?.[ow.department];
-        if (!weekLoad) continue;
+// ── Helper: remove a job's contributions from a simulated weekly load ──
+const removeJobFromLoad = (simLoad: WeeklyCapacityMap, jobId: string) => {
+    for (const [, depts] of Object.entries(simLoad)) {
+        for (const [, load] of Object.entries(depts)) {
+            const contribs = load.contributions.filter(c => c.jobId === jobId);
+            for (const c of contribs) {
+                load.total -= c.pts;
+            }
+            load.contributions = load.contributions.filter(c => c.jobId !== jobId);
+        }
+    }
+};
 
-        // Work order suggestions: individual jobs that are flexible
-        const jobsInWeek = weekLoad.contributions
-            .map(c => ({ job: jobs.find(j => j.id === c.jobId), pts: c.pts }))
-            .filter(c => c.job && !c.job.isOverdue)
-            .sort((a, b) => b.pts - a.pts);
+// ── Helper: count late jobs using a simulated load ──
+// This is an approximation — it checks if the bottleneck weeks for each
+// late job have been relieved enough to potentially bring the job on-time.
+const estimateLateJobsAfterRelief = (
+    originalLateJobs: LateJob[],
+    originalLoad: WeeklyCapacityMap,
+    simulatedLoad: WeeklyCapacityMap,
+    jobs: Job[]
+): { recoveredIds: string[]; stillLate: LateJob[] } => {
+    const recoveredIds: string[] = [];
+    const stillLate: LateJob[] = [];
 
-        for (const { job: candidate, pts } of jobsInWeek.slice(0, 3)) {
-            if (!candidate) continue;
-            // Suggest moving due date 1 week later
-            const currentDue = new Date(candidate.dueDate);
-            const suggestedDue = addWorkDays(currentDue, 5);
+    for (const lj of originalLateJobs) {
+        const job = jobs.find(j => j.id === lj.jobId);
+        if (!job?.departmentSchedule) { stillLate.push(lj); continue; }
 
-            moveSuggestions.push({
-                type: 'work_order',
-                id: candidate.id,
-                name: candidate.name,
-                currentDueDate: currentDue.toISOString().split('T')[0],
-                suggestedDueDate: suggestedDue.toISOString().split('T')[0],
-                pointsRelieved: Math.round(pts),
-                benefitDescription: `Frees ~${Math.round(pts)}pts from ${ow.department} (${ow.weekKey})`,
-                jobsAffected: [candidate.id]
-            });
+        // Check if this job's bottleneck weeks have been sufficiently relieved
+        let recovered = false;
+        for (const [dept, sched] of Object.entries(job.departmentSchedule)) {
+            const wk = getWeekKey(new Date(sched.start));
+            const origLoad = originalLoad[wk]?.[dept]?.total || 0;
+            const simLoad = simulatedLoad[wk]?.[dept]?.total || 0;
+
+            if (origLoad > WEEKLY_TARGET && simLoad <= WEEKLY_TARGET) {
+                // This bottleneck was cleared — estimate relief in work days
+                const ptsRelieved = origLoad - simLoad;
+                const daysRelieved = Math.round(ptsRelieved / (WEEKLY_TARGET / 5)); // ~170pts/day
+                if (daysRelieved >= lj.daysLate) {
+                    recovered = true;
+                    break;
+                }
+            }
+        }
+
+        if (recovered) {
+            recoveredIds.push(lj.jobId);
+        } else {
+            stillLate.push(lj);
         }
     }
 
-    // Sales order grouping: find SO#s that contribute most to overloads
-    const soOverloadMap = new Map<string, { points: number; jobs: Job[]; weeks: Set<string> }>();
+    return { recoveredIds, stillLate };
+};
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * SCHEDULE ANALYSIS v2 — Decision-Support Model
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Philosophy: "Better to disappoint 1 customer by 1-2 weeks than 5-10
+ *              customers by 3-5 days."
+ *
+ * The analysis generates:
+ * 1. BASELINE — current late jobs and overloaded weeks
+ * 2. MOVE OPTIONS — both WO-level and SO-level pushes (+1wk, +2wk max)
+ *    scored by how many late jobs each recovers globally
+ * 3. OT RECOMMENDATIONS — 4-tier breakdown with hours and explanations
+ * 4. PROJECTED OUTCOMES — before/after snapshots
+ *
+ * Hard constraint: NEVER push a job more than 2 weeks. Never 3 weeks late.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+const analyzeSchedule = (jobs: Job[]): ScheduleInsights => {
+    const weeklyLoad = computeWeeklyLoad(jobs);
+
+    // ══════════════════════════════════════════════
+    // 1. BASELINE
+    // ══════════════════════════════════════════════
+    const lateJobs = findLateJobs(jobs, weeklyLoad);
+    const overloadedWeeks = findOverloadedWeeks(weeklyLoad);
+
+    // ══════════════════════════════════════════════
+    // 2. MOVE OPTIONS (Greedy — WO + SO at +1wk / +2wk)
+    // ══════════════════════════════════════════════
+    const moveOptions: MoveOption[] = [];
+
+    // Build candidate set: jobs in overloaded weeks that could be pushed
+    const candidateJobIds = new Set<string>();
     for (const ow of overloadedWeeks) {
         const weekLoad = weeklyLoad[ow.weekKey]?.[ow.department];
         if (!weekLoad) continue;
         for (const c of weekLoad.contributions) {
-            const job = jobs.find(j => j.id === c.jobId);
-            if (!job?.salesOrder || job.isOverdue) continue;
-            const so = job.salesOrder;
-            if (!soOverloadMap.has(so)) soOverloadMap.set(so, { points: 0, jobs: [], weeks: new Set() });
-            const entry = soOverloadMap.get(so)!;
-            entry.points += c.pts;
-            entry.weeks.add(ow.weekKey);
-            if (!entry.jobs.find(j => j.id === job.id)) entry.jobs.push(job);
+            candidateJobIds.add(c.jobId);
         }
     }
 
-    // Top sales orders contributing to overloads
-    const soEntries = Array.from(soOverloadMap.entries())
-        .sort((a, b) => b[1].points - a[1].points)
-        .slice(0, 5);
+    // Determine which jobs are currently late (can't be Tier A candidates)
+    const lateJobIds = new Set(lateJobs.map(lj => lj.jobId));
 
-    for (const [so, data] of soEntries) {
-        if (data.jobs.length < 2) continue; // Only suggest SO moves for multi-job projects
-        const earliestDue = new Date(Math.min(...data.jobs.map(j => new Date(j.dueDate).getTime())));
-        const suggestedDue = addWorkDays(earliestDue, 5);
-        const weeksList = Array.from(data.weeks).slice(0, 3).join(', ');
+    // Tier A: non-late, non-overdue jobs with forward slack
+    const tierAJobs = Array.from(candidateJobIds)
+        .map(id => jobs.find(j => j.id === id))
+        .filter((j): j is Job => !!j && !j.isOverdue && !lateJobIds.has(j.id))
+        .sort((a, b) => (b.weldingPoints || 0) - (a.weldingPoints || 0));
 
-        moveSuggestions.push({
-            type: 'sales_order',
-            id: so,
-            name: `SO ${so} (${data.jobs.length} jobs)`,
-            currentDueDate: earliestDue.toISOString().split('T')[0],
-            suggestedDueDate: suggestedDue.toISOString().split('T')[0],
-            pointsRelieved: Math.round(data.points),
-            benefitDescription: `Relieves ~${Math.round(data.points)}pts across ${weeksList}`,
-            jobsAffected: data.jobs.map(j => j.id)
+    // For each candidate, try +1wk and +2wk pushes and evaluate impact
+    for (const candidate of tierAJobs.slice(0, 20)) { // Evaluate top 20 by points
+        for (const pushWeeks of [1, 2] as (1 | 2)[]) {
+            const currentDue = new Date(candidate.dueDate);
+            const suggestedDue = addWorkDays(currentDue, pushWeeks * 5);
+
+            // Simulate: remove this job's contributions from the load
+            const simLoad = cloneWeeklyLoad(weeklyLoad);
+            removeJobFromLoad(simLoad, candidate.id);
+
+            // Check what departments/weeks are affected
+            const affectedWeeks: string[] = [];
+            const affectedDepts: string[] = [];
+            let totalRelieved = 0;
+
+            if (candidate.departmentSchedule) {
+                for (const [dept, sched] of Object.entries(candidate.departmentSchedule)) {
+                    const wk = getWeekKey(new Date(sched.start));
+                    const origLoad = weeklyLoad[wk]?.[dept]?.total || 0;
+                    if (origLoad > WEEKLY_TARGET) {
+                        const contrib = weeklyLoad[wk][dept].contributions.find(c => c.jobId === candidate.id);
+                        if (contrib) {
+                            totalRelieved += Math.round(contrib.pts);
+                            if (!affectedWeeks.includes(wk)) affectedWeeks.push(wk);
+                            if (!affectedDepts.includes(dept)) affectedDepts.push(dept);
+                        }
+                    }
+                }
+            }
+
+            if (totalRelieved === 0) continue; // No overloaded weeks affected
+
+            // Estimate recovery
+            const { recoveredIds, stillLate } = estimateLateJobsAfterRelief(
+                lateJobs, weeklyLoad, simLoad, jobs
+            );
+
+            // Check if pushing this job makes it late itself
+            const latestEnd = candidate.departmentSchedule
+                ? Math.max(...Object.values(candidate.departmentSchedule).map(s => new Date(s.end).getTime()))
+                : currentDue.getTime();
+            const newSlack = Math.round(
+                (suggestedDue.getTime() - latestEnd) / (1000 * 60 * 60 * 24)
+            );
+            const riskLevel: 'safe' | 'moderate' = newSlack >= 3 ? 'safe' : 'moderate';
+
+            // Build impact summary
+            const recoveredCount = recoveredIds.length;
+            const deptList = affectedDepts.join(', ');
+            const weekList = affectedWeeks.join(', ');
+            const impactSummary = recoveredCount > 0
+                ? `Recovers ${recoveredCount} late job${recoveredCount > 1 ? 's' : ''}, relieves ${totalRelieved}pts from ${deptList} (${weekList})`
+                : `Relieves ${totalRelieved}pts from ${deptList} (${weekList}) but doesn't directly recover any late jobs`;
+
+            moveOptions.push({
+                type: 'work_order',
+                id: candidate.id,
+                name: candidate.name,
+                jobIds: [candidate.id],
+                currentDueDate: currentDue.toISOString().split('T')[0],
+                pushWeeks,
+                suggestedDueDate: suggestedDue.toISOString().split('T')[0],
+                pointsRelieved: totalRelieved,
+                affectedWeeks,
+                affectedDepartments: affectedDepts,
+                riskLevel,
+                lateJobsBefore: lateJobs.length,
+                lateJobsAfter: stillLate.length,
+                lateJobsRecovered: recoveredIds,
+                impactSummary
+            });
+        }
+    }
+
+    // ── Sales Order level moves ──
+    // Group candidates by SO# and evaluate pushing entire projects
+    const soGroupMap = new Map<string, Job[]>();
+    for (const candidate of tierAJobs) {
+        if (!candidate.salesOrder) continue;
+        if (!soGroupMap.has(candidate.salesOrder)) soGroupMap.set(candidate.salesOrder, []);
+        soGroupMap.get(candidate.salesOrder)!.push(candidate);
+    }
+
+    for (const [so, soJobs] of soGroupMap) {
+        if (soJobs.length < 1) continue; // Include even single-job SOs for comparison
+
+        for (const pushWeeks of [1, 2] as (1 | 2)[]) {
+            const earliestDue = new Date(Math.min(...soJobs.map(j => new Date(j.dueDate).getTime())));
+            const suggestedDue = addWorkDays(earliestDue, pushWeeks * 5);
+
+            // Simulate: remove ALL jobs in this SO from the load
+            const simLoad = cloneWeeklyLoad(weeklyLoad);
+            for (const j of soJobs) removeJobFromLoad(simLoad, j.id);
+
+            // Aggregate impact
+            const affectedWeeks: string[] = [];
+            const affectedDepts: string[] = [];
+            let totalRelieved = 0;
+
+            for (const j of soJobs) {
+                if (!j.departmentSchedule) continue;
+                for (const [dept, sched] of Object.entries(j.departmentSchedule)) {
+                    const wk = getWeekKey(new Date(sched.start));
+                    const origLoad = weeklyLoad[wk]?.[dept]?.total || 0;
+                    if (origLoad > WEEKLY_TARGET) {
+                        const contrib = weeklyLoad[wk][dept].contributions.find(c => c.jobId === j.id);
+                        if (contrib) {
+                            totalRelieved += Math.round(contrib.pts);
+                            if (!affectedWeeks.includes(wk)) affectedWeeks.push(wk);
+                            if (!affectedDepts.includes(dept)) affectedDepts.push(dept);
+                        }
+                    }
+                }
+            }
+
+            if (totalRelieved === 0) continue;
+
+            const { recoveredIds, stillLate } = estimateLateJobsAfterRelief(
+                lateJobs, weeklyLoad, simLoad, jobs
+            );
+
+            const recoveredCount = recoveredIds.length;
+            const deptList = affectedDepts.join(', ');
+            const impactSummary = recoveredCount > 0
+                ? `Recovers ${recoveredCount} late job${recoveredCount > 1 ? 's' : ''}, relieves ${totalRelieved}pts from ${deptList} across ${affectedWeeks.length} week${affectedWeeks.length > 1 ? 's' : ''}`
+                : `Relieves ${totalRelieved}pts from ${deptList} but doesn't directly recover any late jobs`;
+
+            moveOptions.push({
+                type: 'sales_order',
+                id: so,
+                name: `SO ${so} (${soJobs.length} job${soJobs.length > 1 ? 's' : ''})`,
+                jobIds: soJobs.map(j => j.id),
+                currentDueDate: earliestDue.toISOString().split('T')[0],
+                pushWeeks,
+                suggestedDueDate: suggestedDue.toISOString().split('T')[0],
+                pointsRelieved: totalRelieved,
+                affectedWeeks,
+                affectedDepartments: affectedDepts,
+                riskLevel: 'safe', // SO moves are inherently safe (whole project moves)
+                lateJobsBefore: lateJobs.length,
+                lateJobsAfter: stillLate.length,
+                lateJobsRecovered: recoveredIds,
+                impactSummary
+            });
+        }
+    }
+
+    // Sort move options: most late jobs recovered first, then by points relieved
+    moveOptions.sort((a, b) => {
+        const recoveryDiff = b.lateJobsRecovered.length - a.lateJobsRecovered.length;
+        if (recoveryDiff !== 0) return recoveryDiff;
+        return b.pointsRelieved - a.pointsRelieved;
+    });
+
+    // ══════════════════════════════════════════════
+    // 3. OT RECOMMENDATIONS (4 Tiers)
+    // ══════════════════════════════════════════════
+    const otRecommendations: OTRecommendation[] = [];
+    for (const ow of overloadedWeeks) {
+        // Find the minimum tier that covers the excess
+        const selectedTier = OT_TIERS.find(t => t.bonusPts >= ow.excess) || OT_TIERS[OT_TIERS.length - 1];
+        const remaining = ow.excess - selectedTier.bonusPts;
+
+        // Build explanation
+        let explanation: string;
+        if (selectedTier.bonusPts >= ow.excess) {
+            explanation = `${ow.department} is ${ow.excess}pts over capacity (${ow.scheduledPoints}/${ow.capacity}). ` +
+                `${selectedTier.label} adds +${selectedTier.bonusPts}pts/week, fully covering the excess.`;
+        } else {
+            explanation = `${ow.department} is ${ow.excess}pts over capacity (${ow.scheduledPoints}/${ow.capacity}). ` +
+                `Even ${selectedTier.label} (+${selectedTier.bonusPts}pts) leaves ${remaining}pts uncovered. ` +
+                `Job moves are needed to relieve the remaining load.`;
+        }
+
+        // Add note about lower tiers that could partially help
+        const lowerTier = OT_TIERS.find(t => t.tier < selectedTier.tier && t.bonusPts < ow.excess);
+        if (lowerTier && selectedTier.tier > 1) {
+            explanation += ` Note: ${lowerTier.label} (+${lowerTier.bonusPts}pts) would reduce but not fully clear the excess.`;
+        }
+
+        otRecommendations.push({
+            weekKey: ow.weekKey,
+            weekStart: ow.weekStart,
+            department: ow.department,
+            currentLoad: ow.scheduledPoints,
+            baseCapacity: ow.capacity,
+            excess: ow.excess,
+            recommendedTier: selectedTier.tier,
+            tierLabel: selectedTier.label,
+            bonusPoints: selectedTier.bonusPts,
+            remainingExcess: remaining,
+            explanation,
+            weekdayHours: selectedTier.weekdayHrs,
+            saturdayHours: selectedTier.satHrs
         });
     }
 
-    // Deduplicate WO suggestions (keep highest point relief)
-    const woSuggestions = moveSuggestions
-        .filter(s => s.type === 'work_order')
-        .reduce((acc, s) => {
-            const existing = acc.find(e => e.id === s.id);
-            if (existing) { if (s.pointsRelieved > existing.pointsRelieved) Object.assign(existing, s); }
-            else acc.push(s);
-            return acc;
-        }, [] as MoveSuggestion[]);
+    // ══════════════════════════════════════════════
+    // 4. PROJECTED OUTCOMES
+    // ══════════════════════════════════════════════
 
-    const soSuggestions = moveSuggestions.filter(s => s.type === 'sales_order');
-    const finalSuggestions = [...woSuggestions.slice(0, 10), ...soSuggestions];
+    // Project WITH MOVES: apply the top-scoring unique moves greedily
+    const simLoadAfterMoves = cloneWeeklyLoad(weeklyLoad);
+    const appliedMoveJobIds = new Set<string>();
 
-    // ── 4. Build Summary ──
+    // Greedily apply the best non-overlapping moves
+    for (const move of moveOptions) {
+        // Skip if any job in this move has already been "moved"
+        const alreadyApplied = move.jobIds.some(id => appliedMoveJobIds.has(id));
+        if (alreadyApplied) continue;
+
+        // Only apply moves that actually recover late jobs
+        if (move.lateJobsRecovered.length === 0) continue;
+
+        for (const jid of move.jobIds) {
+            removeJobFromLoad(simLoadAfterMoves, jid);
+            appliedMoveJobIds.add(jid);
+        }
+    }
+    const projectedLateAfterMoves = findLateJobs(jobs.filter(j => !appliedMoveJobIds.has(j.id)), simLoadAfterMoves);
+    // Re-add late jobs that are still in the schedule but weren't moved
+    const unmovableLate = lateJobs.filter(lj => !appliedMoveJobIds.has(lj.jobId));
+    const afterMovesLate = estimateLateJobsAfterRelief(unmovableLate, weeklyLoad, simLoadAfterMoves, jobs);
+    const projectedOverloadedAfterMoves = findOverloadedWeeks(simLoadAfterMoves);
+
+    // Project WITH MOVES + OT: add OT bonus to remaining overloaded weeks
+    const simLoadAfterOT = cloneWeeklyLoad(simLoadAfterMoves);
+    for (const ot of otRecommendations) {
+        // Only apply OT to weeks that are still overloaded after moves
+        const load = simLoadAfterOT[ot.weekKey]?.[ot.department];
+        if (load && load.total > WEEKLY_TARGET) {
+            load.total = Math.max(0, load.total - ot.bonusPoints);
+        }
+    }
+    const afterOTLate = estimateLateJobsAfterRelief(afterMovesLate.stillLate, simLoadAfterMoves, simLoadAfterOT, jobs);
+    const projectedOverloadedAfterOT = findOverloadedWeeks(simLoadAfterOT);
+
+    // ══════════════════════════════════════════════
+    // 5. BUILD FINAL RESULT
+    // ══════════════════════════════════════════════
     const totalExcessPoints = overloadedWeeks.reduce((sum, w) => sum + w.excess, 0);
 
     return {
-        lateJobs: lateJobs.sort((a, b) => b.daysLate - a.daysLate),
+        lateJobs,
         overloadedWeeks,
-        moveSuggestions: finalSuggestions,
+        moveOptions,
+        otRecommendations,
+        projectedWithMoves: {
+            lateJobs: afterMovesLate.stillLate,
+            overloadedWeeks: projectedOverloadedAfterMoves
+        },
+        projectedWithMovesAndOT: {
+            lateJobs: afterOTLate.stillLate,
+            overloadedWeeks: projectedOverloadedAfterOT
+        },
         summary: {
             totalJobs: jobs.length,
             onTimeJobs: jobs.length - lateJobs.length,
             lateJobCount: lateJobs.length,
             weeksRequiringOT: new Set(overloadedWeeks.map(w => w.weekKey)).size,
-            totalExcessPoints: Math.round(totalExcessPoints)
+            totalExcessPoints: Math.round(totalExcessPoints),
+            projectedLateAfterMoves: afterMovesLate.stillLate.length,
+            projectedLateAfterOT: afterOTLate.stillLate.length
         }
     };
 };
@@ -2371,7 +2614,7 @@ const schedulePipeline = (jobs: Job[]): { jobs: Job[]; insights: ScheduleInsight
     console.log(`[SCHEDULER] Phase 5: Analyzing...`);
     const insights = analyzeSchedule(validated);
     console.log(`[SCHEDULER]   ${insights.summary.lateJobCount} late jobs, ${insights.summary.weeksRequiringOT} weeks needing OT`);
-    console.log(`[SCHEDULER]   ${insights.moveSuggestions.length} move suggestions`);
+    console.log(`[SCHEDULER]   ${insights.moveOptions.length} move options, ${insights.otRecommendations.length} OT recommendations`);
     console.log(`[SCHEDULER] ========= Pipeline Complete =========`);
 
     return { jobs: validated, insights };
