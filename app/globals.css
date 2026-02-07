@@ -3,19 +3,28 @@
 @theme {
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+
+  /* Global Color Remapping for Monochrome Industrial */
+  --color-indigo-600: #000000;
+  --color-indigo-500: #1e293b;
+  --color-blue-600: #000000;
+  --color-blue-500: #1e293b;
+  --color-slate-900: #000000;
+  --color-slate-950: #000000;
+  --color-slate-50: #f8fafc;
 }
 
 :root {
-  --background: #f1f5f9;
-  /* slate-100 */
-  --foreground: #0f172a;
-  /* slate-900 */
-  --primary: #2563eb;
-  /* blue-600 */
-  --card-bg: #e2e8f0;
+  --background: #f8fafc;
+  /* slate-50 */
+  --foreground: #020617;
+  /* slate-950 */
+  --primary: #000000;
+  /* black */
+  --card-bg: #ffffff;
+  /* white */
+  --border-color: #e2e8f0;
   /* slate-200 */
-  --border-color: #cbd5e1;
-  /* slate-300 */
 }
 
 body {
@@ -25,37 +34,37 @@ body {
   overflow-x: hidden;
 }
 
-/* Custom Utilities for Glassmorphism (Light Theme) */
+/* Custom Utilities for Glassmorphism (Monochrome Industrial) */
 @utility glass-panel {
-  background-color: rgba(255, 255, 255, 0.7);
+  background-color: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
 }
 
 @utility glass-card {
-  background-color: rgba(255, 255, 255, 0.5);
+  background-color: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--border-color);
   transition: all 0.3s ease;
 }
 
 @utility glass-card-hover {
   &:hover {
-    background-color: rgba(255, 255, 255, 0.8);
-    border-color: rgba(37, 99, 235, 0.3);
-    box-shadow: 0 0 20px rgba(37, 99, 235, 0.1);
+    background-color: rgba(255, 255, 255, 1);
+    border-color: var(--primary);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
     transform: translateY(-2px);
   }
 }
 
 @utility text-glow {
-  text-shadow: 0 0 10px rgba(37, 99, 235, 0.2);
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
 /* Grid Background (Light Mode) */
 .bg-grid {
   background-size: 40px 40px;
-  background-image: linear-gradient(to right, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+  background-image: linear-gradient(to right, rgba(2, 6, 23, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(2, 6, 23, 0.03) 1px, transparent 1px);
 }

@@ -661,7 +661,7 @@ export default function CustomGanttTable({
                                     >
                                         <div className="job-cell-content">
                                             <div className="flex items-center gap-1.5 overflow-visible relative group/tooltip">
-                                                <div className="job-name flex-1 cursor-help underline decoration-dotted decoration-slate-300 underline-offset-2">
+                                                <div className="job-name flex-1 cursor-help underline decoration-dotted decoration-black underline-offset-2 text-black font-bold">
                                                     {job.name}
                                                 </div>
                                                 {/* Tooltip */}
@@ -711,15 +711,15 @@ export default function CustomGanttTable({
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="job-id">{job.id}</div>
-                                            <div className="text-[10px] text-slate-600 mt-0.5 truncate max-w-[160px]">
+                                            <div className="job-id text-black font-semibold opacity-80">{job.id}</div>
+                                            <div className="text-[10px] text-black mt-0.5 truncate max-w-[160px]">
                                                 {job.description || 'No description'}
                                             </div>
-                                            <div className="flex justify-between items-center mt-1.5 text-[9px] text-slate-500 font-mono">
+                                            <div className="flex justify-between items-center mt-1.5 text-[9px] text-black font-mono">
                                                 <span className={differenceInCalendarDays(job.dueDate, today) < 0 ? "text-red-600 font-bold" : ""}>
                                                     Due: {format(job.dueDate, 'M/d')}
                                                 </span>
-                                                <span className="bg-slate-100 border border-slate-200 px-1 py-px rounded text-slate-600">
+                                                <span className="bg-slate-300 border border-slate-400 px-1 py-px rounded text-black font-semibold">
                                                     {Math.round(job.weldingPoints || 0)} pts
                                                 </span>
                                             </div>

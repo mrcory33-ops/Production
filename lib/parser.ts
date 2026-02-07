@@ -19,6 +19,61 @@ const parseDate = (value: any): Date => {
     return isNaN(date.getTime()) ? new Date() : date;
 };
 
+const normalizeKey = (key: string) => key.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+const SALES_ORDER_KEY_CANDIDATES = new Set([
+    'SO',
+    'SONUM',
+    'SONUMBER',
+    'SONO',
+    'SO#',
+    'SALESORDER',
+    'SALESORDERNUM',
+    'SALESORDERNUMBER',
+    'ORDER',
+    'ORDERNUM',
+    'ORDERNUMBER',
+    'SOHEAD',
+    'SOHEADNUM',
+    'SOHEADNUMBER',
+    'SOHEADER',
+    'SOHEADERNUM',
+    'SOHEADERNUMBER'
+]);
+
+const findSalesOrder = (row: any): string | undefined => {
+    if (!row || typeof row !== 'object') return undefined;
+    const keys = Object.keys(row);
+
+    let matchedKey: string | undefined;
+    for (const key of keys) {
+        const normalized = normalizeKey(key);
+        if (SALES_ORDER_KEY_CANDIDATES.has(normalized)) {
+            matchedKey = key;
+            break;
+        }
+    }
+
+    if (!matchedKey) {
+        matchedKey = keys.find(k => {
+            const normalized = normalizeKey(k);
+            return normalized.includes('SALES') && normalized.includes('ORDER');
+        });
+    }
+
+    if (!matchedKey) return undefined;
+    const value = row[matchedKey];
+    if (value === undefined || value === null || value === '') return undefined;
+    return String(value).trim();
+};
+
+const deriveSalesOrderFromWorkOrder = (workOrder: any): string | undefined => {
+    if (!workOrder) return undefined;
+    const digits = String(workOrder).replace(/\D/g, '');
+    if (digits.length >= 5) return digits.slice(0, 5);
+    return undefined;
+};
+
 // Helper to determine product type
 const parseProductType = (division: string): ProductType => {
     const d = division?.toUpperCase() || '';
@@ -100,6 +155,7 @@ export const parseGlobalShopExport = async (fileBuffer: ArrayBuffer): Promise<Jo
         // Priority list for Due Date columns
         const dueDateKeys = ['WO_HEAD_DATE_DUE', 'PROMISED_DATE', 'WO_DUE_DATE', 'JOB_DUE_DATE', 'DATE_DUE', 'SO_HEAD_DATE_DUE'];
         const resolvedDueDate = findDueDate(masterRow, dueDateKeys);
+        const resolvedSalesOrder = findSalesOrder(masterRow) || deriveSalesOrderFromWorkOrder(masterRow['WO_NUM']);
 
         const job: Job = {
             id: masterRow['WO_NUM'], // Use the Master's WO_NUM as the primary ID
@@ -112,6 +168,7 @@ export const parseGlobalShopExport = async (fileBuffer: ArrayBuffer): Promise<Jo
 
             productType: parseProductType(masterRow['DIVISION']),
             salesperson: masterRow['REP_NAME'] || '',
+            salesOrder: resolvedSalesOrder,
 
             isPriority: false, // Default, user must flag manually? Or look for specific notes?
             sizeClass: totalWeldingPoints >= 70 ? 'LARGE' : 'SMALL',

@@ -23,6 +23,7 @@ export interface Job {
     // Classification
     productType: ProductType; // DIVISION (F/D/H)
     salesperson: string; // REP_NAME
+    salesOrder?: string; // Sales Order Number (if available)
 
     // Priority & Size
     isPriority: boolean; // Manual override

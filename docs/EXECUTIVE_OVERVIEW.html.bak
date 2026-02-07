@@ -1,0 +1,1053 @@
+<h1>EMJAC Production Scheduling System</h1>
+<h2>Executive Overview Document</h2>
+<p><strong>Prepared for:</strong> Company President<br><strong>Date:</strong> February 5, 2026<br><strong>System Version:</strong> 7.2.8<br><strong>Live URL:</strong> <a href="https://production-scheduler-em-ops.web.app">https://production-scheduler-em-ops.web.app</a></p>
+<hr>
+<h2>1. What This System Does</h2>
+<p>The <strong>EMJAC Production Scheduling System</strong> is an intelligent job scheduling platform that:</p>
+<ol>
+<li><strong>Imports daily job data</strong> from Global Shop (XLSX exports)</li>
+<li><strong>Automatically schedules work</strong> across all 6 production departments</li>
+<li><strong>Tracks job progress</strong> against the original schedule</li>
+<li><strong>Identifies problems early</strong> (delays, stalls, due date changes)</li>
+<li><strong>Exports reports</strong> for analysis and record-keeping</li>
+</ol>
+<p>The system replaces manual scheduling with data-driven decisions, ensuring that:</p>
+<ul>
+<li>Big jobs get prioritized appropriately</li>
+<li>Departments don&#39;t get overloaded</li>
+<li>Due dates are met whenever possible</li>
+<li>Problems are visible before they become critical</li>
+</ul>
+<hr>
+<h2>2. Daily Workflow</h2>
+<h3>Morning: Import Today&#39;s Data</h3>
+<ol>
+<li><strong>Export from Global Shop</strong> → Generate the daily XLSX file containing all open work orders</li>
+<li><strong>Upload to Scheduler</strong> → Drag &amp; drop the file into the Upload page</li>
+<li><strong>Preview &amp; Confirm</strong> → Review the parsed jobs, then click &quot;Sync to Database&quot;</li>
+</ol>
+<h3>What Happens During Import</h3>
+<table>
+<thead>
+<tr>
+<th>Job Status</th>
+<th>System Action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>NEW</strong> (never seen before)</td>
+<td>Scheduled automatically using optimization algorithms</td>
+</tr>
+<tr>
+<td><strong>EXISTING</strong> (already in system)</td>
+<td>Schedule preserved, progress tracked against original plan</td>
+</tr>
+<tr>
+<td><strong>MISSING</strong> (was in system, not in today&#39;s file)</td>
+<td>Marked as COMPLETED</td>
+</tr>
+</tbody></table>
+<h3>Automatic Alerts After Import</h3>
+<p>The system notifies you of:</p>
+<ul>
+<li><strong>📅 Due Date Changes</strong> — Jobs where the due date moved since yesterday (with old → new dates shown)</li>
+<li><strong>🚀 Ahead of Schedule</strong> — Jobs that jumped past their expected department</li>
+</ul>
+<hr>
+<h2>3. The Six Production Departments</h2>
+<p>Jobs flow through departments in this fixed order:</p>
+<pre><code>Engineering → Laser → Press Brake → Welding → Polishing → Assembly
+</code></pre>
+<p>Each department&#39;s work is measured in <strong>Welding Points</strong> (from <code>DEPT4HRS</code> in Global Shop), which represent the job&#39;s complexity and time requirements.</p>
+<h3>Department Duration Calculation</h3>
+<p>The system calculates how many <strong>days</strong> a job will spend in each department using worker capacity:</p>
+<p><strong>Formula:</strong></p>
+<pre><code>Duration (days) = Welding Points ÷ Daily Output
+Daily Output = Workers per Project × Output per Worker/Day
+</code></pre>
+<h4>Worker Pool Configuration</h4>
+<table>
+<thead>
+<tr>
+<th>Department</th>
+<th>Workers per Project</th>
+<th>Output per Worker/Day</th>
+<th>Effective Daily Output</th>
+<th>Multiplier</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Engineering</strong></td>
+<td>1</td>
+<td>22 pts</td>
+<td>22 pts/day</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Laser</strong></td>
+<td>2</td>
+<td>67.5 pts</td>
+<td>135 pts/day</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Press Brake</strong></td>
+<td>4</td>
+<td>33 pts</td>
+<td>132 pts/day</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Welding</strong></td>
+<td>3</td>
+<td>15 pts</td>
+<td>45 pts/day</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Polishing</strong></td>
+<td>3</td>
+<td>18 pts</td>
+<td>54 pts/day</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Assembly</strong></td>
+<td>3</td>
+<td>16 pts</td>
+<td>48 pts/day</td>
+<td><strong>×1.25</strong></td>
+</tr>
+</tbody></table>
+<h4>Example: 100-Point FAB Job Duration</h4>
+<table>
+<thead>
+<tr>
+<th>Department</th>
+<th>Calculation</th>
+<th>Raw Days</th>
+<th>Rounded</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Engineering</td>
+<td>100 ÷ 22</td>
+<td>4.55 days</td>
+<td><strong>5 days</strong></td>
+</tr>
+<tr>
+<td>Laser</td>
+<td>100 ÷ 135</td>
+<td>0.74 days</td>
+<td><strong>1 day</strong></td>
+</tr>
+<tr>
+<td>Press Brake</td>
+<td>100 ÷ 132</td>
+<td>0.76 days</td>
+<td><strong>1 day</strong></td>
+</tr>
+<tr>
+<td>Welding</td>
+<td>100 ÷ 45</td>
+<td>2.22 days</td>
+<td><strong>2.5 days</strong></td>
+</tr>
+<tr>
+<td>Polishing</td>
+<td>100 ÷ 54</td>
+<td>1.85 days</td>
+<td><strong>2 days</strong></td>
+</tr>
+<tr>
+<td>Assembly</td>
+<td>100 ÷ 48 × 1.25</td>
+<td>2.60 days</td>
+<td><strong>3 days</strong></td>
+</tr>
+</tbody></table>
+<p><strong>Total work time: ~14.5 days</strong> (plus gaps between departments)</p>
+<h4>Special Rules</h4>
+<ol>
+<li><strong>Assembly has a 1.25× time multiplier</strong> — takes 25% longer than formula suggests</li>
+<li><strong>Door Leaf jobs</strong> (description contains &quot;door&quot; but not &quot;frame&quot;) — minimum 2 days in Welding</li>
+<li><strong>Results round up to nearest half-day</strong> — 2.22 becomes 2.5, not 2</li>
+</ol>
+<h4>Why &quot;Workers per Project&quot; Matters</h4>
+<ul>
+<li><strong>Engineering</strong> (1 worker max): Only 1 engineer can work on any single job, so a 100pt job takes longer</li>
+<li><strong>Press Brake</strong> (4 workers max): Up to 4 operators can work on one job, processing faster</li>
+<li><strong>Welding</strong> (3 workers max): Balanced for quality — too many welders causes coordination issues</li>
+</ul>
+<hr>
+<h2>4. Urgency Scoring (Complete Breakdown)</h2>
+<p>Every job receives an <strong>Urgency Score</strong> (0–100+) that determines its scheduling priority. The score is calculated from <strong>7 built-in factors</strong> plus any <strong>custom factors</strong> you define.</p>
+<h3>4.1 Built-In Scoring Factors</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Factor</th>
+<th>Max Points</th>
+<th>Trigger Condition</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><strong>Due Date Proximity</strong></td>
+<td>30 pts</td>
+<td>Always active</td>
+<td>Jobs due within 5 days get maximum points. Score scales down for jobs with more time.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>FastShip</strong></td>
+<td>25 pts</td>
+<td><code>fastShip = true</code></td>
+<td>Jobs flagged as &quot;Fast Ship&quot; in Global Shop get a 25-point bonus. This is the highest single bonus.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Slippage Risk</strong></td>
+<td>20 pts</td>
+<td>Current dept behind expected</td>
+<td>If a job is in Laser but should be in Welding, it gets 5 points per department of lag.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Stall Penalty</strong></td>
+<td>15 pts</td>
+<td>No movement for 2+ days</td>
+<td>If a job hasn&#39;t moved departments in 2+ days AND is behind schedule, it gets 5 points per day stalled.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Big Rock</strong></td>
+<td>10 pts</td>
+<td>weldingPoints ≥ 50</td>
+<td>Large jobs get a priority boost to ensure they start on time.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>REF Job</strong></td>
+<td>10 pts</td>
+<td>Description contains &quot;REF&quot;</td>
+<td>Refrigeration/specialty jobs get a 10-point bonus.</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Harmonic</strong></td>
+<td>10 pts</td>
+<td>productType = &quot;HARMONIC&quot;</td>
+<td>Harmonic product type jobs (Work Order starts with &quot;H&quot;) get a 10-point bonus.</td>
+</tr>
+</tbody></table>
+<h3>4.2 Score Calculation Example</h3>
+<p>A job with:</p>
+<ul>
+<li>Due in 3 days → <strong>30 pts</strong> (Due Date Proximity)</li>
+<li>FastShip flag → <strong>25 pts</strong></li>
+<li>60 welding points → <strong>10 pts</strong> (Big Rock)</li>
+<li>Description: &quot;REF Frame&quot; → <strong>10 pts</strong> (REF Job)</li>
+</ul>
+<p><strong>Total Urgency Score: 75 points</strong></p>
+<p>This job would be scheduled before a job with only 40 points.</p>
+<h3>4.3 Custom Factors</h3>
+<p>The system supports user-defined scoring factors. Each custom factor can:</p>
+<ul>
+<li>Match text in the job description, notes, or name</li>
+<li>Add a bonus point value when matched</li>
+<li>Be enabled/disabled individually</li>
+</ul>
+<hr>
+<h2>5. Product Types</h2>
+<p>Jobs are classified into three product types based on the Work Order number prefix:</p>
+<table>
+<thead>
+<tr>
+<th>Prefix</th>
+<th>Product Type</th>
+<th>Symbol</th>
+<th>Department Pools</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>D</td>
+<td>DOORS</td>
+<td>🚪</td>
+<td>Uses DOORS-specific capacity pools</td>
+</tr>
+<tr>
+<td>H</td>
+<td>HARMONIC</td>
+<td>〰️</td>
+<td>Uses HARMONIC-specific capacity pools</td>
+</tr>
+<tr>
+<td>All others</td>
+<td>FAB</td>
+<td>🏭</td>
+<td>Uses general FAB capacity pools</td>
+</tr>
+</tbody></table>
+<p>This classification affects:</p>
+<ul>
+<li>Which capacity pool a job draws from</li>
+<li>Whether the Harmonic urgency bonus applies</li>
+<li>Analytics and reporting breakdowns</li>
+</ul>
+<hr>
+<h2>6. Job Size Classification</h2>
+<table>
+<thead>
+<tr>
+<th>Size Class</th>
+<th>Welding Points</th>
+<th>Scheduling Priority</th>
+<th>Gap Between Departments</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Big Rock</strong></td>
+<td>≥ 50 pts</td>
+<td>Scheduled FIRST — these anchor the week</td>
+<td>1 full day</td>
+</tr>
+<tr>
+<td><strong>Medium</strong></td>
+<td>8–49 pts</td>
+<td>Scheduled after big rocks</td>
+<td>0.5 days (half day)</td>
+</tr>
+<tr>
+<td><strong>Small</strong></td>
+<td>≤ 7 pts</td>
+<td>Batched together to fill gaps</td>
+<td>No gap (same-day handoff OK)</td>
+</tr>
+</tbody></table>
+<h3>Why Big Rocks Come First</h3>
+<p>Big Rock jobs take multiple days per department and consume significant capacity. By scheduling them first, the system:</p>
+<ol>
+<li>Ensures they meet their due dates</li>
+<li>Places them optimally to avoid conflicts with each other</li>
+<li>Allows smaller jobs to fill the gaps around them</li>
+</ol>
+<hr>
+<h2>7. Batching Logic (Similar Jobs Grouped Together)</h2>
+<p>The scheduler groups similar jobs together to improve production efficiency. Jobs are batched based on their <strong>description text</strong> matching specific patterns.</p>
+<h3>7.1 Batch Categories</h3>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Description Patterns (Any Match)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Frame Knock Down</strong></td>
+<td>&quot;frame knock down&quot;, &quot;frames knock down&quot;, &quot;frame knockdown&quot;, &quot;frame kd&quot;, &quot;frames kd&quot;, &quot;kd frame&quot;, &quot;knock down frame&quot;</td>
+</tr>
+<tr>
+<td><strong>Frame Case Opening</strong></td>
+<td>&quot;frame case opening&quot;, &quot;frames case opening&quot;, &quot;case opening frame&quot;, &quot;frame co&quot;, &quot;frames co&quot;</td>
+</tr>
+<tr>
+<td><strong>Door Lock Seam</strong></td>
+<td>&quot;door lock seam&quot;, &quot;doors lock seam&quot;, &quot;lock seam door&quot;, &quot;lock seam doors&quot;</td>
+</tr>
+</tbody></table>
+<h3>7.2 Batching Tiers</h3>
+<p>When jobs match a batch category, they are further grouped by:</p>
+<p><strong>Tier 1 — Strict Match (Highest Priority):</strong></p>
+<ul>
+<li>Same batch category (e.g., Frame Knock Down)</li>
+<li>Same <strong>gauge</strong> (e.g., &quot;16 ga&quot;, &quot;#16&quot;)</li>
+<li>Same <strong>material</strong> (e.g., SS304, galvanized, CRS)</li>
+<li>Same <strong>due week</strong> (Monday-Sunday containing due date)</li>
+</ul>
+<p><strong>Tier 2 — Relaxed Match (Medium Priority):</strong></p>
+<ul>
+<li>Same batch category</li>
+<li>Same due week</li>
+<li>(Any gauge or material)</li>
+</ul>
+<p><strong>Tier 3 — No Batch (Normal Priority):</strong></p>
+<ul>
+<li>Jobs that don&#39;t match any batch category are scheduled individually</li>
+</ul>
+<h3>7.3 Material Detection</h3>
+<p>The system recognizes these materials from job descriptions:</p>
+<table>
+<thead>
+<tr>
+<th>Keywords</th>
+<th>Material Code</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>&quot;ss 316l&quot;, &quot;316l&quot;</td>
+<td>SS316L</td>
+</tr>
+<tr>
+<td>&quot;ss 316&quot;, &quot;316&quot;</td>
+<td>SS316</td>
+</tr>
+<tr>
+<td>&quot;ss 304&quot;, &quot;304&quot;</td>
+<td>SS304</td>
+</tr>
+<tr>
+<td>&quot;stainless&quot;, &quot;ss&quot;</td>
+<td>STAINLESS</td>
+</tr>
+<tr>
+<td>&quot;galvanized&quot;, &quot;galv&quot;</td>
+<td>GALV</td>
+</tr>
+<tr>
+<td>&quot;aluminum&quot;, &quot;alum&quot;</td>
+<td>ALUM</td>
+</tr>
+<tr>
+<td>&quot;crs&quot;</td>
+<td>CRS (Cold Rolled Steel)</td>
+</tr>
+<tr>
+<td>&quot;hrs&quot;</td>
+<td>HRS (Hot Rolled Steel)</td>
+</tr>
+<tr>
+<td>&quot;steel&quot;</td>
+<td>STEEL</td>
+</tr>
+</tbody></table>
+<h3>7.4 Gauge Detection</h3>
+<p>The system looks for gauge patterns like:</p>
+<ul>
+<li>&quot;16 ga&quot;, &quot;16ga&quot;, &quot;16 gage&quot;</li>
+<li>&quot;#16&quot;, &quot;# 16&quot;</li>
+</ul>
+<h3>7.5 Batching Example</h3>
+<p>Given these jobs:</p>
+<ol>
+<li>&quot;Frame Knock Down 16ga SS304&quot; due Feb 10</li>
+<li>&quot;Frame Knock Down 16ga SS304&quot; due Feb 12</li>
+<li>&quot;Frame Knock Down 18ga Galv&quot; due Feb 11</li>
+<li>&quot;Frame Case Opening&quot; due Feb 10</li>
+</ol>
+<p><strong>Result:</strong></p>
+<ul>
+<li>Jobs 1 &amp; 2 → Same batch (FRAME_KD, 16ga, SS304, same week)</li>
+<li>Job 3 → Separate batch (different gauge/material)</li>
+<li>Job 4 → Separate batch (different category)</li>
+</ul>
+<p>Jobs 1 &amp; 2 will be scheduled consecutively to maximize efficiency.</p>
+<hr>
+<h2>8. Capacity Management</h2>
+<h3>8.1 Weekly Capacity Pool</h3>
+<p>Each department has a <strong>weekly budget of 850 points</strong> (adjustable).</p>
+<table>
+<thead>
+<tr>
+<th>Day</th>
+<th>Example Load</th>
+<th>Running Total</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Monday</td>
+<td>200 pts</td>
+<td>200 / 850</td>
+</tr>
+<tr>
+<td>Tuesday</td>
+<td>250 pts</td>
+<td>450 / 850</td>
+</tr>
+<tr>
+<td>Wednesday</td>
+<td>180 pts</td>
+<td>630 / 850</td>
+</tr>
+<tr>
+<td>Thursday</td>
+<td>150 pts</td>
+<td>780 / 850</td>
+</tr>
+<tr>
+<td>Friday</td>
+<td>70 pts</td>
+<td>850 / 850 ✓</td>
+</tr>
+</tbody></table>
+<p>This allows flexibility — a heavy Monday can be balanced by a lighter Friday.</p>
+<h3>8.2 Big Rock Rules (70/30 Rule)</h3>
+<p>To prevent big jobs from monopolizing a department:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Maximum concurrent Big Rocks per day (Engineering)</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Maximum concurrent Big Rocks per day (Laser)</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Maximum concurrent Big Rocks per day (Press Brake)</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Maximum concurrent Big Rocks per day (Welding)</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Maximum concurrent Big Rocks per day (Polishing)</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Maximum concurrent Big Rocks per day (Assembly)</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Maximum daily capacity consumed by Big Rocks</td>
+<td>70%</td>
+</tr>
+<tr>
+<td>Reserved for smaller jobs</td>
+<td>30%</td>
+</tr>
+</tbody></table>
+<h3>8.3 Department-Specific Capacity Pools</h3>
+<p>Each department has multiple capacity pools for different product types:</p>
+<p><strong>Example: Welding Department</strong></p>
+<ul>
+<li>Pool 1: FAB + HARMONIC products</li>
+<li>Pool 2: DOORS products</li>
+</ul>
+<p>This prevents one product type from completely blocking another.</p>
+<hr>
+<h2>9. Department Gaps (Buffer Time)</h2>
+<p>Jobs don&#39;t move instantly between departments. The scheduler inserts realistic gaps:</p>
+<table>
+<thead>
+<tr>
+<th>Job Size</th>
+<th>Gap Between Departments</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Big Rock (≥50 pts)</td>
+<td>1 day</td>
+<td>Large jobs need material staging and setup time</td>
+</tr>
+<tr>
+<td>Medium (8-49 pts)</td>
+<td>0.5 days (half day)</td>
+<td>Moderate setup requirements</td>
+</tr>
+<tr>
+<td>Small (≤7 pts)</td>
+<td>No gap</td>
+<td>Can be handed off same-day</td>
+</tr>
+</tbody></table>
+<h3>&quot;No Gaps&quot; Override</h3>
+<p>For rush jobs, supervisors can click the <strong>⚡ No Gaps</strong> button on any job. This:</p>
+<ul>
+<li>Removes ALL department gaps for that specific job</li>
+<li>Schedules departments back-to-back</li>
+<li>Can significantly shorten the total job duration</li>
+<li>Appears as a blue &quot;⚡ No Gaps&quot; badge on the job card</li>
+</ul>
+<hr>
+<h2>10. Scheduling Algorithms</h2>
+<p>The system uses two scheduling strategies depending on the situation:</p>
+<h3>10.1 Backward Scheduling (Default for New Jobs)</h3>
+<p><strong>Goal:</strong> Finish just before the due date with a buffer.</p>
+<ol>
+<li>Start from due date minus 2 days (buffer)</li>
+<li>Work backward, placing Assembly first</li>
+<li>Then Polishing, Welding, Press Brake, Laser, Engineering</li>
+<li>Find the earliest start date needed</li>
+</ol>
+<p><strong>Used when:</strong> Job is new and has time before due date.</p>
+<h3>10.2 Forward Scheduling (For Overdue/Tight Deadlines)</h3>
+<p><strong>Goal:</strong> Start ASAP and push forward.</p>
+<ol>
+<li>Start from TODAY (or job&#39;s current department)</li>
+<li>Schedule each department in order: Engineering → Assembly</li>
+<li>Calculate the earliest possible completion date</li>
+</ol>
+<p><strong>Used when:</strong></p>
+<ul>
+<li>Job&#39;s calculated start date would be in the past</li>
+<li>Job is already overdue</li>
+<li>Job has been rescheduled from current department</li>
+</ul>
+<h3>10.3 Scheduling Priority Order</h3>
+<ol>
+<li><strong>All Big Rocks first</strong> — Sorted by urgency score (highest first)</li>
+<li><strong>All smaller jobs</strong> — Sorted by urgency score, grouped by batch category</li>
+</ol>
+<hr>
+<h2>11. Handling Overdue Jobs</h2>
+<p>If a job&#39;s scheduled start date has already passed:</p>
+<ol>
+<li>The system <strong>reschedules from TODAY</strong> (not the original date)</li>
+<li>It starts from the job&#39;s <strong>current department</strong> (not Engineering)</li>
+<li>The job is flagged as overdue (red due date)</li>
+<li>Forward scheduling is used to find the soonest completion</li>
+</ol>
+<hr>
+<h2>12. Progress Tracking</h2>
+<p>Every time a new XLSX is imported, the system compares where each job <strong>should be</strong> vs. where it <strong>actually is</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Badge</th>
+<th>Color</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>ON_TRACK</strong></td>
+<td>(none)</td>
+<td>—</td>
+<td>Job is in the expected department</td>
+</tr>
+<tr>
+<td><strong>AHEAD</strong></td>
+<td>🚀</td>
+<td>Green</td>
+<td>Job has passed its expected department — great news!</td>
+</tr>
+<tr>
+<td><strong>SLIPPING</strong></td>
+<td>⚠️</td>
+<td>Yellow</td>
+<td>Job is behind schedule but moved recently</td>
+</tr>
+<tr>
+<td><strong>STALLED</strong></td>
+<td>OT?</td>
+<td>Orange</td>
+<td>Job is behind AND hasn&#39;t moved in 2+ days (may need overtime)</td>
+</tr>
+<tr>
+<td><strong>Needs Reschedule</strong></td>
+<td>📅</td>
+<td>Purple (pulsing)</td>
+<td>Due date changed — user should review</td>
+</tr>
+</tbody></table>
+<h3>How Progress Status is Determined</h3>
+<ol>
+<li>System looks up the <strong>expected department for today</strong> from the original schedule</li>
+<li>Compares to the <strong>current department</strong> from today&#39;s Global Shop import</li>
+<li>Calculates the difference:<ul>
+<li>Current ahead of expected → <strong>AHEAD</strong> 🚀</li>
+<li>Current behind expected + moved in last 2 days → <strong>SLIPPING</strong></li>
+<li>Current behind expected + no movement for 2+ days → <strong>STALLED</strong></li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2>13. Due Date Change Detection</h2>
+<p>When Global Shop&#39;s due date for a job changes between imports:</p>
+<table>
+<thead>
+<tr>
+<th>What Happens</th>
+<th>Visual Indicator</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>dueDateChanged</code> flag set to <code>true</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>previousDueDate</code> stored for reference</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>needsReschedule</code> flag set to <code>true</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>📅 Purple pulsing badge</strong> appears on job</td>
+<td>Visible on Planning Board</td>
+</tr>
+<tr>
+<td>Alert shown in sync summary</td>
+<td>After upload</td>
+</tr>
+<tr>
+<td>Tooltip shows: &quot;Was: [old date] → Now: [new date]&quot;</td>
+<td>On hover</td>
+</tr>
+</tbody></table>
+<p><strong>Why this matters:</strong> Due date changes from sales should trigger a schedule review. The system makes these changes impossible to miss.</p>
+<hr>
+<h2>14. The Planning Board (Gantt Chart)</h2>
+<p>The main view is an interactive Gantt chart showing:</p>
+<h3>Left Panel (Job Cards)</h3>
+<ul>
+<li>Job name (customer name from Global Shop)</li>
+<li>Work Order ID</li>
+<li>Job description (first line)</li>
+<li>Due date (red if overdue)</li>
+<li>Welding points</li>
+<li>Urgency score (visible on hover)</li>
+</ul>
+<h3>Right Panel (Timeline)</h3>
+<ul>
+<li>Department bars showing when work is scheduled</li>
+<li>Color coding by department:<ul>
+<li>🔵 Engineering (blue)</li>
+<li>🟣 Laser (purple)</li>
+<li>🟠 Press Brake (orange)</li>
+<li>🔴 Welding (red)</li>
+<li>🟢 Polishing (green)</li>
+<li>🟡 Assembly (yellow)</li>
+</ul>
+</li>
+</ul>
+<h3>Visual Indicators on Job Cards</h3>
+<table>
+<thead>
+<tr>
+<th>Indicator</th>
+<th>Meaning</th>
+<th>Action Needed</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Red <strong>!</strong> badge</td>
+<td>Scheduling conflict — can&#39;t meet due date</td>
+<td>Consider overtime or scope reduction</td>
+</tr>
+<tr>
+<td>Orange <strong>OT?</strong></td>
+<td>Stalled 2+ days, behind schedule</td>
+<td>May need overtime</td>
+</tr>
+<tr>
+<td>Yellow <strong>⚠</strong></td>
+<td>Slipping behind schedule</td>
+<td>Monitor closely</td>
+</tr>
+<tr>
+<td>Green <strong>🚀</strong></td>
+<td>Ahead of schedule</td>
+<td>Celebrate!</td>
+</tr>
+<tr>
+<td>Purple <strong>📅</strong> (pulsing)</td>
+<td>Due date changed</td>
+<td>Review and possibly reschedule</td>
+</tr>
+<tr>
+<td>Blue <strong>⚡ No Gaps</strong></td>
+<td>Gap override active</td>
+<td>Job will move faster than normal</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>15. Export Function</h2>
+<h3>Exporting the Schedule</h3>
+<p>Click <strong>&quot;Export&quot;</strong> on the Planning Board to download:</p>
+<ul>
+<li><strong>PDF export</strong> of the current schedule</li>
+<li>Includes all visible jobs with their department timelines</li>
+<li>Can be filtered by date range, department, or job type</li>
+</ul>
+<h3>What&#39;s Included in Exports</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Job ID</td>
+<td>Work Order number</td>
+</tr>
+<tr>
+<td>Job Name</td>
+<td>Customer name</td>
+</tr>
+<tr>
+<td>Description</td>
+<td>Product description</td>
+</tr>
+<tr>
+<td>Due Date</td>
+<td>Original due date from Global Shop</td>
+</tr>
+<tr>
+<td>Welding Points</td>
+<td>Complexity measure (DEPT4HRS)</td>
+</tr>
+<tr>
+<td>Product Type</td>
+<td>FAB, DOORS, or HARMONIC</td>
+</tr>
+<tr>
+<td>Department Schedule</td>
+<td>Start/end dates for each department</td>
+</tr>
+<tr>
+<td>Status Flags</td>
+<td>Overdue, conflict, stalled, etc.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>16. Complete Flow: First Import to Next Day</h2>
+<h3>Day 1: First Import (Monday Morning)</h3>
+<ol>
+<li><p><strong>Export XLSX from Global Shop</strong> </p>
+<ul>
+<li>Contains all open work orders</li>
+<li>System reads: WO#, Customer, Description, Due Date, DEPT4HRS (welding points), Current Dept</li>
+</ul>
+</li>
+<li><p><strong>Upload to Scheduler</strong></p>
+<ul>
+<li>Drag &amp; drop file onto Upload page</li>
+<li>System parses and groups by Work Order Number</li>
+</ul>
+</li>
+<li><p><strong>Parsing &amp; Filtering</strong></p>
+<ul>
+<li>Jobs must have welding points &gt; 0</li>
+<li>Jobs must have valid due date</li>
+<li>Product type determined from WO# prefix (D=DOORS, H=HARMONIC, else FAB)</li>
+</ul>
+</li>
+<li><p><strong>Urgency Scoring</strong></p>
+<ul>
+<li>Each job scored on 7 factors + custom factors</li>
+<li>FastShip, REF, Harmonic bonuses applied if applicable</li>
+</ul>
+</li>
+<li><p><strong>Batching Analysis</strong></p>
+<ul>
+<li>Descriptions scanned for Frame KD, Frame CO, Door Lock Seam patterns</li>
+<li>Matching jobs grouped by gauge/material/due week</li>
+</ul>
+</li>
+<li><p><strong>Big Rocks Scheduled First</strong></p>
+<ul>
+<li>All jobs ≥50 pts sorted by urgency score</li>
+<li>Scheduled using backward scheduling from due date</li>
+<li>70/30 rule enforced (max 70% capacity to big rocks)</li>
+</ul>
+</li>
+<li><p><strong>Smaller Jobs Scheduled</strong></p>
+<ul>
+<li>Remaining jobs sorted by urgency, then batched</li>
+<li>Fill gaps around big rocks</li>
+<li>Batched jobs scheduled consecutively</li>
+</ul>
+</li>
+<li><p><strong>Results Saved</strong></p>
+<ul>
+<li>All jobs written to Firebase</li>
+<li>Planning Board updated in real-time</li>
+</ul>
+</li>
+</ol>
+<h3>Day 2: Daily Sync (Tuesday Morning)</h3>
+<ol>
+<li><p><strong>Export new XLSX from Global Shop</strong></p>
+</li>
+<li><p><strong>Upload to Scheduler</strong></p>
+</li>
+<li><p><strong>System Compares to Yesterday:</strong></p>
+<ul>
+<li><strong>New jobs</strong> (new WO#s) → Scheduled with remaining capacity</li>
+<li><strong>Existing jobs</strong> → Schedule PRESERVED, progress tracked</li>
+<li><strong>Missing jobs</strong> (WO# not in file) → Marked COMPLETED</li>
+</ul>
+</li>
+<li><p><strong>Progress Tracking:</strong></p>
+<ul>
+<li>Current department compared to expected department</li>
+<li>Status updated: ON_TRACK, AHEAD, SLIPPING, or STALLED</li>
+</ul>
+</li>
+<li><p><strong>Due Date Change Detection:</strong></p>
+<ul>
+<li>Today&#39;s due date vs. yesterday&#39;s due date</li>
+<li>If different → Flag job with 📅, store previous date</li>
+</ul>
+</li>
+<li><p><strong>Sync Summary Displayed:</strong></p>
+<pre><code>✅ Sync Complete!
+
+📊 Job Summary:
+  • 5 new jobs scheduled
+  • 42 existing jobs updated
+  • 3 jobs marked complete
+
+📅 Due Date Changes (2 jobs):
+  ⚠️ WO-12345: 2/10 → 2/15
+  ⚠️ WO-12346: 2/12 → 2/8
+  → Go to Planning Board to reschedule
+
+🚀 Ahead of Schedule (1 job):
+  ✨ WO-12347 (now in Welding)
+</code></pre>
+</li>
+<li><p><strong>Review Planning Board</strong></p>
+<ul>
+<li>Stalled jobs show OT? badge</li>
+<li>Due date changes show 📅 badge</li>
+<li>Click &quot;No Gaps&quot; for any rush jobs</li>
+</ul>
+</li>
+<li><p><strong>Export if Needed</strong></p>
+<ul>
+<li>Download PDF for distribution or printing</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2>17. Key Benefits Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Manual scheduling in spreadsheets</td>
+<td>Automated, optimized scheduling</td>
+</tr>
+<tr>
+<td>No visibility into capacity</td>
+<td>Weekly capacity pool tracked automatically</td>
+</tr>
+<tr>
+<td>Due date changes missed</td>
+<td>Automatic detection with visual alerts</td>
+</tr>
+<tr>
+<td>Overdue jobs discovered late</td>
+<td>Early warning via progress status badges</td>
+</tr>
+<tr>
+<td>Big jobs block small ones</td>
+<td>70/30 rule ensures balanced flow</td>
+</tr>
+<tr>
+<td>Similar jobs scattered</td>
+<td>Intelligent batching by material/gauge</td>
+</tr>
+<tr>
+<td>FastShip/REF/Harmonic treated equally</td>
+<td>Priority bonuses ensure proper handling</td>
+</tr>
+<tr>
+<td>No urgency transparency</td>
+<td>Urgency scores visible with factor breakdown</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>18. Technical Details (For Reference)</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Frontend</td>
+<td>Next.js 16 (React)</td>
+</tr>
+<tr>
+<td>Database</td>
+<td>Firebase Firestore</td>
+</tr>
+<tr>
+<td>Hosting</td>
+<td>Firebase Hosting</td>
+</tr>
+<tr>
+<td>Data Import</td>
+<td>XLSX parsing (Global Shop format)</td>
+</tr>
+<tr>
+<td>Authentication</td>
+<td>Firebase Auth</td>
+</tr>
+<tr>
+<td>Real-time Updates</td>
+<td>Firestore subscriptions</td>
+</tr>
+<tr>
+<td>Export</td>
+<td>PDF generation</td>
+</tr>
+</tbody></table>
+<h3>Key Configuration Values</h3>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Weekly Capacity</td>
+<td>850 pts/week</td>
+<td>Per department</td>
+</tr>
+<tr>
+<td>Big Rock Threshold</td>
+<td>≥50 pts</td>
+<td>Jobs this size get special handling</td>
+</tr>
+<tr>
+<td>Small Job Threshold</td>
+<td>≤7 pts</td>
+<td>No gaps between departments</td>
+</tr>
+<tr>
+<td>Buffer Days</td>
+<td>2 days</td>
+<td>Finish before due date</td>
+</tr>
+<tr>
+<td>Stall Detection</td>
+<td>2 days</td>
+<td>No movement triggers STALLED status</td>
+</tr>
+<tr>
+<td>FastShip Bonus</td>
+<td>25 pts</td>
+<td>Highest urgency bonus</td>
+</tr>
+<tr>
+<td>Due Date Proximity Max</td>
+<td>30 pts</td>
+<td>For jobs due within 5 days</td>
+</tr>
+</tbody></table>
+<hr>
+<p><strong>Questions?</strong> Contact the development team for demonstrations or additional training.</p>
+<p><strong>Document Version:</strong> 2.0 (Complete)<br><strong>Last Updated:</strong> February 5, 2026</p>
