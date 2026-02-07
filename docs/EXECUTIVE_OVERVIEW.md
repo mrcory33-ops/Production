@@ -2,8 +2,8 @@
 ## Executive Overview Document
 
 **Prepared for:** Company President  
-**Date:** February 5, 2026  
-**System Version:** 7.2.8  
+**Date:** February 7, 2026  
+**System Version:** 7.3.0  
 **Live URL:** https://production-scheduler-em-ops.web.app
 
 ---
@@ -434,6 +434,69 @@ The main view is an interactive Gantt chart showing:
 
 ---
 
+## 14.5. Schedule Insights — Decision Support Panel
+
+Click the **📊 Insights** button (chart icon) on the Planning Board toolbar to open the Schedule Insights panel.
+
+### What It Shows
+
+The panel analyzes the current schedule and presents **options, not orders** — the manager makes the final call.
+
+#### Summary Pipeline
+
+At the top, a 3-stage pipeline shows the projected outcome:
+
+```
+Current State   →   After Suggested Moves   →   After Moves + Overtime
+   12 late              6 late                       0 late
+```
+
+#### Section 1: Late Jobs
+
+Lists every job that will miss its due date, showing:
+- Work Order ID and customer name
+- Due date vs. estimated completion
+- Days late and bottleneck department
+
+#### Section 2: Overtime Recommendations
+
+For each overloaded week, shows a recommended overtime tier:
+
+| Tier | Schedule | Extra Capacity |
+|------|----------|----------------|
+| **Tier 1** | 9-Hour Days (Mon-Fri) | +106 pts/week |
+| **Tier 2** | 10-Hour Days (Mon-Fri) | +213 pts/week |
+| **Tier 3** | 9hr Days + Saturday 6am-12pm | +234 pts/week |
+| **Tier 4** | 10hr Days + Saturday 6am-12pm | +341 pts/week |
+
+The system recommends the **lowest tier** that covers each week's overload.
+
+#### Section 3: Move Options
+
+Suggests jobs that could be pushed +1 or +2 weeks to free up bottleneck capacity:
+
+- **Work Order moves** — push a single job
+- **Sales Order moves** — push an entire project's jobs together
+
+Each option shows:
+- Which late jobs it would recover
+- Risk level (Safe = won't cause the moved job to be late)
+- Points freed up
+- Impact summary
+
+**Hard rules:**
+- Never pushes a job more than 2 weeks
+- Never pushes a job that's already late
+- Manager must decide which moves to apply
+
+#### Section 4: Projected Outcome
+
+Shows what the schedule would look like after moves and OT:
+- Which jobs are still late (if any)
+- Escalation flags for unfixable situations
+
+---
+
 ## 15. Export Function
 
 ### Exporting the Schedule
@@ -588,5 +651,5 @@ Click **"Export"** on the Planning Board to download:
 
 **Questions?** Contact the development team for demonstrations or additional training.
 
-**Document Version:** 2.0 (Complete)  
-**Last Updated:** February 5, 2026
+**Document Version:** 3.0 (Schedule Insights v2 added)  
+**Last Updated:** February 7, 2026

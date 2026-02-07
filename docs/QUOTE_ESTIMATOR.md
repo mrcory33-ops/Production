@@ -27,7 +27,8 @@ The FAB Quote Estimator now includes advanced capacity-aware scheduling with thr
 - **Any job can be moved** as long as real due date is preserved
 
 #### Tier 3: With Overtime
-- Uses 1000 pts/week capacity (vs. 850 baseline)
+- Uses increased capacity per the shop's 4-tier OT model (see `SCHEDULING_ENGINE.md` for breakdown)
+- Base OT capacity: 956 pts/week (Tier 1) up to 1191 pts/week (Tier 4)
 - Shows which weeks would need OT
 - Provides completion date with OT
 

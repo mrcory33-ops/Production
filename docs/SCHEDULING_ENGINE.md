@@ -1,8 +1,8 @@
 # Scheduling Engine — Design Document
 
-> **Version:** 2.0 — Weekly-Capacity Model  
+> **Version:** 2.1 — Weekly-Capacity Model + Schedule Insights v2  
 > **Last Updated:** February 7, 2026  
-> **Status:** Implementation In Progress
+> **Status:** Production
 
 ---
 
@@ -209,11 +209,12 @@ Scheduler Pipeline (lib/scheduler.ts)
     ├── Phase 1: idealPlacement()
     ├── Phase 2: capacityAudit()
     ├── Phase 3: compress()
-    └── Phase 4: validate()
-    ↓ Job[] with final schedules
+    ├── Phase 4: validate()
+    └── Phase 5: analyzeSchedule()   ← NEW
+    ↓ Job[] with final schedules + ScheduleInsights
 Database Sync (lib/jobs.ts)
     ↓
-Firestore → Gantt Chart UI
+Firestore → Gantt Chart UI + Schedule Insights Panel
 ```
 
 ---
@@ -281,18 +282,27 @@ Firestore → Gantt Chart UI
 
 ---
 
-### Overtime Mode
+### Overtime Mode — 4-Tier Recommendation System
 
-**Location:** `lib/scheduler.ts`
+**Location:** `lib/scheduler.ts` → `analyzeSchedule()` → OT Recommendations
 
-```typescript
-setOvertimeConfig({
-  enabled: true,
-  saturdayCapacityMultiplier: 0.5  // Half-day capacity
-});
-```
+The Schedule Insights engine uses a detailed 4-tier overtime model based on real shop-floor hours:
 
-When enabled, Saturdays count as work days with reduced capacity.
+| Tier | Label | Schedule | Bonus Pts/Week | Description |
+|------|-------|----------|----------------|-------------|
+| **Tier 1** | 9-Hour Days | Mon-Fri 6am-3pm | +106 pts | 1 extra hour/day × 5 days |
+| **Tier 2** | 10-Hour Days | Mon-Fri 6am-4pm | +213 pts | 2 extra hours/day × 5 days |
+| **Tier 3** | 9hr + Saturday | Mon-Fri 6am-3pm, Sat 6am-12pm | +234 pts | 1hr extra weekdays + 6hr Saturday |
+| **Tier 4** | 10hr + Saturday | Mon-Fri 6am-4pm, Sat 6am-12pm | +341 pts | 2hr extra weekdays + 6hr Saturday |
+
+**Capacity math:**
+- Base: 8hr days × 5 days = 40hr/week → 850 pts
+- Points per hour: 850 ÷ 40 = **21.25 pts/hr**
+- Saturday (6am-12pm): 6 hrs × 21.25 = **127.5 pts**
+
+The system recommends the lowest tier that covers each overloaded week's excess points.
+
+**Important:** These are *recommendations*, not automatic changes. The manager reviews the OT needs per week and decides whether to authorize.
 
 ---
 
@@ -347,8 +357,90 @@ When enabled, Saturdays count as work days with reduced capacity.
 | Adjust batch discounts | `BATCH_DISCOUNT_2` / `BATCH_DISCOUNT_3PLUS` | departmentConfig.ts |
 | Adjust big/small rock split | `BIG_ROCK_RATIO` / `SMALL_ROCK_RATIO` | scheduler.ts |
 
-- [ ] Overtime scheduling: Include Saturdays at 50% capacity when weeks are overloaded
+---
+
+## Schedule Insights v2 — Decision-Support Engine
+
+> **Added:** February 7, 2026  
+> **Location:** `lib/scheduler.ts` → `analyzeSchedule()` + `components/ScheduleInsightsPanel.tsx`
+
+The Schedule Insights system runs as **Phase 5** of the pipeline. It analyzes the finalized schedule and produces actionable recommendations. It does NOT auto-apply changes — it presents options and projected outcomes so the manager can decide.
+
+### What It Analyzes
+
+1. **Late Jobs** — Jobs whose estimated completion dates exceed their due dates
+2. **Overloaded Weeks** — Weeks where any department exceeds 850 pts capacity
+3. **Move Options** — Jobs that could be pushed +1 or +2 weeks to relieve bottleneck weeks
+4. **OT Recommendations** — 4-tier overtime suggestions per overloaded week
+5. **Projected Outcomes** — "What if" results: after applying moves, and after moves + OT
+
+### Move Options Logic
+
+The system generates two types of moves:
+
+| Type | What Moves | When Used |
+|------|-----------|----------|
+| **Work Order (WO)** | Single job pushed +1wk or +2wk | Surgical fix for specific bottlenecks |
+| **Sales Order (SO)** | All jobs sharing the same SO pushed together | Project-level relief for multi-job orders |
+
+**Selection criteria:**
+- Only **non-late** jobs are considered for moves (we don't push already-late work further)
+- Moves must not cause the moved job to become late (`riskLevel: 'safe'` or `'moderate'`)
+- **Max push: 2 weeks** — the system will NEVER suggest moving a job more than 2 weeks
+- Moves are scored by how many **currently late jobs they recover** globally
+
+### Projected Outcomes
+
+The panel shows a 3-stage pipeline:
+
+```
+Current State → After Suggested Moves → After Moves + OT
+   12 late         6 late                 0 late
+```
+
+Each stage shows:
+- Number of late jobs
+- Which specific jobs are still late
+- Bottleneck departments for remaining late jobs
+
+If jobs remain late even after Tier 4 OT, the panel flags them as **escalation needed**.
+
+### OT Recommendation Details
+
+Each overloaded week gets a recommendation card showing:
+- **Recommended tier** and schedule (weekday hours, Saturday hours)
+- **Capacity bar** showing current load vs. base capacity
+- **Bonus points** added by the recommended tier
+- **Coverage status** — fully covered or remaining excess
+- **Human-readable explanation** of why this tier was chosen
+
+### Hard Constraints
+
+| Constraint | Rule |
+|-----------|------|
+| Max push | Never suggest >2 week moves |
+| Late job protection | Never push a late job further out |
+| 3-week lateness | System flags if any job would be 3+ weeks late as critical |
+| No auto-apply | All suggestions are recommendations, not automatic changes |
+
+### Panel Sections (UI)
+
+| Section | Content | Default State |
+|---------|---------|---------------|
+| Summary Bar | Current → Moves → OT pipeline | Always visible |
+| Late Jobs | Detailed cards with due date, est. completion, bottleneck | Expanded |
+| OT Recommendations | Per-week tier cards with schedule details | Collapsed |
+| Move Options | WO and SO suggestions with impact analysis | Expanded |
+| Projected Outcome | Before/after comparison | Collapsed |
+
+---
+
+## Future Enhancements
+
+- [x] ~~Overtime scheduling: Include Saturdays at 50% capacity~~ → **Done:** 4-tier OT model
+- [x] ~~What-if simulator~~ → **Done:** Projected outcomes in Schedule Insights
 - [ ] Inter-department overlap: Allow small jobs to share days across 2 departments
 - [ ] Predictive capacity: Use historical data to forecast weekly loads
 - [ ] Manager approval queue: Route frozen-zone conflicts to a review screen
-- [ ] What-if simulator: Let managers drag jobs and see the ripple effect
+- [ ] Apply move suggestions: One-click to execute the recommended moves
+- [ ] Export Schedule Insights as PDF for management review
