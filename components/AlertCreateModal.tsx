@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { addDays, format } from 'date-fns';
-import { AlertTriangle, Search, X } from 'lucide-react';
+import { AlertTriangle, FileX2, Package, PackageX, Search, X } from 'lucide-react';
 import { Job } from '@/types';
 import { createAlert } from '@/lib/supervisorAlerts';
 
@@ -26,6 +26,10 @@ export default function AlertCreateModal({
     const [reason, setReason] = useState('');
     const [estimatedResolutionDate, setEstimatedResolutionDate] = useState(toDateInput(addDays(new Date(), 1)));
     const [reportedBy, setReportedBy] = useState('Supervisor');
+    const [isSpecialPurchase, setIsSpecialPurchase] = useState(false);
+    const [daysNeededAfterPO, setDaysNeededAfterPO] = useState<number>(5);
+    const [isCsiNotReceived, setIsCsiNotReceived] = useState(false);
+    const [isOutOfStock, setIsOutOfStock] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +64,10 @@ export default function AlertCreateModal({
         setReason('');
         setEstimatedResolutionDate(toDateInput(addDays(new Date(), 1)));
         setReportedBy('Supervisor');
+        setIsSpecialPurchase(false);
+        setDaysNeededAfterPO(5);
+        setIsCsiNotReceived(false);
+        setIsOutOfStock(false);
         setError(null);
     };
 
@@ -114,7 +122,11 @@ export default function AlertCreateModal({
                 salesOrder: primary.salesOrder,
                 reportedBy: reportedBy.trim(),
                 additionalJobIds: additional.map(j => j.id),
-                additionalJobNames: additional.map(j => j.name)
+                additionalJobNames: additional.map(j => j.name),
+                isSpecialPurchase: isSpecialPurchase || undefined,
+                daysNeededAfterPO: isSpecialPurchase ? daysNeededAfterPO : undefined,
+                isCsiNotReceived: isCsiNotReceived || undefined,
+                isOutOfStock: isOutOfStock || undefined
             });
             onCreated?.();
             handleClose();
@@ -163,8 +175,8 @@ export default function AlertCreateModal({
                                     <span
                                         key={job.id}
                                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border transition-colors ${idx === 0
-                                                ? 'bg-cyan-900/40 border-cyan-500/40 text-cyan-200'
-                                                : 'bg-slate-800 border-slate-700 text-slate-300'
+                                            ? 'bg-cyan-900/40 border-cyan-500/40 text-cyan-200'
+                                            : 'bg-slate-800 border-slate-700 text-slate-300'
                                             }`}
                                     >
                                         <span className="font-mono font-semibold">{job.id}</span>
@@ -207,8 +219,8 @@ export default function AlertCreateModal({
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="flex items-center gap-2">
                                                     <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${isSelected
-                                                            ? 'bg-cyan-500 border-cyan-400 text-white'
-                                                            : 'border-slate-600 text-transparent'
+                                                        ? 'bg-cyan-500 border-cyan-400 text-white'
+                                                        : 'border-slate-600 text-transparent'
                                                         }`}>
                                                         ✓
                                                     </span>
@@ -259,6 +271,62 @@ export default function AlertCreateModal({
                             rows={4}
                             className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-sm text-white outline-none resize-y focus:border-cyan-500"
                         />
+                    </div>
+
+                    {/* Issue Flags */}
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-3 space-y-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Issue Flags</p>
+
+                        {/* Special Purchase */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={isSpecialPurchase}
+                                onChange={(e) => setIsSpecialPurchase(e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-950 text-sky-500 focus:ring-sky-500 cursor-pointer"
+                            />
+                            <Package className="w-4 h-4 text-sky-400" />
+                            <span className="text-sm font-semibold text-sky-300">Special Purchase Issue</span>
+                        </label>
+                        {isSpecialPurchase && (
+                            <div className="ml-6 mt-1 mb-1">
+                                <label className="text-xs font-bold uppercase tracking-wider text-sky-400">Days Needed After PO Received</label>
+                                <p className="text-[11px] text-slate-400 mt-0.5 mb-1.5">How many business days does this job need once parts arrive?</p>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={60}
+                                    value={daysNeededAfterPO}
+                                    onChange={(e) => setDaysNeededAfterPO(Math.max(1, Math.min(60, Number(e.target.value) || 1)))}
+                                    className="w-24 px-3 py-2 rounded-xl border border-sky-500/40 bg-slate-950 text-sm text-white outline-none focus:border-sky-400"
+                                />
+                                <span className="ml-2 text-xs text-slate-400">business days</span>
+                            </div>
+                        )}
+
+                        {/* CSI Not Received */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={isCsiNotReceived}
+                                onChange={(e) => setIsCsiNotReceived(e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-950 text-amber-500 focus:ring-amber-500 cursor-pointer"
+                            />
+                            <FileX2 className="w-4 h-4 text-amber-400" />
+                            <span className="text-sm font-semibold text-amber-300">CSI Not Received</span>
+                        </label>
+
+                        {/* Out of Stock Part */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={isOutOfStock}
+                                onChange={(e) => setIsOutOfStock(e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-950 text-rose-500 focus:ring-rose-500 cursor-pointer"
+                            />
+                            <PackageX className="w-4 h-4 text-rose-400" />
+                            <span className="text-sm font-semibold text-rose-300">Out of Stock Part</span>
+                        </label>
                     </div>
 
                     {error && (

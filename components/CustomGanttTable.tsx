@@ -741,7 +741,7 @@ export default function CustomGanttTable({
                                                     </div>
                                                 )}
                                                 {/* Status Symbols — clickable with explanation popovers */}
-                                                <JobStatusSymbols job={job} />
+                                                <JobStatusSymbols job={job} alerts={jobAlerts} />
                                             </div>
                                             <div
                                                 className="job-id font-extrabold tracking-wide opacity-100"

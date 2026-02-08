@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, getDocs, limit, query, where } from 'firebase/firestore';
-import { AlertTriangle, ArrowLeft, BellRing, ClipboardPlus, Clock3, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BellRing, CheckCircle, ClipboardPlus, Clock3, FileX2, Package, PackageX, ShieldAlert } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { DepartmentLiveStatus, Job, SupervisorAlert } from '@/types';
 import { getDepartmentStatus, subscribeToAlerts } from '@/lib/supervisorAlerts';
@@ -199,8 +199,38 @@ export default function SupervisorDashboard() {
                                         <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
                                             {alert.department}
                                         </span>
+                                        {alert.isSpecialPurchase && (
+                                            <span className="text-[10px] px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold inline-flex items-center gap-1">
+                                                <Package className="w-3 h-3" />
+                                                SP
+                                            </span>
+                                        )}
+                                        {alert.isCsiNotReceived && (
+                                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold inline-flex items-center gap-1">
+                                                <FileX2 className="w-3 h-3" />
+                                                CSI
+                                            </span>
+                                        )}
+                                        {alert.isOutOfStock && (
+                                            <span className="text-[10px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold inline-flex items-center gap-1">
+                                                <PackageX className="w-3 h-3" />
+                                                OOS
+                                            </span>
+                                        )}
                                     </div>
                                     <p className="mt-2 text-xs text-slate-300 leading-relaxed">{alert.reason}</p>
+                                    {alert.isSpecialPurchase && alert.daysNeededAfterPO && (
+                                        <div className="mt-1.5 text-[11px] text-sky-300 flex items-center gap-1">
+                                            <Package className="w-3 h-3" />
+                                            {alert.daysNeededAfterPO} business days needed after PO received
+                                        </div>
+                                    )}
+                                    {alert.poReceivedEarly && (
+                                        <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-1.5 text-[11px] text-emerald-300 font-semibold flex items-center gap-1.5">
+                                            <CheckCircle className="w-3.5 h-3.5" />
+                                            PO RECEIVED EARLY — consider readjusting schedule
+                                        </div>
+                                    )}
                                     <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
                                         <span className="inline-flex items-center gap-1">
                                             <Clock3 className="w-3 h-3" />

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Job } from '@/types';
+import { Job, SupervisorAlert } from '@/types';
 import { X } from 'lucide-react';
 
 interface StatusSymbol {
@@ -15,7 +15,7 @@ interface StatusSymbol {
     explanation: string;
 }
 
-function getJobSymbols(job: Job): StatusSymbol[] {
+function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
     const symbols: StatusSymbol[] = [];
 
     // Scheduling Conflict — system could not meet due date
@@ -116,6 +116,85 @@ function getJobSymbols(job: Job): StatusSymbol[] {
                     `Overtime (Saturday shifts) will likely be needed to bring it back on time. ` +
                     `The scheduler detected that the total work points in the affected week(s) ` +
                     `exceed the 850-point weekly capacity for at least one department.`
+            });
+        }
+    }
+
+    // Special Purchase — Open PO (nothing received yet)
+    if (job.openPOs && !job.closedPOs) {
+        symbols.push({
+            key: 'open-po',
+            icon: 'Open PO',
+            label: 'Open PO',
+            bgClass: 'bg-orange-100',
+            borderClass: 'border-orange-400',
+            textClass: 'text-orange-700',
+            explanation: `This job has open Purchase Orders — special parts or materials have been ordered ` +
+                `but NOTHING has been received yet. The job may not be ready to move to the next ` +
+                `department until these materials arrive. Check with Purchasing for ETA updates.`
+        });
+    }
+
+    // Special Purchase — Partially Received (some POs closed, some still open)
+    if (job.openPOs && job.closedPOs) {
+        symbols.push({
+            key: 'partial-po',
+            icon: 'Partial',
+            label: 'Partially Received',
+            bgClass: 'bg-yellow-100',
+            borderClass: 'border-yellow-400',
+            textClass: 'text-yellow-700',
+            explanation: `This job has special parts that are PARTIALLY received — some Purchase Orders ` +
+                `have been fulfilled, but others are still open. The job may be able to start ` +
+                `some work, but full completion depends on remaining deliveries.`
+        });
+    }
+
+    // Special Purchase — Received (all POs closed, none still open)
+    if (!job.openPOs && job.closedPOs) {
+        symbols.push({
+            key: 'received-po',
+            icon: 'Received',
+            label: 'Received',
+            bgClass: 'bg-emerald-100',
+            borderClass: 'border-emerald-400',
+            textClass: 'text-emerald-700',
+            explanation: `All special parts and materials for this job have been RECEIVED. ` +
+                `All Purchase Orders are closed. This job is clear to proceed ` +
+                `through production without material delays.`
+        });
+    }
+
+    // ---- Alert-driven issue flags ----
+    if (alerts && alerts.length > 0) {
+        const hasCsi = alerts.some(a => a.isCsiNotReceived);
+        const hasOos = alerts.some(a => a.isOutOfStock);
+
+        if (hasCsi) {
+            symbols.push({
+                key: 'csi-missing',
+                icon: 'CSI',
+                label: 'CSI Not Received',
+                bgClass: 'bg-amber-100',
+                borderClass: 'border-amber-400',
+                textClass: 'text-amber-700',
+                explanation: `A supervisor alert has flagged this job as missing its CSI (Customer Supplied Information). ` +
+                    `Work may be blocked until the CSI documents or specs are received from the customer. ` +
+                    `Contact the sales rep to follow up on the missing information.`
+            });
+        }
+
+        if (hasOos) {
+            symbols.push({
+                key: 'out-of-stock',
+                icon: 'OOS',
+                label: 'Out of Stock Part',
+                bgClass: 'bg-rose-100',
+                borderClass: 'border-rose-400',
+                textClass: 'text-rose-700',
+                explanation: `A supervisor alert has flagged this job as having an out-of-stock part. ` +
+                    `Production is held until the part becomes available or an alternative is sourced. ` +
+                    `Check with Purchasing for restock ETA or substitute options.`
             });
         }
     }
@@ -238,10 +317,11 @@ function SymbolButton({ symbol }: SymbolButtonProps) {
 
 interface JobStatusSymbolsProps {
     job: Job;
+    alerts?: SupervisorAlert[];
 }
 
-export default function JobStatusSymbols({ job }: JobStatusSymbolsProps) {
-    const symbols = getJobSymbols(job);
+export default function JobStatusSymbols({ job, alerts }: JobStatusSymbolsProps) {
+    const symbols = getJobSymbols(job, alerts);
     if (symbols.length === 0) return null;
 
     return (

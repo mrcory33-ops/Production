@@ -614,11 +614,11 @@
         <div class="meta-bar">
             <div class="meta-item">
                 <span>Version:</span>
-                <strong>7.3.0</strong>
+                <strong>7.4.0</strong>
             </div>
             <div class="meta-item">
                 <span>Updated:</span>
-                <strong>February 6, 2026</strong>
+                <strong>February 8, 2026</strong>
             </div>
             <div class="meta-item">
                 <span>Status:</span>
@@ -648,7 +648,8 @@
                 <a href="#s13"><span class="num">13.</span> Progress Tracking</a>
                 <a href="#s14"><span class="num">14.</span> Due Date Change Detection</a>
                 <a href="#s15"><span class="num">15.</span> The Planning Board</a>
-                <a href="#s16"><span class="num">16.</span> Supervisor Dashboard</a>
+                <a href="#s16"><span class="num">16.</span> Supervisor Dashboard <span
+                        class="tag new">Updated</span></a>
                 <a href="#s17"><span class="num">17.</span> Schedule Insights <span class="tag new">NEW</span></a>
                 <a href="#s18"><span class="num">18.</span> Quote Estimator <span class="tag new">NEW</span></a>
                 <a href="#s19"><span class="num">19.</span> Export Function</a>
@@ -661,9 +662,10 @@
 
         <!-- NEW FEATURES BANNER -->
         <div class="highlight-box new-feature">
-            <h4>🚀 February 2026 Updates (v7.3.0)</h4>
-            <p><strong>New this version:</strong> NYCHA 3-day welding minimum • HARMONIC painting extension (+8-9 days)
-                • Painting scoring bonus (+15 pts) • Analytics panel scrollbar fix</p>
+            <h4>🚀 February 2026 Updates (v7.4.0)</h4>
+            <p><strong>New this version:</strong> Special Purchase Alert System with email notifications •
+                CSI Not Received & Out of Stock issue flags • PO Received priority boost (+35 pts) •
+                Early PO receipt detection • Sales rep code search • Unlimited job query</p>
         </div>
 
         <!-- Section 1: What This System Does -->
@@ -1569,21 +1571,37 @@
                         <td><span class="tag blue">Blue ⚡</span></td>
                         <td>No Gaps active</td>
                     </tr>
+                    <tr style="background: #ecfdf5;">
+                        <td><span class="tag orange">Amber "CSI"</span> <span class="tag new">NEW</span></td>
+                        <td>CSI (Customer Supplied Info) not received — flagged by supervisor alert</td>
+                    </tr>
+                    <tr style="background: #ecfdf5;">
+                        <td><span class="tag red">Rose "OOS"</span> <span class="tag new">NEW</span></td>
+                        <td>Out of Stock Part — flagged by supervisor alert</td>
+                    </tr>
                 </tbody>
             </table>
+            <div class="highlight-box new-feature">
+                <h4>Alert-Driven Visual Indicators</h4>
+                <p>The <strong>CSI</strong> and <strong>OOS</strong> badges appear automatically on any job box in the
+                    Gantt chart when an active supervisor alert has the corresponding flag checked.
+                    Clicking the badge opens an explanation popover, just like all other status symbols.</p>
+            </div>
         </section>
 
         <!-- Section 16: Supervisor Dashboard -->
         <section class="section" id="s16">
-            <h2><span class="num">16</span> Supervisor Dashboard <span class="tag new">NEW</span></h2>
+            <h2><span class="num">16</span> Supervisor Dashboard <span class="tag new">Updated</span></h2>
             <p>The <strong>Supervisor Dashboard</strong> (<code>/supervisor</code>) is a dedicated interface for shop
                 floor supervisors to report and track production blockers in real time. It feeds directly into the
-                scheduling engine.</p>
+                scheduling engine and triggers email notifications when special purchase adjustments are made.</p>
 
             <div class="highlight-box">
                 <h4>Key Principle</h4>
-                <p>Supervisors <strong>report</strong> blockers (machine down, material missing, worker absent). The
-                    plant manager handles all <strong>reschedule decisions</strong>.</p>
+                <p>Supervisors <strong>report</strong> blockers (machine down, material missing, worker absent, PO
+                    holds, CSI missing). The
+                    plant manager handles all <strong>reschedule decisions</strong> via the Planning Board's Alert
+                    Management panel.</p>
             </div>
 
             <h3>KPI Summary Cards</h3>
@@ -1609,7 +1627,18 @@
 
             <h3>Active Alert Feed</h3>
             <p>A scrollable list of all open alerts showing Work Order ID, job name, affected department, reason for
-                delay, estimated resolution date, and business days blocked.</p>
+                delay, estimated resolution date, and business days blocked. Each alert card displays colored
+                <strong>issue flag badges</strong> when applicable:
+            </p>
+            <div class="badge-row">
+                <div class="status-badge blue">📦 SP — Special Purchase</div>
+                <div class="status-badge yellow">📄 CSI — CSI Not Received</div>
+                <div class="status-badge" style="background: #ffe4e6; color: #9f1239;">📦❌ OOS — Out of Stock Part</div>
+            </div>
+            <p>If an alert has <code>poReceivedEarly = true</code>, a green banner appears:
+                <strong>"PO RECEIVED EARLY — consider readjusting schedule"</strong>. This prompts the
+                manager to re-evaluate the schedule since the parts arrived sooner than expected.
+            </p>
 
             <h3>Creating an Alert</h3>
             <p>Click <strong>"Report Issue"</strong> to open the alert creation modal:</p>
@@ -1650,16 +1679,238 @@
                 </tbody>
             </table>
 
+            <h4>Issue Flags <span class="tag new">NEW</span></h4>
+            <p>Below the standard fields, an <strong>"Issue Flags"</strong> panel offers three independent checkboxes.
+                Multiple flags can be active on the same alert simultaneously:</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Flag</th>
+                        <th>Badge</th>
+                        <th>Color</th>
+                        <th>Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="background: #e0f2fe;">
+                        <td><strong>Special Purchase Issue</strong></td>
+                        <td>SP</td>
+                        <td>Sky Blue</td>
+                        <td>Job is held due to a special purchase order. When checked, reveals a
+                            <strong>"Days Needed After PO Received"</strong> number input (1–60 business days). This
+                            value records how many working days the job requires once the PO parts finally arrive.
+                        </td>
+                    </tr>
+                    <tr style="background: #fef3c7;">
+                        <td><strong>CSI Not Received</strong></td>
+                        <td>CSI</td>
+                        <td>Amber</td>
+                        <td>Customer Supplied Information has not been received. Production cannot begin or
+                            continue until the customer submits required documents, specifications, or approvals.
+                            The amber CSI badge appears on the job box in the Gantt chart.</td>
+                    </tr>
+                    <tr style="background: #ffe4e6;">
+                        <td><strong>Out of Stock Part</strong></td>
+                        <td>OOS</td>
+                        <td>Rose</td>
+                        <td>A required part is out of stock. Production is blocked until the part is restocked
+                            or an alternative is sourced. The rose OOS badge appears on the job box in the Gantt chart.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Purchase Order (PO) Tracking & Status Symbols</h3>
+            <p>The system imports PO status from the XLSX file columns <code>OpenPOs</code> and <code>ClosedPOs</code>.
+                Based on these values, interactive status symbols appear directly on the job boxes in the Gantt chart:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Color</th>
+                        <th>Condition</th>
+                        <th>Meaning</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Open PO</strong></td>
+                        <td>Orange</td>
+                        <td><code>openPOs = true</code>, <code>closedPOs = false</code></td>
+                        <td>Special parts ordered but NOTHING received yet. Job may be blocked.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Partial</strong></td>
+                        <td>Yellow</td>
+                        <td><code>openPOs = true</code>, <code>closedPOs = true</code></td>
+                        <td>Some POs fulfilled, others still pending. Partial work may begin.</td>
+                    </tr>
+                    <tr style="background: #ecfdf5;">
+                        <td><strong>Received</strong></td>
+                        <td>Green</td>
+                        <td><code>openPOs = false</code>, <code>closedPOs = true</code></td>
+                        <td>All POs closed. Job is clear to proceed without material delays.</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p>Each symbol is clickable — clicking opens an explanation popover describing the PO status and
+                recommended next steps.</p>
+
+            <h3>PO Received Priority Boost <span class="tag new">NEW</span></h3>
+            <div class="highlight-box success">
+                <h4>Automatic +35 Urgency Points</h4>
+                <p>When all POs are received (<code>closedPOs = true</code> and <code>openPOs = false</code>), the
+                    scoring engine automatically adds <strong>+35 bonus urgency points</strong> to the job.
+                    This ensures that jobs which were previously waiting on parts are immediately
+                    prioritized to move through production once materials arrive.</p>
+            </div>
+            <div class="formula">
+                <span class="comment">// Scoring factor: poReceivedBoost</span><br>
+                <span class="highlight">if</span> (!job.openPOs && job.closedPOs) {<br>
+                &nbsp;&nbsp;factors.poReceivedBoost = <span class="highlight">35</span>; <span class="comment">// bonus
+                    points</span><br>
+                }
+            </div>
+
+            <h3>Early PO Receipt Detection <span class="tag new">NEW</span></h3>
+            <p>If a Special Purchase alert was created with an adjusted due date (<code>spAdjustedDueDate</code>)
+                and the PO is received <strong>before</strong> that adjusted date, the system flags
+                <code>poReceivedEarly = true</code> on the alert. This triggers:
+            </p>
+            <ul>
+                <li>A <strong>green banner</strong> on the alert card: <em>"PO RECEIVED EARLY — consider readjusting
+                        schedule"</em></li>
+                <li>The manager can then re-evaluate the schedule and potentially pull the job forward, since it no
+                    longer needs the extra buffer time</li>
+            </ul>
+
+            <h3>Email Notifications for Special Purchase Adjustments <span class="tag new">NEW</span></h3>
+            <p>When a schedule adjustment is <strong>approved</strong> on the Planning Board for a Special Purchase
+                alert, the system automatically sends an email notification via Gmail SMTP. The notification flow is:
+            </p>
+            <div class="flow-diagram">
+                <div class="flow-step">SP Alert Created</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step" style="border-color: #f59e0b;">Manager Reviews on Planning Board</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step" style="border-color: #3b82f6;">Approves Adjustment</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step" style="border-color: #10b981;">Email Sent Automatically</div>
+            </div>
+
+            <h4>Email Recipients</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Role</th>
+                        <th>How Determined</th>
+                        <th>Field</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Admin (TO)</strong></td>
+                        <td>Fixed: <code>Aidao@emjacindustries.com</code></td>
+                        <td>Always receives</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Sales Rep (TO)</strong></td>
+                        <td>Looked up from <code>Code_Sort</code> (XLSX column L) via <code>salesRepEmails.ts</code>
+                        </td>
+                        <td>Receives if code found in mapping</td>
+                    </tr>
+                    <tr>
+                        <td><strong>CC List</strong></td>
+                        <td>Fixed: Felipe P., Cory D., Bill R.</td>
+                        <td>Always copied</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>Sales Rep Code Mapping</h4>
+            <p>The <code>Code_Sort</code> value from column L of the XLSX file is parsed during import and stored as
+                <code>salesRepCode</code> on each Job. This code maps to salesperson email addresses via
+                <code>lib/salesRepEmails.ts</code>:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Salesperson</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>EN</td>
+                        <td>Eric N.</td>
+                    </tr>
+                    <tr>
+                        <td>AD</td>
+                        <td>Alex D.</td>
+                    </tr>
+                    <tr>
+                        <td>DB</td>
+                        <td>David B.</td>
+                    </tr>
+                    <tr>
+                        <td>OB</td>
+                        <td>Omar B.</td>
+                    </tr>
+                    <tr>
+                        <td>JO</td>
+                        <td>Jim O.</td>
+                    </tr>
+                    <tr>
+                        <td>LA</td>
+                        <td>Lazaro A.</td>
+                    </tr>
+                    <tr>
+                        <td>CF</td>
+                        <td>Chris F.</td>
+                    </tr>
+                    <tr>
+                        <td>ND</td>
+                        <td>Nouly D. (Stainless Doors)</td>
+                    </tr>
+                    <tr>
+                        <td>TP</td>
+                        <td>Tony P. (Stainless Doors)</td>
+                    </tr>
+                    <tr>
+                        <td>ED</td>
+                        <td>Eli D. (Stainless Doors)</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p>To add new sales reps, edit the <code>SALES_REP_EMAILS</code> map in <code>lib/salesRepEmails.ts</code>.
+            </p>
+
+            <h4>Email Content</h4>
+            <p>The notification email includes a dark-themed, branded HTML body containing:</p>
+            <ul>
+                <li>Work Order ID and Job Name</li>
+                <li>Previous Due Date → <strong>New Due Date</strong> (highlighted)</li>
+                <li>Days Needed After PO (if applicable)</li>
+                <li>Adjustment Strategy (direct, move jobs, or overtime)</li>
+                <li>Full reason text from the alert</li>
+                <li>Footer reminder: <em>"Please update the due date in Global Shop accordingly"</em></li>
+            </ul>
+
             <h3>Alert Lifecycle</h3>
             <div class="flow-diagram">
                 <div class="flow-step">Created</div>
                 <span class="flow-arrow">→</span>
                 <div class="flow-step" style="border-color: #f59e0b;">Active</div>
                 <span class="flow-arrow">→</span>
+                <div class="flow-step" style="border-color: #8b5cf6;">Adjusted (optional)</div>
+                <span class="flow-arrow">→</span>
                 <div class="flow-step" style="border-color: #10b981;">Resolved</div>
             </div>
             <p>Available actions: <strong>Resolve</strong> (mark cleared), <strong>Extend</strong> (push resolution
-                date), <strong>Update</strong> (edit reason/reporter), <strong>Delete</strong> (remove entirely).</p>
+                date), <strong>Update</strong> (edit reason/reporter), <strong>Delete</strong> (remove entirely),
+                <strong>Adjust</strong> (approve schedule shift — triggers email for SP alerts).
+            </p>
 
             <h3>Impact on Scheduling</h3>
             <div class="highlight-box new-feature">
@@ -1669,6 +1920,25 @@
                     department, available capacity after subtracting blocked points, and a human-readable summary. This
                     ensures overtime recommendations and move suggestions account for real-world issues, not just
                     theoretical schedule data.</p>
+            </div>
+
+            <h3>Complete Special Purchase Flow — End to End</h3>
+            <div class="highlight-box purple">
+                <h4>Full SP Lifecycle</h4>
+                <p>
+                    <strong>1.</strong> Supervisor creates alert with "Special Purchase Issue" checked + days needed
+                    after PO.<br>
+                    <strong>2.</strong> Alert appears on Dashboard and Planning Board with sky-blue <strong>SP</strong>
+                    badge.<br>
+                    <strong>3.</strong> Gantt chart shows <strong>Open PO</strong> / <strong>Partial</strong> /
+                    <strong>Received</strong> symbol on the job box.<br>
+                    <strong>4.</strong> Manager reviews on Planning Board → approves date adjustment.<br>
+                    <strong>5.</strong> System emails Admin + Sales Rep + CC list automatically.<br>
+                    <strong>6.</strong> If PO arrives early → green "PO RECEIVED EARLY" banner appears → manager can
+                    readjust.<br>
+                    <strong>7.</strong> Once all POs received → job gets +35 urgency boost → rises to top of priority
+                    queue.
+                </p>
             </div>
         </section>
 
@@ -1998,8 +2268,12 @@
                     <td>30 pts</td>
                 </tr>
                 <tr style="background: #ecfdf5;">
-                    <td>Painting Required Bonus <span class="tag new">NEW</span></td>
+                    <td>Painting Required Bonus</td>
                     <td>15 pts</td>
+                </tr>
+                <tr style="background: #ecfdf5;">
+                    <td>PO Received Boost <span class="tag new">NEW</span></td>
+                    <td>35 pts</td>
                 </tr>
             </table>
         </section>
@@ -2008,7 +2282,7 @@
         <section class="section" id="s23">
             <h2><span class="num">23</span> February 2026 Updates</h2>
 
-            <div class="version-badge">v7.3.0 — February 6, 2026</div>
+            <div class="version-badge">v7.4.0 — February 8, 2026</div>
 
             <table>
                 <thead>
@@ -2018,15 +2292,49 @@
                     </tr>
                 </thead>
                 <tbody>
+                    <tr style="background: #dbeafe;">
+                        <td><strong>Special Purchase Alert System</strong> <span class="tag new">NEW</span></td>
+                        <td>Full lifecycle: SP checkbox → days-needed-after-PO input → SP badge on alerts →
+                            automatic email to Admin + Sales Rep on adjustment approval → early PO receipt detection
+                        </td>
+                    </tr>
+                    <tr style="background: #dbeafe;">
+                        <td><strong>CSI Not Received Flag</strong> <span class="tag new">NEW</span></td>
+                        <td>Issue flag on alerts for missing Customer Supplied Information. Amber CSI badge
+                            appears on alert cards and Gantt chart job boxes</td>
+                    </tr>
+                    <tr style="background: #dbeafe;">
+                        <td><strong>Out of Stock Part Flag</strong> <span class="tag new">NEW</span></td>
+                        <td>Issue flag on alerts for out-of-stock parts. Rose OOS badge
+                            appears on alert cards and Gantt chart job boxes</td>
+                    </tr>
+                    <tr style="background: #dbeafe;">
+                        <td><strong>PO Received Priority Boost</strong> <span class="tag new">NEW</span></td>
+                        <td>+35 urgency points automatically awarded when all POs are received
+                            (<code>closedPOs = true</code>, <code>openPOs = false</code>)</td>
+                    </tr>
+                    <tr style="background: #dbeafe;">
+                        <td><strong>Email Notifications (Gmail SMTP)</strong> <span class="tag new">NEW</span></td>
+                        <td>Automatic SP adjustment emails sent to Admin (Aidao), Sales Rep (by Code_Sort lookup),
+                            and CC list (Felipe, Cory, Bill) via Nodemailer</td>
+                    </tr>
+                    <tr style="background: #dbeafe;">
+                        <td><strong>Sales Rep Code Search</strong> <span class="tag new">NEW</span></td>
+                        <td>Typing a 2-letter code (e.g., "EN") in the Planning Board search bar filters
+                            to all jobs for that sales rep</td>
+                    </tr>
+                    <tr style="background: #dbeafe;">
+                        <td><strong>Unlimited Job Query</strong> <span class="tag new">NEW</span></td>
+                        <td>Removed the 200-job limit on Planning Board queries. All PENDING, IN_PROGRESS,
+                            and HOLD jobs are now loaded</td>
+                    </tr>
                     <tr style="background: #ecfdf5;">
                         <td><strong>NYCHA 3-Day Welding Minimum</strong></td>
-                        <td>Jobs with "NYCHA" in name guaranteed minimum 3 days in Welding department, regardless of
-                            welding points</td>
+                        <td>Jobs with "NYCHA" in name guaranteed minimum 3 days in Welding department</td>
                     </tr>
                     <tr style="background: #ecfdf5;">
                         <td><strong>HARMONIC Painting Extension</strong></td>
-                        <td>Import-time prompt for painting selection; +5 days painting + 3-4 days post-paint = 8-9 days
-                            added to Assembly</td>
+                        <td>Import-time prompt; +5 days painting + 3-4 days post-paint = 8-9 days added to Assembly</td>
                     </tr>
                     <tr style="background: #ecfdf5;">
                         <td><strong>Painting Scoring Bonus</strong></td>
@@ -2034,8 +2342,7 @@
                     </tr>
                     <tr style="background: #ecfdf5;">
                         <td><strong>Analytics Panel Fix</strong></td>
-                        <td>Gantt chart vertical scrollbar now remains visible when Department Analytics panel is open
-                        </td>
+                        <td>Gantt chart vertical scrollbar now remains visible when Analytics panel is open</td>
                     </tr>
                     <tr style="background: #ecfdf5;">
                         <td><strong>Supervisor Dashboard</strong></td>
@@ -2047,6 +2354,11 @@
 
             <h3>Previous Version History</h3>
             <table>
+                <tr>
+                    <td><strong>v7.3.0</strong></td>
+                    <td>Feb 6, 2026</td>
+                    <td>NYCHA welding, HARMONIC painting, painting scoring, supervisor dashboard</td>
+                </tr>
                 <tr>
                     <td><strong>v7.2.8</strong></td>
                     <td>Feb 5, 2026</td>
@@ -2098,8 +2410,8 @@
 
     <footer class="footer">
         <div class="logo">Emjac Industries, Inc.</div>
-        <p>EMJAC Production Scheduling System v7.3.0</p>
-        <p>Document Version: 3.0 (Complete) • Last Updated: February 6, 2026</p>
+        <p>EMJAC Production Scheduling System v7.4.0</p>
+        <p>Document Version: 4.0 (Complete) • Last Updated: February 8, 2026</p>
         <p style="margin-top: 8px; opacity: 0.7;">© 2026 Emjac Industries, Inc. All rights reserved.</p>
     </footer>
 </body>

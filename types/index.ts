@@ -45,6 +45,16 @@ export interface SupervisorAlert {
     lastAdjustmentReason?: string;
     lastAdjustmentMovedJobIds?: string[];
     lastAdjustmentOtSummary?: string;
+
+    // Special Purchase tracking
+    isSpecialPurchase?: boolean;     // Alert is due to a special purchase issue
+    daysNeededAfterPO?: number;      // Business days needed to complete once parts arrive
+    spAdjustedDueDate?: string;      // New due date assigned because of SP hold (ISO)
+    poReceivedEarly?: boolean;       // PO was received before the adjusted due date
+
+    // Additional issue flags
+    isCsiNotReceived?: boolean;      // CSI has not been received
+    isOutOfStock?: boolean;          // Part is out of stock
 }
 
 export interface DepartmentLiveStatus {
@@ -78,6 +88,7 @@ export interface Job {
     // Classification
     productType: ProductType; // DIVISION (F/D/H)
     salesperson: string; // REP_NAME
+    salesRepCode?: string; // Code_Sort (column L) — used for SP email lookup
     salesOrder?: string; // Sales Order Number (if available)
 
     // Priority & Size

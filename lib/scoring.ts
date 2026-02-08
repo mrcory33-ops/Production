@@ -33,7 +33,8 @@ export const calculateUrgencyScore = (job: Job): UrgencyResult => {
         bigRockWeight: 0,
         refJobBonus: 0,
         harmonicBonus: 0,
-        paintingBonus: 0
+        paintingBonus: 0,
+        poReceivedBoost: 0
     };
 
     // 1. Due Date Proximity
@@ -121,6 +122,11 @@ export const calculateUrgencyScore = (job: Job): UrgencyResult => {
     // 8. Painting Required Bonus
     if (weights.paintingRequired.enabled && job.requiresPainting === true) {
         factors.paintingBonus = weights.paintingRequired.bonusPoints || 15;
+    }
+
+    // 10. PO Received Boost — all special parts arrived, job should jump to top priority
+    if (weights.poReceivedBoost.enabled && !job.openPOs && job.closedPOs) {
+        factors.poReceivedBoost = weights.poReceivedBoost.bonusPoints || 35;
     }
 
     // 9. Custom Factors

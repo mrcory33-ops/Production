@@ -107,6 +107,16 @@ const normalizeAlertDoc = (docSnap: QueryDocumentSnapshot<DocumentData>): Superv
         ? data.additionalJobNames.map((n: unknown) => String(n))
         : undefined;
 
+    // Special Purchase fields
+    const isSpecialPurchase = data.isSpecialPurchase === true;
+    const daysNeededAfterPO = typeof data.daysNeededAfterPO === 'number' ? data.daysNeededAfterPO : undefined;
+    const spAdjustedDueDate = data.spAdjustedDueDate ? toIsoString(data.spAdjustedDueDate, '') : undefined;
+    const poReceivedEarly = data.poReceivedEarly === true;
+
+    // Additional issue flags
+    const isCsiNotReceived = data.isCsiNotReceived === true;
+    const isOutOfStock = data.isOutOfStock === true;
+
     return {
         id: docSnap.id,
         jobId: String(data.jobId || ''),
@@ -129,7 +139,13 @@ const normalizeAlertDoc = (docSnap: QueryDocumentSnapshot<DocumentData>): Superv
         lastAdjustmentStrategy,
         lastAdjustmentReason,
         lastAdjustmentMovedJobIds,
-        lastAdjustmentOtSummary
+        lastAdjustmentOtSummary,
+        isSpecialPurchase: isSpecialPurchase || undefined,
+        daysNeededAfterPO,
+        spAdjustedDueDate: spAdjustedDueDate || undefined,
+        poReceivedEarly: poReceivedEarly || undefined,
+        isCsiNotReceived: isCsiNotReceived || undefined,
+        isOutOfStock: isOutOfStock || undefined
     };
 };
 
@@ -143,6 +159,10 @@ export interface CreateAlertInput {
     reportedBy: string;
     additionalJobIds?: string[];
     additionalJobNames?: string[];
+    isSpecialPurchase?: boolean;
+    daysNeededAfterPO?: number;
+    isCsiNotReceived?: boolean;
+    isOutOfStock?: boolean;
 }
 
 export interface UpdateAlertInput {
@@ -178,10 +198,19 @@ export const createAlert = async (data: CreateAlertInput): Promise<SupervisorAle
         reportedBy: data.reportedBy.trim(),
         daysBlocked: calculateBusinessDaysUntil(estimatedResolutionDate),
         createdAt: nowIso,
-        updatedAt: nowIso
+        updatedAt: nowIso,
+        isSpecialPurchase: data.isSpecialPurchase || undefined,
+        daysNeededAfterPO: data.daysNeededAfterPO || undefined,
+        isCsiNotReceived: data.isCsiNotReceived || undefined,
+        isOutOfStock: data.isOutOfStock || undefined
     };
 
-    await setDoc(ref, alert);
+    // Firestore does not accept `undefined` values — strip them before writing
+    const cleanAlert = Object.fromEntries(
+        Object.entries(alert).filter(([, v]) => v !== undefined)
+    );
+
+    await setDoc(ref, cleanAlert);
     return alert;
 };
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, query, where, getDocs, limit, doc, updateDoc, deleteDoc, writeBatch, onSnapshot, Timestamp, deleteField } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, writeBatch, onSnapshot, Timestamp, deleteField } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Job, Department, ScheduleInsights, SupervisorAlert } from '@/types';
 import {
@@ -587,8 +587,7 @@ export default function PlanningBoard() {
             try {
                 const q = query(
                     collection(db, 'jobs'),
-                    where('status', 'in', ['PENDING', 'IN_PROGRESS']),
-                    limit(200)
+                    where('status', 'in', ['PENDING', 'IN_PROGRESS', 'HOLD'])
                 );
 
                 const snapshot = await getDocs(q);
@@ -729,25 +728,38 @@ export default function PlanningBoard() {
             });
         }
 
-        // Search by job name, sales order, or work order
+        // Search by job name, sales order, work order, or sales rep code
         const query = searchQuery.trim().toLowerCase();
         const queryDigits = query.replace(/\D/g, '');
+        const isRepCodeQuery = /^[a-z]{2}$/.test(query);
         if (query) {
             const exactWorkOrder = jobs.find(j => String(j.id).toLowerCase() === query);
             if (exactWorkOrder) {
                 filtered = filtered.filter(j => String(j.id).toLowerCase() === query);
+            } else if (isRepCodeQuery) {
+                filtered = filtered.filter(j => (j.salesRepCode || '').toLowerCase() === query);
             } else {
                 filtered = filtered.filter(j => {
                     const name = (j.name || '').toLowerCase();
                     const workOrder = String(j.id || '').toLowerCase();
                     const salesOrder = (j.salesOrder || getSalesOrderFromWorkOrder(j.id) || '').toLowerCase();
+                    const salesRepCode = (j.salesRepCode || '').toLowerCase();
                     if (queryDigits.length === 5) {
                         const woDigits = workOrder.replace(/\D/g, '');
-                        if (salesOrder.startsWith(queryDigits) || woDigits.startsWith(queryDigits)) {
+                        if (
+                            salesOrder.startsWith(queryDigits) ||
+                            woDigits.startsWith(queryDigits) ||
+                            salesRepCode.startsWith(queryDigits)
+                        ) {
                             return true;
                         }
                     }
-                    return name.includes(query) || salesOrder.includes(query) || workOrder.includes(query);
+                    return (
+                        name.includes(query) ||
+                        salesOrder.includes(query) ||
+                        workOrder.includes(query) ||
+                        salesRepCode.includes(query)
+                    );
                 });
             }
         }
@@ -1054,7 +1066,7 @@ export default function PlanningBoard() {
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="pl-8 pr-3 py-1.5 w-64 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-black focus:border-transparent transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]"
-                                    placeholder="Search Job, SO, or WO..."
+                                    placeholder="Search Job, SO, WO, or Sales Rep Code..."
                                 />
                             </div>
 
@@ -1474,6 +1486,31 @@ export default function PlanningBoard() {
                                 movedJobIds: actionableShifts.map(shift => shift.jobId),
                                 otSummary
                             });
+
+                            // Send email notification for Special Purchase adjustments
+                            if (alertRecord.isSpecialPurchase) {
+                                const primaryJob = jobs.find(j => j.id === alertRecord.jobId);
+                                const primaryShift = actionableShifts.find(s => s.jobId === alertRecord.jobId);
+                                const updatedJob = primaryShift ? updatesByJobId.get(primaryShift.jobId) : undefined;
+                                const newForecastDue = updatedJob?.forecastDueDate
+                                    || primaryJob?.forecastDueDate
+                                    || primaryJob?.dueDate;
+
+                                fetch('/api/notify-sp-adjustment', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        jobId: alertRecord.jobId,
+                                        jobName: alertRecord.jobName,
+                                        salesRepCode: primaryJob?.salesRepCode || '',
+                                        oldDueDate: primaryJob?.dueDate ? new Date(primaryJob.dueDate).toISOString() : undefined,
+                                        newDueDate: newForecastDue ? new Date(newForecastDue).toISOString() : new Date().toISOString(),
+                                        reason: alertRecord.reason,
+                                        daysNeededAfterPO: alertRecord.daysNeededAfterPO,
+                                        adjustmentStrategy: decision.strategy
+                                    })
+                                }).catch(err => console.error('SP email notification failed:', err));
+                            }
 
                             return {
                                 success: true,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Bell, CheckCircle2, ChevronDown, Clock3, Pencil, Trash2, X } from 'lucide-react';
+import { Bell, CheckCircle2, ChevronDown, Clock3, FileX2, Package, PackageX, Pencil, Trash2, X } from 'lucide-react';
 import { Department, Job, SupervisorAlert } from '@/types';
 import type { AlertAdjustmentDecision } from '@/lib/scheduler';
 
@@ -294,6 +294,24 @@ export default function AlertManagementPanel({
                                                     +{alert.additionalJobIds.length} more
                                                 </span>
                                             )}
+                                            {alert.isSpecialPurchase && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold inline-flex items-center gap-1">
+                                                    <Package className="w-3 h-3" />
+                                                    SP
+                                                </span>
+                                            )}
+                                            {alert.isCsiNotReceived && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold inline-flex items-center gap-1">
+                                                    <FileX2 className="w-3 h-3" />
+                                                    CSI
+                                                </span>
+                                            )}
+                                            {alert.isOutOfStock && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold inline-flex items-center gap-1">
+                                                    <PackageX className="w-3 h-3" />
+                                                    OOS
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="text-xs text-slate-300 truncate max-w-[260px]" title={alert.jobName}>
                                             {alert.jobName}
@@ -344,6 +362,13 @@ export default function AlertManagementPanel({
                                         Days blocked: {daysBlocked}
                                     </div>
                                 </div>
+
+                                {alert.isSpecialPurchase && alert.daysNeededAfterPO && (
+                                    <div className="mt-2 rounded-md border border-sky-500/25 bg-sky-500/10 px-2 py-1.5 text-[11px] text-sky-200 flex items-center gap-1.5">
+                                        <Package className="w-3.5 h-3.5 text-sky-400" />
+                                        <span>Special Purchase — <strong>{alert.daysNeededAfterPO} business days</strong> needed after PO received</span>
+                                    </div>
+                                )}
 
                                 {alert.lastAdjustmentAt && (
                                     <div className="mt-2 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1.5 text-[11px] text-indigo-100">

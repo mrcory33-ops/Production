@@ -168,6 +168,7 @@ export const parseGlobalShopExport = async (fileBuffer: ArrayBuffer): Promise<Jo
 
             productType: parseProductType(masterRow['DIVISION']),
             salesperson: masterRow['REP_NAME'] || '',
+            salesRepCode: String(masterRow['Code_Sort'] || masterRow['CODE_SORT'] || masterRow['code_sort'] || '').trim() || undefined,
             salesOrder: resolvedSalesOrder,
 
             isPriority: false, // Default, user must flag manually? Or look for specific notes?

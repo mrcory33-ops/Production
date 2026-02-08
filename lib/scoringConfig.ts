@@ -23,6 +23,7 @@ export interface ScoringWeights {
     refJob: ScoringFactor;
     harmonicProduct: ScoringFactor;
     paintingRequired: ScoringFactor;
+    poReceivedBoost: ScoringFactor;
     customFactors?: ScoringFactor[]; // New: array of user-defined factors
 }
 
@@ -72,6 +73,11 @@ const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
         bonusPoints: 15,
         enabled: true,
         label: 'Painting Required'
+    },
+    poReceivedBoost: {
+        bonusPoints: 35,
+        enabled: true,
+        label: 'PO Received Boost'
     },
     customFactors: []
 };
