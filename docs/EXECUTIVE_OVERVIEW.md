@@ -265,6 +265,12 @@ This classification affects:
 
 ## 7. Batching Logic (Similar Jobs Grouped Together)
 
+### 7.0 When Batching Activates
+
+Batching is **not a separate step** — it's woven into Phase 1 (Ideal Placement) of the scheduling pipeline. Before jobs are laid onto the Gantt chart, the engine calls `orderJobsForBatching()` to reorder the job list so that physically similar items land in consecutive time slots. This means the same welder can process a run of identical frames without retooling between each one.
+
+**Why it matters:** Without batching, two "Frame KD 16ga SS304" jobs due the same week might be scheduled days apart with unrelated work in between. With batching, they're placed back-to-back and each receives an automatic time discount (see §7.3).
+
 The scheduler groups similar jobs together to improve production efficiency. Jobs are batched based on their **description text** matching specific patterns.
 
 ### 7.1 Batch Categories
@@ -280,23 +286,33 @@ The scheduler groups similar jobs together to improve production efficiency. Job
 | **Wall Shelf** | "wall shelf", "wall shelves", "lower wall shelf", "upper wall shelf" |
 | **Corner Guard** | "corner guard", "corner guards", "cornerguard", "cornerguards" |
 
-### 7.2 Batching Tiers
+### 7.2 How the Grouping Key Works
 
-When jobs match a batch category, they are further grouped by:
+The engine builds a **composite key** for each job. Two jobs that produce the same key land in the same batch:
 
-**Tier 1 — Strict Match (Highest Priority):**
-- Same batch category (e.g., Frame Knock Down)
-- Same **gauge** (e.g., "16 ga", "#16")
-- Same **material** (e.g., SS304, galvanized, CRS)
-- Same **due week** (Monday-Sunday containing due date)
+**Strict Match** (highest priority, scheduled first within a week):
+```
+Key = "strict:" + category + "|" + gauge + "|" + material + "|" + dueWeekStartTimestamp
+```
+Example: `strict:FRAME_KD|16|SS304|1707091200000`
 
-**Tier 2 — Relaxed Match (Medium Priority):**
-- Same batch category
-- Same due week
-- (Any gauge or material)
+**Relaxed Match** (medium priority):
+```
+Key = "relaxed:" + category + "|" + dueWeekStartTimestamp
+```
+Used when gauge AND material aren't both extractable from the description.
 
-**Tier 3 — No Batch (Normal Priority):**
-- Jobs that don't match any batch category are scheduled individually
+**No Batch** (normal priority):
+Jobs that don't match any batch category are scheduled individually, sorted by urgency score → due date → size.
+
+### 7.2.1 How Batches Are Ordered Against Each Other
+
+Within the same due week, groups are sorted by:
+1. **Due week** (earliest week first)
+2. **Earliest due date** within the group
+3. **Priority tier** (strict > relaxed > singles)
+4. **Highest urgency score** in the group
+5. **Largest welding points** in the group (tiebreaker)
 
 ### 7.3 Batch Efficiency Discount
 
@@ -429,57 +445,109 @@ For rush jobs, supervisors can click the **⚡ No Gaps** button on any job. This
 
 ---
 
-## 10. Scheduling Algorithms
+## 10. The Scheduling Pipeline — Five Phases
 
-The system uses two scheduling strategies depending on the situation:
+The scheduler doesn't make one pass — it runs a **five-phase pipeline** every time a schedule is computed. Each phase transforms the schedule and feeds the next.
 
-### 10.1 Backward Scheduling (Default for New Jobs)
+```
+Phase 1          Phase 2            Phase 3             Phase 4            Phase 5
+Ideal         →  Capacity        →  Compression      →  Validation      →  Analysis
+Placement        Audit               (Multi-Pass          (Checks)          (Insights)
+                                      Shift Relief)
+```
 
-**Goal:** Finish just before the due date with a buffer.
+### 10.1 Phase 1 — Ideal Placement
 
-1. Start from due date minus 2 days (buffer)
-2. Work backward, placing Assembly first
-3. Then Polishing, Welding, Press Brake, Laser, Engineering
-4. Find the earliest start date needed
+This is where every job gets its initial time slot on the Gantt chart. The engine works through jobs in **batch-aware order** (see §7).
 
-**Used when:** Job is new and has time before due date.
+**Drum-Buffer-Rope Strategy — welding is the heartbeat:**
+1. **Schedule Welding first** — Each job's Welding start/end is placed based on due date and available capacity
+2. **Work backward** from Welding start — Engineering → Laser → Press Brake get calculated dates
+3. **Work forward** from Welding end — Polishing → Assembly get calculated dates
 
-### 10.2 Forward Scheduling (For Overdue/Tight Deadlines)
+**Two sub-strategies based on timing:**
 
-**Goal:** Start ASAP and push forward.
+| Strategy | When It's Used | How It Works |
+|----------|---------------|--------------|
+| **Backward Scheduling** | Job has time before due date | Start from `due date − 2 days buffer`, work backward through all 6 departments. Finds the earliest Engineering start needed. |
+| **Forward Scheduling** | Calculated start would be in the past, OR job is already overdue | Start from **today** (or the job's current department), schedule each department in order Engineering → Assembly, find the soonest completion. |
 
-1. Start from TODAY (or job's current department)
-2. Schedule each department in order: Engineering → Assembly
-3. Calculate the earliest possible completion date
+Within each strategy, the engine applies **department gaps** between departments based on job size:
+- ≥ 70 points (Big Rock): **1 workday gap** between departments
+- ≥ 8 points (Medium): **0.5 workday gap**
+- < 8 points (Small): **no gap**
 
-**Used when:**
-- Job's calculated start date would be in the past
-- Job is already overdue
-- Job has been rescheduled from current department
+**Priority Order within Phase 1:**
+1. All overdue jobs first → forward-scheduled immediately
+2. All Big Rocks (≥ 50 pts) → sorted by urgency score, scheduled backward when possible
+3. All remaining jobs → batch-ordered, backward-scheduled
 
-### 10.3 Scheduling Strategy: Drum-Buffer-Rope
+### 10.2 Phase 2 — Capacity Audit
 
-The system treats **Welding as the Heartbeat** (the Drum) of the production floor. This ensures all other work flows at a pace the primary constraint can handle:
+After ideal placement, the engine tallies every department's weekly load:
 
-1. **Schedule Welding First** — Jobs are allocated Welding slots based on due date and capacity
-2. **Work Backwards** — Upstream departments (Engineering → Laser → Press Brake) are scheduled by subtracting work days from the Welding start date
-3. **Work Forwards** — Downstream departments (Polishing → Assembly) are scheduled by adding work days to the Welding end date
+```
+For each week (Monday to Sunday):
+   For each department:
+      weeklyLoad = Σ (welding points of every job with work in that dept during that week)
+      
+      if weeklyLoad > 850 → flag as OVER_CAPACITY
+```
 
-### 10.4 Scheduling Priority Order
+**850 points/week** is the base capacity per department (derived from 8hr/day × 5 days × 21.25 pts/hr).
 
-1. **All Big Rocks first** — Sorted by urgency score (highest first)
-2. **All smaller jobs** — Sorted by urgency score, grouped by batch category
+The audit produces a `weeklyLoad` map — a 2D grid of `[week × department → points]` — that all subsequent phases consume.
+
+### 10.3 Phase 3 — Compression (Multi-Pass Shift Relief)
+
+This is the engine's most aggressive optimization. When Phase 2 finds over-capacity weeks, Phase 3 tries to move jobs **earlier** to fill underutilized weeks.
+
+**How it works — three passes with decreasing shift sizes:**
+
+| Pass | Shift Attempt | Description |
+|:----:|:---:|-------------|
+| 1 | 5 workdays | Try moving each overloaded-week job 1 full week earlier |
+| 2 | 3 workdays | Try moving overloaded-week jobs 3 days earlier |
+| 3 | 1 workday | Try moving overloaded-week jobs 1 day earlier |
+
+**For each candidate job in each pass:**
+1. Check if the target week has room: `targetWeekLoad + jobPoints ≤ 850`
+2. Check if moving earlier would violate the job's **sequential department order** (Engineering must still come before Laser, etc.)
+3. Check the job has **forward slack** — moving it earlier won't push it past its due date
+4. If all checks pass → move the job, update the weekly load map
+
+The engine keeps iterating until no more moves are possible or the weekly load is balanced.
+
+### 10.4 Phase 4 — Validation
+
+After compression, the engine runs two validation checks on every job:
+
+1. **Due Date Check:** Is the scheduled completion (Assembly end date) on or before the due date? If not, the job is flagged `isLate = true`.
+2. **Sequential Order Check:** Do departments flow in the correct order? (Engineering start ≤ Laser start ≤ Press Brake start ≤ Welding start ≤ Polishing start ≤ Assembly start). Violations are flagged as conflicts.
+
+### 10.5 Phase 5 — Analysis (Schedule Insights Generation)
+
+This phase doesn't change the schedule — it **reads** the finalized schedule and produces decision-support data for the plant manager. The outputs feed directly into the Schedule Insights panel (see §16).
+
+Phase 5 generates:
+- **Late Job List** — Every job that will miss its due date, with bottleneck department and days late
+- **Move Options** — Simulated job pushes that could recover late jobs (see §16.3)
+- **OT Recommendations** — Which weeks need overtime and at what tier
+- **Projected Outcomes** — Net effect if the manager applies all suggested moves + OT
+- **Alert Impact** — How supervisor-reported blockers (see §15) affect the schedule
 
 ---
 
 ## 11. Handling Overdue Jobs
 
-If a job's scheduled start date has already passed:
+Overdue handling is embedded in Phase 1 of the pipeline. If a job's backward-scheduled Engineering start date falls **before today**, the engine automatically switches to forward scheduling:
 
-1. The system **reschedules from TODAY** (not the original date)
-2. It starts from the job's **current department** (not Engineering)
-3. The job is flagged as overdue (red due date)
-4. Forward scheduling is used to find the soonest completion
+1. Start from **today** (not the original date)
+2. Begin at the job's **current department** (not Engineering) — skipping departments the job has already passed through
+3. Forward-schedule remaining departments sequentially
+4. Flag the job as overdue (red due date badge on the Gantt)
+
+Overdue jobs are always scheduled **first** — before Big Rocks and before batched jobs — because recovering them is the highest priority.
 
 ---
 
@@ -682,13 +750,13 @@ This means the system's overtime recommendations and move suggestions account fo
 
 ## 16. Schedule Insights — Decision Support Panel
 
-Click the **📊 Insights** button (chart icon) on the Planning Board toolbar to open the Schedule Insights panel.
+Click the **📊 Insights** button (chart icon) on the Planning Board toolbar to open the Schedule Insights panel. This is the output of **Phase 5** of the scheduling pipeline (see §10.5).
 
-### What It Shows
+### 16.1 Design Principle
 
-The panel analyzes the current schedule and presents **options, not orders** — the manager makes the final call.
+The panel presents **options, not orders**. It simulates what-if scenarios against the current schedule and shows the manager the projected impact of each option. The manager makes every final decision.
 
-#### Summary Pipeline
+### 16.2 Summary Pipeline
 
 At the top, a 3-stage pipeline shows the projected outcome:
 
@@ -697,73 +765,127 @@ Current State   →   After Suggested Moves   →   After Moves + Overtime
    12 late              6 late                       0 late
 ```
 
-#### Section 1: Late Jobs
+### 16.3 Late Job Detection
 
-Lists every job that will miss its due date, showing:
-- Work Order ID and customer name
-- Due date vs. estimated completion
-- Days late and bottleneck department
+For each job where `Assembly end date > due date`, the engine identifies:
+- **Days late** — workday count between due date and scheduled completion
+- **Bottleneck department** — which department caused the overshoot (the one with the largest gap between ideal and actual placement)
+- **Total blocked points** — welding points of late jobs, rolled up per week and per department
 
-#### Section 2: Overtime Recommendations
+### 16.4 Move Options — The Simulation Harness
 
-For each overloaded week, shows a recommended overtime tier:
+This is the most technically complex part of the system. The engine doesn't just "suggest jobs to push" — it **simulates every possible move** against a cloned schedule and scores the outcome.
 
-| Tier | Schedule | Extra Capacity |
-|------|----------|:-:|
-| **Tier 1** | 9-Hour Days (Mon-Fri) | +106 pts/week |
-| **Tier 2** | 10-Hour Days (Mon-Fri) | +213 pts/week |
-| **Tier 3** | 9hr Days + Saturday 6am-12pm | +234 pts/week |
-| **Tier 4** | 10hr Days + Saturday 6am-12pm | +341 pts/week |
+#### How the Simulation Works
 
-The system recommends the **lowest tier** that covers each week's overload.
+```
+1. Clone the weekly load map → workingLoad (deep copy)
+2. For each candidate job (sorted by points, top 20):
+   a. Remove the job's point contributions from workingLoad
+   b. Place the job at +1 week and +2 week positions
+   c. Add the job's points to those new positions in workingLoad
+   d. Count how many currently-late jobs would NO LONGER be late
+   e. Record: { lateJobsRecovered, pointsRelieved, riskLevel }
+   f. Restore workingLoad to its pre-move state (undo)
+3. Sort all viable moves by lateJobsRecovered (desc), then pointsRelieved (desc)
+```
 
-#### Section 3: Move Options
+This "clone → remove → evaluate → restore" pattern is the **scheduling harness** — the same pattern used by the Quote Estimator (see §17) for feasibility analysis. It allows the engine to test hundreds of hypothetical moves without ever touching the real schedule.
 
-Suggests jobs that could be pushed +1 or +2 weeks to free up bottleneck capacity:
+#### Work Order (WO) Moves
 
-- **Work Order moves** — push a single job
-- **Sales Order moves** — push an entire project's jobs together
+A WO move pushes a **single job** to a later week. The engine evaluates the top 20 non-late jobs (by welding points) as candidates:
 
-Each option shows:
-- Which late jobs it would recover
-- Risk level (Safe = won't cause the moved job to be late)
+| Property | How It's Determined |
+|----------|-------------------|
+| **Candidate Selection** | Jobs not currently late, sorted by welding points (descending) |
+| **Test Positions** | +1 week and +2 weeks from current position |
+| **Recovery Score** | How many currently-late jobs would be recovered by freeing this capacity |
+| **Risk Level** | `SAFE` if the moved job would still finish before its due date; `AT_RISK` otherwise |
+| **Points Relieved** | The moved job's welding points freed from the bottleneck week |
+
+#### Sales Order (SO) Moves
+
+A SO move pushes **all jobs in a sales order** together — this is inherently safer because the jobs maintain their relative spacing.
+
+| Property | How It's Determined |
+|----------|-------------------|
+| **Grouping** | All jobs sharing the same Sales Order number |
+| **Combined Points** | Sum of all jobs in the SO |
+| **Recovery Score** | Evaluated as a group — removing all SO jobs at once from the weekly load |
+| **Risk Assessment** | Safer than WO moves because inter-job dependencies are preserved |
+
+#### Move Comparison Display
+
+Each move option shown in the UI includes:
+- Which late jobs it would recover (by WO#)
+- Risk level badge
 - Points freed up
-- Impact summary
+- Impact summary sentence
 
-**Hard rules:**
+**Hard rules enforced by the engine:**
 - Never pushes a job more than 2 weeks
 - Never pushes a job that's already late
+- Late jobs are never candidates — only non-late jobs with capacity to give
 - Manager must decide which moves to apply
 
-#### Section 4: Projected Outcome
+### 16.5 Overtime Recommendations
 
-Shows what the schedule would look like after moves and OT:
-- Which jobs are still late (if any)
-- Escalation flags for unfixable situations
+For each week where `weeklyLoad > 850`, the engine finds the **lowest OT tier** that covers the excess:
+
+| Tier | Schedule | Bonus Capacity | Weekly Total |
+|:----:|----------|:-:|:-:|
+| **1** | 9-Hour Days (6am–3pm, Mon-Fri) | +106 pts | 956 pts |
+| **2** | 10-Hour Days (6am–4pm, Mon-Fri) | +213 pts | 1,063 pts |
+| **3** | 9hr Days + Saturday 6am–12pm | +234 pts | 1,084 pts |
+| **4** | 10hr Days + Saturday 6am–12pm | +341 pts | 1,191 pts |
+
+The tier is selected per-week, per-department — so one department might need Tier 2 while another needs Tier 3 in the same week.
+
+### 16.6 Projected Outcome
+
+The engine applies all suggested moves+OT in a **greedy, non-overlapping** manner and reports:
+- **Recovered late jobs** — jobs that would no longer be late
+- **Remaining late jobs** — jobs that are still late even with moves+OT (escalation candidates)
+- **Net capacity change** — how much headroom each week gains
+
+### 16.7 Alert Impact Integration
+
+When the Supervisor Dashboard (§15) has active alerts, the Insights engine incorporates them:
+
+| Data Point | Description |
+|------------|-------------|
+| **Blocked Job Count** | Jobs tied to active supervisor alerts |
+| **Blocked Points** | Welding points affected, rolled up by department |
+| **Available Capacity** | `850 - currentLoad - blockedPoints` per department per week |
+| **Note** | Human-readable summary (e.g., "3 alerts blocking 145pts in Welding") |
+
+This means OT recommendations and move suggestions account for **real-world issues** supervisors have flagged, not just the theoretical schedule.
 
 ---
 
 ## 17. Quote Estimator — Capacity-Aware Job Feasibility
 
-The **Quote Estimator** is a simulation tool that answers: *"If a customer requests a new job worth $X, can we finish it — and by when?"* without modifying the live production schedule.
+The **Quote Estimator** is a simulation tool that answers: *"If a customer requests a new job worth $X, can we finish it — and by when?"* without modifying the live production schedule. It uses the same **scheduling harness** pattern as Schedule Insights (§16.4) — cloning the capacity map and running a hypothetical schedule.
 
-### 16.1 How to Access
+### 17.1 How to Access
 
 Click the **Calculator icon** (🧮) in the Tools Island on the Planning Board, or navigate directly to `/quote-estimator`.
 
-### 16.2 User Inputs
+### 17.2 User Inputs
 
 | Input | Description |
 |-------|-------------|
 | **Total Job Value ($)** | The full dollar value of the sales order |
 | **Total Quantity** | How many individual items are in the order |
 | **Big Rocks** | Optional. Individual high-value items with their own dollar values (e.g., a single $40,000 panel) |
-| **REF Specialty** | Checkbox. Marks the job as a REF (refrigeration) specialty job |
+| **REF Specialty** | Checkbox. Marks the job as a REF (refrigeration) specialty job (+10 urgency) |
+| **Product Type** | FAB, DOORS, or HARMONIC — affects department duration ratios |
 | **Engineering Ready Date** | The date engineering drawings will be available |
 | **Scheduling Mode** | `EARLIEST` (find soonest finish) or `TARGET` (check if a specific date is achievable) |
 | **Target Date** | Only when mode = TARGET. The customer's requested delivery date |
 
-### 16.3 Dollar-to-Points Conversion
+### 17.3 Dollar-to-Points Conversion
 
 The core conversion formula:
 
@@ -785,74 +907,94 @@ Remaining Points  = convertDollarToPoints(Remaining Value)
 Total Points      = Big Rock Points + Remaining Points
 ```
 
-If Total Points ≥ 50 → Job classified as **"Big Rock Class"**
+If Total Points ≥ **70** → Job classified as **"Big Rock Class"** in the Quote Estimator
 
-### 16.4 Production Timeline Simulation (Pipeline Effect)
+> **Note on the "Big Rock" threshold:** The Quote Estimator uses **70 points** for Big Rock classification — this controls department gap sizing (1 workday gap between departments for Big Rocks). The urgency scoring system (§6) uses a separate **50 point** threshold that adds +10 bonus urgency points. These serve different purposes and are intentionally different values.
 
-The Quote Estimator simulates a **flowing pipeline** where departments **overlap** — the next department can begin after ~25% of the current department's work is done:
+### 17.4 Production Timeline Simulation (Sequential, Capacity-Aware)
+
+The Quote Estimator simulates a **sequential pipeline** — each department must **complete entirely** before the next can start (plus a size-based gap). This is deliberately conservative to give accurate delivery estimates.
 
 ```
 For each department (1 to 6):
-  duration = calculateDeptDuration(dept, totalPoints, productType)
-  startDate = currentDate
-  endDate = addWorkDays(startDate, ceil(duration) - 1)
+  1. duration = calculateDeptDuration(dept, totalPoints, productType)
+  2. Find first available slot where EVERY week the dept spans
+     has remaining capacity: weeklyLoad + jobPoints ≤ 850
+  3. Reserve this capacity in the cloned capacity map
+  4. Next dept starts after this dept ends + department gap
+     
+Department gaps:
+  ≥ 70 pts (Big Rock):  1 workday gap
+  ≥ 8 pts  (Medium):    0.5 workday gap
+  < 8 pts  (Small):     no gap
 
-  overlapDays = max(1, ceil(duration × 0.25))
-  currentDate = addWorkDays(startDate, overlapDays)
-
-Estimated Completion = endDate of Assembly (last department)
+Estimated Completion = end date of Assembly (last department)
 ```
 
-This pipeline effect means total job time is significantly shorter than the sum of individual department durations.
+**Capacity-aware slot finding:** The engine doesn't just lay departments on dates — it checks the existing shop floor load. If Welding is at 800pts in a given week and the new job would add 60pts (pushing to 860 > 850), the engine slides to the next week automatically. This sliding can cascade across departments.
 
-### 16.5 Three-Tier Feasibility Analysis
+### 17.5 Three-Tier Feasibility Analysis
 
-When a **Target Date** is specified, the system runs a 3-tier feasibility check:
+When a **Target Date** is specified, the system runs a 3-tier feasibility check. Each tier only runs if the previous tier failed:
 
-**Tier 1 — "As-Is Schedule":**
-Can this job fit into current capacity (850 pts/week) without changing anything?
-- Scans existing shop floor load week-by-week
-- Finds available capacity slots for each department
-- Reports bottlenecks if any department is delayed
+**Tier 1 — "As-Is" (No Changes):**
+Can this job fit into current capacity (850 pts/week/dept) without touching anything?
+- Runs the sequential simulation against the live capacity map
+- Identifies bottleneck departments (where capacity is full and the job had to slide)
+- If projected completion ≤ target date → **PASS**
 
-**Tier 2 — "Adaptive Re-routing" (With Job Moves):**
-Can we make room by pushing back jobs that have ≥7 days of buffer?
-- Identifies jobs in Engineering or Laser that have enough slack
-- Proposes shifting them 7 workdays later
-- Recalculates timeline with freed capacity
+**Tier 2 — "With Moves" (Push Buffer Jobs):**
+Can we make room by pushing existing jobs that have slack?
+- Scans all existing jobs for those with **≥ 7 workdays of buffer** (due date − scheduled end ≥ 7)
+- Only considers jobs in **Engineering or Laser** (earliest departments, safest to move)
+- Proposes shifting each candidate **7 workdays later**
+- Applies moves to a cloned capacity map and re-simulates
+- If projected completion ≤ target date → **PASS**
 
-**Tier 3 — "Peak Overtime":**
-Can we make the date with overtime (1,000 pts/week)?
-- Applies a **0.85× duration multiplier** (15% faster across all departments)
-- Tracks which calendar weeks would require overtime
-- Only activates if Tiers 1 and 2 both failed
+**Tier 3 — "With Overtime" (4-Tier OT System):**
+Can we make the date with expanded weekly capacity?
+
+The engine tries each OT tier from lowest to highest, stopping at the first one that works:
+
+| Tier | Schedule | Weekly Capacity |
+|:----:|----------|:-:|
+| 1 | 9-Hour Days (6am–3pm) | 956 pts |
+| 2 | 10-Hour Days (6am–4pm) | 1,063 pts |
+| 3 | 9hr + Saturday 6am–12pm | 1,084 pts |
+| 4 | 10hr + Saturday 6am–12pm | 1,191 pts |
+
+For each tier, the engine re-runs the full sequential simulation with the expanded capacity ceiling. It also builds a **week-by-week OT breakdown** showing exactly which weeks and departments need overtime.
+
+If no tier works, the engine still runs Tier 4 to report the **earliest possible date**, even if it misses the target.
 
 **Final Recommendation:**
 ```
-Tier 1 passes → ACCEPT ("Can complete by X without changes")
-Tier 2 passes → ACCEPT_WITH_MOVES ("Can complete by X by moving N jobs")
-Tier 3 passes → ACCEPT_WITH_OT ("Can complete by X with overtime")
-All fail      → DECLINE ("Cannot meet target date")
+Tier 1 passes → ACCEPT        ("Can complete by X without any changes")
+Tier 2 passes → ACCEPT_WITH_MOVES ("Can complete by X by shifting N job(s) with buffer")
+Tier 3 passes → ACCEPT_WITH_OT    ("Can complete by X with [Tier Label] overtime")
+All fail      → DECLINE           ("Cannot meet target even with max OT. Earliest: X")
 ```
 
-### 16.6 End-to-End Example
+### 17.6 End-to-End Example
 
 **Scenario:** Customer requests a $45,500 job, 8 items, engineering ready Feb 10, target date Mar 14.
 
-**Step 1 — Points:** `round((45500 / 650) × 10) / 10` = **70.0 pts** → Big Rock Class
+**Step 1 — Points:** `round((45500 / 650) × 10) / 10` = **70.0 pts** → Big Rock Class (≥ 70)
 
-**Step 2 — Timeline (Pipeline):**
+**Step 2 — Timeline (Sequential with 1-day department gaps):**
 
-| Dept | Duration | Start | 25% Overlap | Next Dept Starts |
-|------|----------|-------|:-:|-----------------|
-| Engineering | 2 days | Feb 10 | 1 day | Feb 11 |
-| Laser | 0.5 day | Feb 11 | 1 day | Feb 12 |
-| Press Brake | 0.5 day | Feb 12 | 1 day | Feb 13 |
-| Welding | 1 day | Feb 13 | 1 day | Feb 14 |
-| Polishing | 1.5 days | Feb 14 | 1 day | Feb 17 (Mon) |
-| Assembly | 1 day | Feb 17 | — | **Finish: Feb 17** |
+| Dept | Duration | Earliest Available Slot | End | Gap | Next Starts |
+|------|:--------:|:-----------------------:|:---:|:---:|:-----------:|
+| Engineering | 2 days | Feb 10 | Feb 11 | 1 day | Feb 12 |
+| Laser | 0.5 day | Feb 12 | Feb 12 | 1 day | Feb 13 |
+| Press Brake | 0.5 day | Feb 13 | Feb 13 | 1 day | Feb 14 |
+| Welding | 1 day | Feb 14 | Feb 14 | 1 day | Feb 17 (Mon) |
+| Polishing | 1.5 days | Feb 17 | Feb 18 | 1 day | Feb 19 |
+| Assembly | 1 day | Feb 19 | Feb 19 | — | **Finish: Feb 19** |
 
-**Estimated Completion: Feb 17** → Well before Mar 14 target. ✅ ACCEPT
+**Estimated Completion: Feb 19** → Well before Mar 14 target. ✅ ACCEPT
+
+> In this example, no capacity constraints delayed the job, so every department got its ideal slot. If Welding was at 820pts the week of Feb 14, the engine would slide Welding to the next week (Feb 17), cascading all downstream departments.
 
 ---
 

@@ -186,6 +186,15 @@ export default function SupervisorDashboard() {
                                         <div>
                                             <div className="text-sm font-mono text-cyan-300">{alert.jobId}</div>
                                             <div className="text-xs text-slate-300 truncate" title={alert.jobName}>{alert.jobName}</div>
+                                            {alert.additionalJobIds && alert.additionalJobIds.length > 0 && (
+                                                <div className="mt-1 flex flex-wrap gap-1">
+                                                    {alert.additionalJobIds.map((id, idx) => (
+                                                        <span key={id} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700" title={alert.additionalJobNames?.[idx] || id}>
+                                                            +{id}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                         <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
                                             {alert.department}

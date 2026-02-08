@@ -22,33 +22,41 @@ export default function AlertCreateModal({
     onCreated
 }: AlertCreateModalProps) {
     const [jobQuery, setJobQuery] = useState('');
-    const [selectedJobId, setSelectedJobId] = useState('');
+    const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
     const [reason, setReason] = useState('');
     const [estimatedResolutionDate, setEstimatedResolutionDate] = useState(toDateInput(addDays(new Date(), 1)));
     const [reportedBy, setReportedBy] = useState('Supervisor');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const selectedJob = useMemo(
-        () => jobs.find(job => job.id === selectedJobId) || null,
-        [jobs, selectedJobId]
+    const jobsById = useMemo(() => {
+        const map = new Map<string, Job>();
+        for (const job of jobs) map.set(job.id, job);
+        return map;
+    }, [jobs]);
+
+    const selectedJobs = useMemo(
+        () => selectedJobIds.map(id => jobsById.get(id)).filter(Boolean) as Job[],
+        [selectedJobIds, jobsById]
     );
+
+    const primaryJob = selectedJobs[0] || null;
 
     const matches = useMemo(() => {
         const query = jobQuery.trim().toLowerCase();
-        if (!query) return jobs.slice(0, 8);
+        if (!query) return jobs.slice(0, 10);
         return jobs
             .filter(job =>
                 job.id.toLowerCase().includes(query) ||
                 job.name.toLowerCase().includes(query) ||
                 (job.salesOrder || '').toLowerCase().includes(query)
             )
-            .slice(0, 8);
+            .slice(0, 20);
     }, [jobQuery, jobs]);
 
     const resetForm = () => {
         setJobQuery('');
-        setSelectedJobId('');
+        setSelectedJobIds([]);
         setReason('');
         setEstimatedResolutionDate(toDateInput(addDays(new Date(), 1)));
         setReportedBy('Supervisor');
@@ -61,9 +69,21 @@ export default function AlertCreateModal({
         onClose();
     };
 
+    const toggleJob = (jobId: string) => {
+        setSelectedJobIds(prev =>
+            prev.includes(jobId)
+                ? prev.filter(id => id !== jobId)
+                : [...prev, jobId]
+        );
+    };
+
+    const removeJob = (jobId: string) => {
+        setSelectedJobIds(prev => prev.filter(id => id !== jobId));
+    };
+
     const handleSubmit = async () => {
-        if (!selectedJob) {
-            setError('Select a work order.');
+        if (selectedJobs.length === 0) {
+            setError('Select at least one work order.');
             return;
         }
         if (!reason.trim()) {
@@ -82,14 +102,19 @@ export default function AlertCreateModal({
         setSaving(true);
         setError(null);
         try {
+            const primary = selectedJobs[0];
+            const additional = selectedJobs.slice(1);
+
             await createAlert({
-                jobId: selectedJob.id,
-                department: selectedJob.currentDepartment,
+                jobId: primary.id,
+                department: primary.currentDepartment,
                 reason: reason.trim(),
                 estimatedResolutionDate: new Date(estimatedResolutionDate),
-                jobName: selectedJob.name,
-                salesOrder: selectedJob.salesOrder,
-                reportedBy: reportedBy.trim()
+                jobName: primary.name,
+                salesOrder: primary.salesOrder,
+                reportedBy: reportedBy.trim(),
+                additionalJobIds: additional.map(j => j.id),
+                additionalJobNames: additional.map(j => j.name)
             });
             onCreated?.();
             handleClose();
@@ -122,34 +147,79 @@ export default function AlertCreateModal({
 
                 <div className="p-5 space-y-4">
                     <div>
-                        <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Work Order</label>
-                        <div className="mt-1 rounded-xl border border-slate-700 bg-slate-950">
+                        <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                            Affected Work Orders
+                            {selectedJobs.length > 0 && (
+                                <span className="ml-2 text-cyan-400 normal-case tracking-normal font-semibold">
+                                    {selectedJobs.length} selected
+                                </span>
+                            )}
+                        </label>
+
+                        {/* Selected job pills */}
+                        {selectedJobs.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                {selectedJobs.map((job, idx) => (
+                                    <span
+                                        key={job.id}
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border transition-colors ${idx === 0
+                                                ? 'bg-cyan-900/40 border-cyan-500/40 text-cyan-200'
+                                                : 'bg-slate-800 border-slate-700 text-slate-300'
+                                            }`}
+                                    >
+                                        <span className="font-mono font-semibold">{job.id}</span>
+                                        <span className="text-slate-500 max-w-[120px] truncate">{job.name}</span>
+                                        {idx === 0 && (
+                                            <span className="text-[9px] px-1 py-px rounded bg-cyan-500/20 text-cyan-300">PRIMARY</span>
+                                        )}
+                                        <button
+                                            onClick={() => removeJob(job.id)}
+                                            className="ml-0.5 p-0.5 rounded hover:bg-white/10 text-slate-500 hover:text-white transition-colors"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Search + results */}
+                        <div className="mt-1.5 rounded-xl border border-slate-700 bg-slate-950">
                             <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800">
                                 <Search className="w-4 h-4 text-slate-500" />
                                 <input
                                     value={jobQuery}
                                     onChange={(e) => setJobQuery(e.target.value)}
-                                    placeholder="Search WO#, job name, or SO#"
+                                    placeholder="Search WO#, job name, or SO# — select multiple"
                                     className="w-full bg-transparent text-sm text-white placeholder:text-slate-500 outline-none"
                                 />
                             </div>
                             <div className="max-h-44 overflow-y-auto">
-                                {matches.map(job => (
-                                    <button
-                                        key={job.id}
-                                        onClick={() => {
-                                            setSelectedJobId(job.id);
-                                            setJobQuery(`${job.id} - ${job.name}`);
-                                        }}
-                                        className={`w-full px-3 py-2 text-left border-b border-slate-900 last:border-b-0 transition-colors ${selectedJobId === job.id ? 'bg-cyan-900/30' : 'hover:bg-slate-800/70'}`}
-                                    >
-                                        <div className="flex items-center justify-between gap-2">
-                                            <span className="text-sm font-mono text-cyan-300">{job.id}</span>
-                                            <span className="text-[10px] text-slate-500">{job.currentDepartment}</span>
-                                        </div>
-                                        <div className="text-xs text-slate-300 truncate">{job.name}</div>
-                                    </button>
-                                ))}
+                                {matches.map(job => {
+                                    const isSelected = selectedJobIds.includes(job.id);
+                                    return (
+                                        <button
+                                            key={job.id}
+                                            onClick={() => toggleJob(job.id)}
+                                            className={`w-full px-3 py-2 text-left border-b border-slate-900 last:border-b-0 transition-colors ${isSelected ? 'bg-cyan-900/30' : 'hover:bg-slate-800/70'
+                                                }`}
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${isSelected
+                                                            ? 'bg-cyan-500 border-cyan-400 text-white'
+                                                            : 'border-slate-600 text-transparent'
+                                                        }`}>
+                                                        ✓
+                                                    </span>
+                                                    <span className="text-sm font-mono text-cyan-300">{job.id}</span>
+                                                </div>
+                                                <span className="text-[10px] text-slate-500">{job.currentDepartment}</span>
+                                            </div>
+                                            <div className="text-xs text-slate-300 truncate ml-6">{job.name}</div>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
@@ -158,7 +228,7 @@ export default function AlertCreateModal({
                         <div>
                             <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Department</label>
                             <div className="mt-1 px-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-sm text-white">
-                                {selectedJob?.currentDepartment || 'Select a WO first'}
+                                {primaryJob?.currentDepartment || 'Select a WO first'}
                             </div>
                         </div>
                         <div>
@@ -212,7 +282,7 @@ export default function AlertCreateModal({
                         disabled={saving}
                         className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold transition-colors disabled:opacity-60"
                     >
-                        {saving ? 'Saving...' : 'Create Alert'}
+                        {saving ? 'Saving...' : `Create Alert${selectedJobs.length > 1 ? ` (${selectedJobs.length} jobs)` : ''}`}
                     </button>
                 </div>
             </div>

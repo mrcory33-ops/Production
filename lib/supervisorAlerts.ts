@@ -3,6 +3,7 @@ import {
     deleteDoc,
     doc,
     getDocs,
+    increment,
     onSnapshot,
     orderBy,
     query,
@@ -13,7 +14,7 @@ import {
     type DocumentData
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Department, DepartmentLiveStatus, Job, SupervisorAlert } from '@/types';
+import { AlertAdjustmentStrategy, Department, DepartmentLiveStatus, Job, SupervisorAlert } from '@/types';
 
 const supervisorAlertsCollection = collection(db, 'supervisorAlerts');
 
@@ -79,6 +80,32 @@ const normalizeAlertDoc = (docSnap: QueryDocumentSnapshot<DocumentData>): Superv
     const daysBlocked = typeof data.daysBlocked === 'number'
         ? data.daysBlocked
         : calculateBusinessDaysUntil(estimatedResolutionDate);
+    const adjustmentCount = typeof data.adjustmentCount === 'number' ? data.adjustmentCount : undefined;
+    const lastAdjustmentAt = data.lastAdjustmentAt ? toIsoString(data.lastAdjustmentAt, updatedAt) : undefined;
+    const lastAdjustmentSelectedStartDate = data.lastAdjustmentSelectedStartDate
+        ? toIsoString(data.lastAdjustmentSelectedStartDate, updatedAt)
+        : undefined;
+    const lastAdjustmentStrategy =
+        data.lastAdjustmentStrategy === 'direct' ||
+            data.lastAdjustmentStrategy === 'move_jobs' ||
+            data.lastAdjustmentStrategy === 'ot'
+            ? data.lastAdjustmentStrategy
+            : undefined;
+    const lastAdjustmentReason = typeof data.lastAdjustmentReason === 'string'
+        ? data.lastAdjustmentReason
+        : undefined;
+    const lastAdjustmentMovedJobIds = Array.isArray(data.lastAdjustmentMovedJobIds)
+        ? data.lastAdjustmentMovedJobIds.map((id: unknown) => String(id))
+        : undefined;
+    const lastAdjustmentOtSummary = typeof data.lastAdjustmentOtSummary === 'string'
+        ? data.lastAdjustmentOtSummary
+        : undefined;
+    const additionalJobIds = Array.isArray(data.additionalJobIds)
+        ? data.additionalJobIds.map((id: unknown) => String(id))
+        : undefined;
+    const additionalJobNames = Array.isArray(data.additionalJobNames)
+        ? data.additionalJobNames.map((n: unknown) => String(n))
+        : undefined;
 
     return {
         id: docSnap.id,
@@ -86,6 +113,8 @@ const normalizeAlertDoc = (docSnap: QueryDocumentSnapshot<DocumentData>): Superv
         department: (data.department || 'Engineering') as Department,
         reason: String(data.reason || ''),
         estimatedResolutionDate,
+        additionalJobIds,
+        additionalJobNames,
         jobName: String(data.jobName || 'Unknown Job'),
         salesOrder: data.salesOrder ? String(data.salesOrder) : undefined,
         status,
@@ -93,7 +122,14 @@ const normalizeAlertDoc = (docSnap: QueryDocumentSnapshot<DocumentData>): Superv
         daysBlocked,
         createdAt,
         updatedAt,
-        resolvedAt
+        resolvedAt,
+        adjustmentCount,
+        lastAdjustmentAt,
+        lastAdjustmentSelectedStartDate,
+        lastAdjustmentStrategy,
+        lastAdjustmentReason,
+        lastAdjustmentMovedJobIds,
+        lastAdjustmentOtSummary
     };
 };
 
@@ -105,12 +141,22 @@ export interface CreateAlertInput {
     jobName: string;
     salesOrder?: string;
     reportedBy: string;
+    additionalJobIds?: string[];
+    additionalJobNames?: string[];
 }
 
 export interface UpdateAlertInput {
     reason?: string;
     estimatedResolutionDate?: string | Date;
     reportedBy?: string;
+}
+
+export interface RecordAlertAdjustmentInput {
+    selectedStartDate: string | Date;
+    strategy: AlertAdjustmentStrategy;
+    reason: string;
+    movedJobIds: string[];
+    otSummary?: string;
 }
 
 export const createAlert = async (data: CreateAlertInput): Promise<SupervisorAlert> => {
@@ -124,6 +170,8 @@ export const createAlert = async (data: CreateAlertInput): Promise<SupervisorAle
         department: data.department,
         reason: data.reason.trim(),
         estimatedResolutionDate,
+        additionalJobIds: data.additionalJobIds?.length ? data.additionalJobIds : undefined,
+        additionalJobNames: data.additionalJobNames?.length ? data.additionalJobNames : undefined,
         jobName: data.jobName,
         salesOrder: data.salesOrder,
         status: 'active',
@@ -176,6 +224,23 @@ export const extendAlert = async (id: string, newDate: string | Date): Promise<v
     });
 };
 
+export const recordAlertAdjustment = async (
+    id: string,
+    data: RecordAlertAdjustmentInput
+): Promise<void> => {
+    const nowIso = new Date().toISOString();
+    await updateDoc(doc(supervisorAlertsCollection, id), {
+        adjustmentCount: increment(1),
+        lastAdjustmentAt: nowIso,
+        lastAdjustmentSelectedStartDate: toStartOfDayIso(data.selectedStartDate),
+        lastAdjustmentStrategy: data.strategy,
+        lastAdjustmentReason: data.reason,
+        lastAdjustmentMovedJobIds: data.movedJobIds,
+        lastAdjustmentOtSummary: data.otSummary || '',
+        updatedAt: nowIso
+    });
+};
+
 export const subscribeToAlerts = (callback: (alerts: SupervisorAlert[]) => void): (() => void) => {
     const q = query(supervisorAlertsCollection, orderBy('createdAt', 'desc'));
 
@@ -215,7 +280,8 @@ export const getDepartmentStatus = (
 
     return ALL_DEPARTMENTS.map((department) => {
         const deptAlerts = activeAlerts.filter((alert) => alert.department === department);
-        const blockedJobs = Array.from(new Set(deptAlerts.map((alert) => alert.jobId)));
+        const allJobIds = deptAlerts.flatMap((alert) => [alert.jobId, ...(alert.additionalJobIds || [])]);
+        const blockedJobs = Array.from(new Set(allJobIds));
 
         let totalBlockedPoints = 0;
         for (const jobId of blockedJobs) {

@@ -10,6 +10,7 @@ export type Department =
 
 export type JobStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'HOLD';
 export type AlertStatus = 'active' | 'resolved';
+export type AlertAdjustmentStrategy = 'direct' | 'move_jobs' | 'ot';
 
 export interface SupervisorAlert {
     id: string;
@@ -19,6 +20,10 @@ export interface SupervisorAlert {
     department: Department;
     reason: string;
     estimatedResolutionDate: string; // ISO date
+
+    // Multi-job support (optional — backward compatible)
+    additionalJobIds?: string[];   // Extra affected job IDs beyond primary jobId
+    additionalJobNames?: string[]; // Paired display names for additional jobs
 
     // Auto-populated
     jobName: string;
@@ -31,6 +36,15 @@ export interface SupervisorAlert {
     createdAt: string;
     updatedAt: string;
     resolvedAt?: string;
+
+    // Adjustment tracking (optional)
+    adjustmentCount?: number;
+    lastAdjustmentAt?: string;
+    lastAdjustmentSelectedStartDate?: string;
+    lastAdjustmentStrategy?: AlertAdjustmentStrategy;
+    lastAdjustmentReason?: string;
+    lastAdjustmentMovedJobIds?: string[];
+    lastAdjustmentOtSummary?: string;
 }
 
 export interface DepartmentLiveStatus {

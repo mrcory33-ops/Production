@@ -2244,7 +2244,7 @@ const analyzeSchedule = (
     const blockedJobIds = new Set(
         activeAlerts
             .filter(alert => alert.status === 'active')
-            .map(alert => alert.jobId)
+            .flatMap(alert => [alert.jobId, ...(alert.additionalJobIds || [])])
     );
 
     // ══════════════════════════════════════════════
@@ -2577,6 +2577,408 @@ const analyzeSchedule = (
             projectedLateAfterOT: afterOTLate.stillLate.length
         },
         alertImpact
+    };
+};
+
+type AlertAdjustmentStrategy = 'direct' | 'move_jobs' | 'ot';
+type OvertimeTier = 1 | 2 | 3 | 4;
+
+export interface AlertAdjustmentJobShift {
+    jobId: string;
+    workDays: number; // positive = later, negative = earlier
+    reason: string;
+}
+
+export interface AlertAdjustmentOTRequirement {
+    weekKey: string;
+    department: string;
+    excess: number;
+    requiredTier: OvertimeTier;
+    tierLabel: string;
+    bonusPoints: number;
+}
+
+export interface AlertAdjustmentDecision {
+    success: boolean;
+    requestedStartDate: string;
+    selectedStartDate?: string;
+    strategy?: AlertAdjustmentStrategy;
+    reason: string;
+    affectedJobIds: string[];
+    jobShifts: AlertAdjustmentJobShift[];
+    otRequirements?: AlertAdjustmentOTRequirement[];
+}
+
+const normalizeToWorkday = (date: Date): Date => {
+    let cursor = startOfDay(date);
+    while (isSaturday(cursor) || isSunday(cursor)) {
+        cursor = addDays(cursor, 1);
+    }
+    return cursor;
+};
+
+const calculateWorkdayDelta = (fromDate: Date, toDate: Date): number => {
+    const from = startOfDay(fromDate);
+    const to = startOfDay(toDate);
+    if (from.getTime() === to.getTime()) return 0;
+
+    const forward = to.getTime() > from.getTime();
+    let cursor = new Date(from);
+    let delta = 0;
+
+    while (forward ? cursor < to : cursor > to) {
+        cursor = addDays(cursor, forward ? 1 : -1);
+        if (!isSaturday(cursor) && !isSunday(cursor)) {
+            delta += forward ? 1 : -1;
+        }
+    }
+
+    return delta;
+};
+
+const shiftScheduleByWorkdayDelta = (
+    schedule?: Record<string, { start: string; end: string }>,
+    deltaWorkDays: number = 0
+): Record<string, { start: string; end: string }> | undefined => {
+    if (!schedule) return undefined;
+    if (deltaWorkDays === 0) return { ...schedule };
+
+    const shifted: Record<string, { start: string; end: string }> = {};
+    for (const [department, window] of Object.entries(schedule)) {
+        const start = startOfDay(new Date(window.start));
+        const end = startOfDay(new Date(window.end));
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
+
+        const newStart = deltaWorkDays >= 0
+            ? addWorkDays(start, deltaWorkDays)
+            : subtractWorkDays(start, Math.abs(deltaWorkDays));
+        const newEnd = deltaWorkDays >= 0
+            ? addWorkDays(end, deltaWorkDays)
+            : subtractWorkDays(end, Math.abs(deltaWorkDays));
+
+        shifted[department] = {
+            start: newStart.toISOString(),
+            end: newEnd.toISOString()
+        };
+    }
+
+    return Object.keys(shifted).length ? shifted : undefined;
+};
+
+const buildEffectiveCapacityJob = (job: Job): Job => {
+    const remaining = job.remainingDepartmentSchedule;
+    const hasRemaining = remaining && Object.keys(remaining).length > 0;
+    return {
+        ...job,
+        departmentSchedule: hasRemaining ? remaining : job.departmentSchedule
+    };
+};
+
+const shiftCapacityJob = (job: Job, deltaWorkDays: number): Job => {
+    const shiftedSchedule = shiftScheduleByWorkdayDelta(job.departmentSchedule, deltaWorkDays);
+    return {
+        ...job,
+        departmentSchedule: shiftedSchedule || job.departmentSchedule
+    };
+};
+
+const isLateAgainstDueDate = (job: Job): boolean => {
+    if (!job.departmentSchedule) return false;
+    const latestEnd = Object.values(job.departmentSchedule)
+        .map(window => startOfDay(new Date(window.end)))
+        .filter(date => !Number.isNaN(date.getTime()))
+        .reduce<Date | null>((max, current) => {
+            if (!max) return current;
+            return current > max ? current : max;
+        }, null);
+
+    if (!latestEnd) return false;
+    const due = startOfDay(new Date(job.dueDate));
+    return isBefore(due, latestEnd);
+};
+
+const weekDeptKey = (weekKey: string, department: string): string => `${weekKey}::${department}`;
+
+const collectWeekDeptKeys = (job: Job): Set<string> => {
+    const keys = new Set<string>();
+    if (!job.departmentSchedule) return keys;
+
+    for (const [department, window] of Object.entries(job.departmentSchedule)) {
+        let cursor = startOfDay(new Date(window.start));
+        const end = startOfDay(new Date(window.end));
+        if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) continue;
+
+        while (cursor <= end) {
+            if (!isSaturday(cursor) && !isSunday(cursor)) {
+                keys.add(weekDeptKey(getWeekKey(cursor), department));
+            }
+            cursor = addDays(cursor, 1);
+        }
+    }
+
+    return keys;
+};
+
+type ImpactedOverload = {
+    weekKey: string;
+    department: string;
+    scheduledPoints: number;
+    excess: number;
+};
+
+const getImpactedOverloads = (
+    weeklyLoad: WeeklyCapacityMap,
+    targetWeekDeptKeys: Set<string>
+): ImpactedOverload[] => {
+    const overloads: ImpactedOverload[] = [];
+
+    for (const key of targetWeekDeptKeys) {
+        const [weekKey, department] = key.split('::');
+        if (!weekKey || !department) continue;
+
+        const total = weeklyLoad[weekKey]?.[department]?.total || 0;
+        if (total > WEEKLY_TARGET) {
+            overloads.push({
+                weekKey,
+                department,
+                scheduledPoints: Math.round(total),
+                excess: Math.round(total - WEEKLY_TARGET)
+            });
+        }
+    }
+
+    overloads.sort((a, b) => b.excess - a.excess);
+    return overloads;
+};
+
+/**
+ * Plan an "Adjust" action for a supervisor alert.
+ * Decision order:
+ * 1) Fit at requested resolution date with no overload
+ * 2) Fit by shifting non-late jobs (never create new late jobs)
+ * 3) Fit by OT tier coverage
+ * 4) If none works, scan forward to first date where any strategy works
+ */
+export const planAlertAdjustment = (
+    jobs: Job[],
+    alert: SupervisorAlert,
+    options: { searchWorkDays?: number; moveShiftDays?: number } = {}
+): AlertAdjustmentDecision => {
+    const searchWorkDays = Math.max(0, Math.min(options.searchWorkDays ?? 40, 120));
+    const moveShiftDays = Math.max(1, Math.min(options.moveShiftDays ?? 5, 10));
+
+    const requestedStart = normalizeToWorkday(new Date(alert.estimatedResolutionDate));
+    if (Number.isNaN(requestedStart.getTime())) {
+        return {
+            success: false,
+            requestedStartDate: '',
+            reason: 'Adjustment failed: invalid estimated resolution date on the alert.',
+            affectedJobIds: [],
+            jobShifts: []
+        };
+    }
+
+    const requestedStartDate = requestedStart.toISOString().split('T')[0];
+    const requestedTargetIds = [alert.jobId, ...(alert.additionalJobIds || [])]
+        .map(id => String(id || '').trim())
+        .filter(Boolean);
+    const uniqueTargetIds = Array.from(new Set(requestedTargetIds));
+
+    const capacityJobs = jobs.map(buildEffectiveCapacityJob);
+    const jobsById = new Map<string, Job>(capacityJobs.map(job => [job.id, job]));
+    const targetJobs = uniqueTargetIds
+        .map(jobId => jobsById.get(jobId))
+        .filter((job): job is Job => !!job && !!job.departmentSchedule);
+    const targetJobIdSet = new Set(targetJobs.map(job => job.id));
+    const missingTargetIds = uniqueTargetIds.filter(jobId => !targetJobIdSet.has(jobId));
+    const skippedNote = missingTargetIds.length > 0
+        ? ` ${missingTargetIds.length} selected work order${missingTargetIds.length > 1 ? 's were' : ' was'} not loaded and skipped.`
+        : '';
+
+    if (targetJobs.length === 0) {
+        return {
+            success: false,
+            requestedStartDate,
+            reason: `Adjustment failed: none of the selected work orders have an active schedule.`,
+            affectedJobIds: [],
+            jobShifts: []
+        };
+    }
+
+    const anchorJob = targetJobs.find(job => !!job.departmentSchedule?.[alert.department]);
+    if (!anchorJob || !anchorJob.departmentSchedule) {
+        return {
+            success: false,
+            requestedStartDate,
+            reason: `Adjustment failed: ${alert.department} is not present in any selected job schedule.`,
+            affectedJobIds: targetJobs.map(job => job.id),
+            jobShifts: []
+        };
+    }
+
+    const alertDeptWindow = anchorJob.departmentSchedule[alert.department];
+    const currentDeptStart = startOfDay(new Date(alertDeptWindow.start));
+    if (Number.isNaN(currentDeptStart.getTime())) {
+        return {
+            success: false,
+            requestedStartDate,
+            reason: `Adjustment failed: current ${alert.department} start date is invalid.`,
+            affectedJobIds: targetJobs.map(job => job.id),
+            jobShifts: []
+        };
+    }
+
+    for (let offset = 0; offset <= searchWorkDays; offset += 1) {
+        const candidateStart = offset === 0 ? requestedStart : addWorkDays(requestedStart, offset);
+        const candidateStartDate = candidateStart.toISOString().split('T')[0];
+        const targetShiftDays = calculateWorkdayDelta(currentDeptStart, candidateStart);
+        const scenarioJobs = new Map(jobsById);
+        const targetShifts: AlertAdjustmentJobShift[] = [];
+        const impactedKeys = new Set<string>();
+
+        for (const targetJob of targetJobs) {
+            const shiftedTarget = shiftCapacityJob(targetJob, targetShiftDays);
+            scenarioJobs.set(targetJob.id, shiftedTarget);
+            targetShifts.push({
+                jobId: targetJob.id,
+                workDays: targetShiftDays,
+                reason: `Shift ${targetJob.id} to align ${alert.department} with ${candidateStartDate}.`
+            });
+            const keys = collectWeekDeptKeys(shiftedTarget);
+            for (const key of keys) impactedKeys.add(key);
+        }
+
+        if (impactedKeys.size === 0) continue;
+
+        const baseLoad = computeWeeklyLoad(Array.from(scenarioJobs.values()));
+        const baseOverloads = getImpactedOverloads(baseLoad, impactedKeys);
+
+        if (baseOverloads.length === 0) {
+            const reason = offset === 0
+                ? `Moved ${targetJobs.length} affected work order${targetJobs.length > 1 ? 's' : ''} to ${candidateStartDate}. Capacity is available in all affected department-week slots.${skippedNote}`
+                : `Requested date could not fit. First available slot is ${candidateStartDate} for ${targetJobs.length} affected work order${targetJobs.length > 1 ? 's' : ''}.${skippedNote}`;
+            return {
+                success: true,
+                requestedStartDate,
+                selectedStartDate: candidateStartDate,
+                strategy: 'direct',
+                reason,
+                affectedJobIds: targetJobs.map(job => job.id),
+                jobShifts: targetShifts
+            };
+        }
+
+        const reliefByJob = new Map<string, number>();
+        for (const overload of baseOverloads) {
+            const contributions = baseLoad[overload.weekKey]?.[overload.department]?.contributions || [];
+            for (const contribution of contributions) {
+                if (targetJobIdSet.has(contribution.jobId)) continue;
+                reliefByJob.set(
+                    contribution.jobId,
+                    (reliefByJob.get(contribution.jobId) || 0) + contribution.pts
+                );
+            }
+        }
+
+        const movableCandidates = Array.from(reliefByJob.entries())
+            .map(([jobId, reliefPoints]) => {
+                const candidate = scenarioJobs.get(jobId);
+                if (!candidate || !candidate.departmentSchedule) return null;
+                if (isLateAgainstDueDate(candidate)) return null;
+
+                const shiftedCandidate = shiftCapacityJob(candidate, moveShiftDays);
+                if (isLateAgainstDueDate(shiftedCandidate)) return null;
+
+                return {
+                    jobId,
+                    reliefPoints,
+                    shiftedCandidate
+                };
+            })
+            .filter((value): value is { jobId: string; reliefPoints: number; shiftedCandidate: Job } => !!value)
+            .sort((a, b) => {
+                if (b.reliefPoints !== a.reliefPoints) return b.reliefPoints - a.reliefPoints;
+                return a.shiftedCandidate.weldingPoints - b.shiftedCandidate.weldingPoints;
+            });
+
+        if (movableCandidates.length > 0) {
+            const moveScenario = new Map(scenarioJobs);
+            const moveShifts: AlertAdjustmentJobShift[] = [];
+
+            for (const candidate of movableCandidates) {
+                moveScenario.set(candidate.jobId, candidate.shiftedCandidate);
+                moveShifts.push({
+                    jobId: candidate.jobId,
+                    workDays: moveShiftDays,
+                    reason: `Shift ${candidate.jobId} by ${moveShiftDays} work day${moveShiftDays > 1 ? 's' : ''} to relieve overloaded slots.`
+                });
+
+                const loadAfterMoves = computeWeeklyLoad(Array.from(moveScenario.values()));
+                const remainingOverloads = getImpactedOverloads(loadAfterMoves, impactedKeys);
+                if (remainingOverloads.length === 0) {
+                    const reason = offset === 0
+                        ? `Moved ${targetJobs.length} affected work order${targetJobs.length > 1 ? 's' : ''} to ${candidateStartDate}. Required shifting ${moveShifts.length} non-late job${moveShifts.length > 1 ? 's' : ''} to clear capacity without creating late jobs.${skippedNote}`
+                        : `Requested date could not fit. First workable slot is ${candidateStartDate} by shifting ${moveShifts.length} non-late job${moveShifts.length > 1 ? 's' : ''} while keeping those jobs on-time.${skippedNote}`;
+                    return {
+                        success: true,
+                        requestedStartDate,
+                        selectedStartDate: candidateStartDate,
+                        strategy: 'move_jobs',
+                        reason,
+                        affectedJobIds: targetJobs.map(job => job.id),
+                        jobShifts: [...targetShifts, ...moveShifts]
+                    };
+                }
+            }
+        }
+
+        const otRequirements: AlertAdjustmentOTRequirement[] = [];
+        let otCanCover = true;
+        for (const overload of baseOverloads) {
+            const tier = OT_TIERS.find(ot => ot.bonusPts >= overload.excess);
+            if (!tier) {
+                otCanCover = false;
+                break;
+            }
+            otRequirements.push({
+                weekKey: overload.weekKey,
+                department: overload.department,
+                excess: overload.excess,
+                requiredTier: tier.tier,
+                tierLabel: tier.label,
+                bonusPoints: tier.bonusPts
+            });
+        }
+
+        if (otCanCover && otRequirements.length > 0) {
+            const otDetails = otRequirements
+                .map(requirement => `${requirement.department} ${requirement.weekKey}: Tier ${requirement.requiredTier}`)
+                .join(', ');
+            const maxTier = otRequirements.reduce<OvertimeTier>((acc, requirement) =>
+                requirement.requiredTier > acc ? requirement.requiredTier : acc
+                , 1);
+            const reason = offset === 0
+                ? `Moved ${targetJobs.length} affected work order${targetJobs.length > 1 ? 's' : ''} to ${candidateStartDate}. Capacity requires OT support (up to Tier ${maxTier}) in affected slots: ${otDetails}.${skippedNote}`
+                : `Requested date could not fit. First workable slot is ${candidateStartDate} with OT support (up to Tier ${maxTier}): ${otDetails}.${skippedNote}`;
+            return {
+                success: true,
+                requestedStartDate,
+                selectedStartDate: candidateStartDate,
+                strategy: 'ot',
+                reason,
+                affectedJobIds: targetJobs.map(job => job.id),
+                jobShifts: targetShifts,
+                otRequirements
+            };
+        }
+    }
+
+    return {
+        success: false,
+        requestedStartDate,
+        reason: `No feasible slot found within ${searchWorkDays} work days after ${requestedStartDate}.`,
+        affectedJobIds: targetJobs.map(job => job.id),
+        jobShifts: []
     };
 };
 

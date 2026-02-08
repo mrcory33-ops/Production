@@ -70,6 +70,7 @@ export default function CustomGanttTable({
     } | null>(null);
     const [priorityDrafts, setPriorityDrafts] = useState<Record<string, string>>({});
     const [isDragging, setIsDragging] = useState(false);
+    const [openJobAlertInfoId, setOpenJobAlertInfoId] = useState<string | null>(null);
 
     const addVisibleDays = (date: Date, delta: number) => {
         if (delta === 0) return startOfDay(date);
@@ -373,6 +374,23 @@ export default function CustomGanttTable({
         };
     }, []);
 
+    useEffect(() => {
+        const handlePointerDown = (event: MouseEvent) => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest('[data-alert-popover-root="true"]')) return;
+            setOpenJobAlertInfoId(null);
+        };
+
+        const closeOnScroll = () => setOpenJobAlertInfoId(null);
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('scroll', closeOnScroll, true);
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('scroll', closeOnScroll, true);
+        };
+    }, []);
+
     // Animation Loop
     const animate = () => {
         if (!dragStateRef.current) return;
@@ -673,12 +691,54 @@ export default function CustomGanttTable({
                                                     {job.name}
                                                 </div>
                                                 {jobAlerts.length > 0 && (
-                                                    <span
-                                                        className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 border border-red-300 text-red-600 font-bold"
-                                                        title={`${jobAlerts.length} active supervisor alert${jobAlerts.length > 1 ? 's' : ''}`}
-                                                    >
-                                                        ⚠ {jobAlerts.length}
-                                                    </span>
+                                                    <div className="relative" data-alert-popover-root="true">
+                                                        <button
+                                                            ref={(el) => {
+                                                                if (el && openJobAlertInfoId === job.id) {
+                                                                    const rect = el.getBoundingClientRect();
+                                                                    const popoverEl = el.nextElementSibling as HTMLElement | null;
+                                                                    if (popoverEl) {
+                                                                        popoverEl.style.top = `${rect.bottom + 4}px`;
+                                                                        popoverEl.style.left = `${Math.max(8, rect.right - 280)}px`;
+                                                                    }
+                                                                }
+                                                            }}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setOpenJobAlertInfoId(prev => prev === job.id ? null : job.id);
+                                                            }}
+                                                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-red-600 border border-red-700 text-white font-extrabold shadow-sm hover:bg-red-700 transition-colors"
+                                                            title={`${jobAlerts.length} active supervisor alert${jobAlerts.length > 1 ? 's' : ''}`}
+                                                        >
+                                                            ! {jobAlerts.length}
+                                                        </button>
+                                                        {openJobAlertInfoId === job.id && (
+                                                            <div
+                                                                className="fixed w-[280px] rounded-lg border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl"
+                                                                style={{ zIndex: 9999 }}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                <div className="px-3 py-2 border-b border-slate-700 text-[11px] font-bold">
+                                                                    Active Alerts ({jobAlerts.length})
+                                                                </div>
+                                                                <div className="max-h-56 overflow-y-auto px-3 py-2 space-y-2">
+                                                                    {jobAlerts.map((alertItem) => (
+                                                                        <div key={alertItem.id} className="rounded border border-slate-700 bg-slate-800/70 p-2 text-[10px] leading-relaxed">
+                                                                            <div className="text-red-300 font-semibold">
+                                                                                {alertItem.department} - resolve by {format(new Date(alertItem.estimatedResolutionDate), 'M/d')}
+                                                                            </div>
+                                                                            <div className="text-slate-200 mt-0.5">{alertItem.reason}</div>
+                                                                            {alertItem.lastAdjustmentAt && (
+                                                                                <div className="text-indigo-200 mt-1">
+                                                                                    Adjusted {format(new Date(alertItem.lastAdjustmentAt), 'M/d h:mm a')}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 )}
                                                 {/* Status Symbols — clickable with explanation popovers */}
                                                 <JobStatusSymbols job={job} />
@@ -872,29 +932,6 @@ export default function CustomGanttTable({
                                                                     </div>
                                                                 </div>
 
-                                                                {jobAlerts.length > 0 && segIndex === 0 && (
-                                                                    <div className="absolute -top-1 -right-1 group/alert-tooltip">
-                                                                        <span className="w-4 h-4 rounded-full bg-red-600 border border-red-200 text-white text-[10px] font-bold flex items-center justify-center">
-                                                                            !
-                                                                        </span>
-                                                                        <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/alert-tooltip:block z-[60] pointer-events-none">
-                                                                            <div className="px-2.5 py-2 bg-slate-900 text-white rounded-lg shadow-xl text-[10px] min-w-[220px] max-w-[280px] whitespace-normal">
-                                                                                <div className="font-bold text-red-300 mb-1">
-                                                                                    {jobAlerts.length} active alert{jobAlerts.length > 1 ? 's' : ''}
-                                                                                </div>
-                                                                                {jobAlerts.slice(0, 2).map(alert => (
-                                                                                    <div key={alert.id} className="mb-1 last:mb-0">
-                                                                                        <span className="text-slate-300">{alert.department}:</span> {alert.reason}
-                                                                                    </div>
-                                                                                ))}
-                                                                                {jobAlerts.length > 2 && (
-                                                                                    <div className="text-slate-400">+{jobAlerts.length - 2} more</div>
-                                                                                )}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-
                                                                 {/* Resize handle - start */}
                                                                 {onSegmentUpdate && (
                                                                     <div
@@ -972,3 +1009,4 @@ export default function CustomGanttTable({
         </div>
     );
 }
+

@@ -51,7 +51,7 @@ function getJobSymbols(job: Job): StatusSymbol[] {
     }
 
     // SLIPPING — behind schedule but still progressing
-    if (job.progressStatus === 'SLIPPING') {
+    if (job.progressStatus === 'SLIPPING' && !job.schedulingConflict) {
         symbols.push({
             key: 'slipping',
             icon: '⚠',

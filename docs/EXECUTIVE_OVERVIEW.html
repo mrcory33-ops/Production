@@ -643,17 +643,19 @@
                 <a href="#s8"><span class="num">8.</span> Batching Logic</a>
                 <a href="#s9"><span class="num">9.</span> Capacity Management</a>
                 <a href="#s10"><span class="num">10.</span> Department Gaps</a>
-                <a href="#s11"><span class="num">11.</span> Scheduling Algorithms</a>
+                <a href="#s11"><span class="num">11.</span> Scheduling Pipeline <span class="tag new">Updated</span></a>
                 <a href="#s12"><span class="num">12.</span> Handling Overdue Jobs</a>
                 <a href="#s13"><span class="num">13.</span> Progress Tracking</a>
                 <a href="#s14"><span class="num">14.</span> Due Date Change Detection</a>
                 <a href="#s15"><span class="num">15.</span> The Planning Board</a>
-                <a href="#s16"><span class="num">16.</span> Supervisor Dashboard <span class="tag new">NEW</span></a>
-                <a href="#s17"><span class="num">17.</span> Export Function</a>
-                <a href="#s18"><span class="num">18.</span> Complete Daily Flow</a>
-                <a href="#s19"><span class="num">19.</span> Key Benefits Summary</a>
-                <a href="#s20"><span class="num">20.</span> Technical Details</a>
-                <a href="#s21"><span class="num">21.</span> February 2026 Updates <span class="tag new">NEW</span></a>
+                <a href="#s16"><span class="num">16.</span> Supervisor Dashboard</a>
+                <a href="#s17"><span class="num">17.</span> Schedule Insights <span class="tag new">NEW</span></a>
+                <a href="#s18"><span class="num">18.</span> Quote Estimator <span class="tag new">NEW</span></a>
+                <a href="#s19"><span class="num">19.</span> Export Function</a>
+                <a href="#s20"><span class="num">20.</span> Complete Daily Flow</a>
+                <a href="#s21"><span class="num">21.</span> Key Benefits Summary</a>
+                <a href="#s22"><span class="num">22.</span> Technical Details</a>
+                <a href="#s23"><span class="num">23.</span> February 2026 Updates</a>
             </div>
         </div>
 
@@ -1138,7 +1140,16 @@
         <!-- Section 8: Batching Logic -->
         <section class="section" id="s8">
             <h2><span class="num">8</span> Batching Logic (Similar Jobs Grouped Together)</h2>
-            <p>The scheduler groups similar jobs together to improve production efficiency.</p>
+
+            <div class="highlight-box" style="border-left-color: var(--accent);">
+                <h4>When Batching Activates</h4>
+                <p>Batching is <strong>not a separate step</strong> — it's woven into Phase 1 (Ideal Placement) of the
+                    scheduling pipeline. Before jobs are laid onto the Gantt chart, the engine calls
+                    <code>orderJobsForBatching()</code> to reorder the job list so that physically similar items land in
+                    consecutive time slots. This means the same welder can process a run of identical frames without
+                    retooling between each one.
+                </p>
+            </div>
 
             <h3>Batch Categories (Description Patterns)</h3>
             <ul>
@@ -1147,37 +1158,65 @@
                 <li><strong>Frame Case Opening:</strong> "frame case opening", "case opening frame", "frame co", etc.
                 </li>
                 <li><strong>Door Lock Seam:</strong> "door lock seam", "lock seam door", etc.</li>
+                <li><strong>Wall Panel:</strong> "wall panel", "wall panels"</li>
+                <li><strong>Dish Table:</strong> "dish table", "dish tables", "soiled dish"</li>
+                <li><strong>3-Compartment Sink:</strong> "3 compartment sink", "3-compartment sink", "3 cpt sink"</li>
+                <li><strong>Wall Shelf:</strong> "wall shelf", "wall shelves", "lower wall shelf", "upper wall shelf"
+                </li>
+                <li><strong>Corner Guard:</strong> "corner guard", "corner guards", "cornerguard"</li>
             </ul>
 
-            <h3>Batching Tiers</h3>
+            <h3>How the Grouping Key Works</h3>
+            <p>The engine builds a <strong>composite key</strong> for each job. Two jobs with the same key land in the
+                same batch:</p>
             <table>
                 <thead>
                     <tr>
-                        <th>Tier</th>
-                        <th>Match Criteria</th>
+                        <th>Match Type</th>
+                        <th>Key Structure</th>
                         <th>Priority</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td><strong>Tier 1</strong></td>
-                        <td>Same batch category + Same gauge + Same material + Same due week</td>
-                        <td>Highest (Strict Match)</td>
+                        <td><strong>Strict</strong></td>
+                        <td><code>strict:category|gauge|material|dueWeek</code></td>
+                        <td>Highest — scheduled first within a week</td>
                     </tr>
                     <tr>
-                        <td><strong>Tier 2</strong></td>
-                        <td>Same batch category + Same due week (Any gauge/material)</td>
-                        <td>Medium (Relaxed Match)</td>
+                        <td><strong>Relaxed</strong></td>
+                        <td><code>relaxed:category|dueWeek</code></td>
+                        <td>Medium — used when gauge/material can't be extracted</td>
                     </tr>
                     <tr>
-                        <td><strong>Tier 3</strong></td>
-                        <td>No batch match</td>
-                        <td>Scheduled individually</td>
+                        <td><strong>No Batch</strong></td>
+                        <td>Sorted by urgency → due date → size</td>
+                        <td>Normal — scheduled individually</td>
                     </tr>
                 </tbody>
             </table>
 
-            <h3>Material & Gauge Detection</h3>
+            <h3>Batch Efficiency Discount</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Batch Size</th>
+                        <th>Time Discount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>2 items in same batch</td>
+                        <td><strong>10%</strong> faster</td>
+                    </tr>
+                    <tr>
+                        <td>3+ items in same batch</td>
+                        <td><strong>15%</strong> faster (max)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Material &amp; Gauge Detection</h3>
             <p><strong>Materials Recognized:</strong> SS316L, SS316, SS304, STAINLESS, GALV, ALUM, CRS, HRS, STEEL</p>
             <p><strong>Gauge Patterns:</strong> "16 ga", "#16", "16 gage", etc.</p>
         </section>
@@ -1302,45 +1341,111 @@
 
         <!-- Section 11: Scheduling Algorithms -->
         <section class="section" id="s11">
-            <h2><span class="num">11</span> Scheduling Algorithms</h2>
+            <h2><span class="num">11</span> The Scheduling Pipeline — Five Phases</h2>
+            <p>The scheduler runs a <strong>five-phase pipeline</strong> every time a schedule is computed:</p>
 
-            <h3>Backward Scheduling (Default for New Jobs)</h3>
-            <p><strong>Goal:</strong> Finish just before due date with buffer.</p>
             <div class="formula">
-                Start from (Due Date - 2 days) → Schedule Assembly → Work backward to Engineering → Find earliest start
-                date
+                Phase 1: Ideal Placement → Phase 2: Capacity Audit → Phase 3: Compression → Phase 4: Validation → Phase
+                5: Analysis
             </div>
 
-            <h3>Forward Scheduling (For Overdue/Tight Deadlines)</h3>
-            <p><strong>Goal:</strong> Start ASAP and push forward.</p>
-            <div class="formula">
-                Start from TODAY (or current dept) → Schedule Engineering through Assembly → Calculate earliest
-                completion
-            </div>
-            <p><strong>Used when:</strong></p>
-            <ul>
-                <li>Calculated start date is in the past</li>
-                <li>Job is overdue</li>
-                <li>Job rescheduled</li>
-            </ul>
-
-            <h3>Scheduling Priority Order</h3>
+            <h3>Phase 1 — Ideal Placement</h3>
+            <p>Every job gets its initial Gantt slot using <strong>Drum-Buffer-Rope</strong> strategy:</p>
             <ol>
-                <li><strong>All Big Rocks first</strong> (sorted by Urgency)</li>
-                <li><strong>All smaller jobs</strong> (sorted by Urgency, grouped by batch)</li>
+                <li><strong>Schedule Welding first</strong> — placed based on due date and available capacity</li>
+                <li><strong>Work backward</strong> from Welding start — Engineering → Laser → Press Brake</li>
+                <li><strong>Work forward</strong> from Welding end — Polishing → Assembly</li>
             </ol>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Strategy</th>
+                        <th>When Used</th>
+                        <th>How It Works</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Backward</strong></td>
+                        <td>Job has time before due date</td>
+                        <td>Start from due date − 2 days buffer, work backward through all 6 depts</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Forward</strong></td>
+                        <td>Start would be in the past, or job is overdue</td>
+                        <td>Start from today/current dept, schedule forward to Assembly</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p><strong>Priority Order:</strong> Overdue jobs → Big Rocks (≥50pts, by urgency) → Remaining jobs
+                (batch-ordered)</p>
+
+            <h3>Phase 2 — Capacity Audit</h3>
+            <p>Tallies every department's weekly load. <strong>850 pts/week</strong> is the base capacity (8hr/day × 5
+                days × 21.25 pts/hr). Weeks exceeding 850 are flagged OVER_CAPACITY.</p>
+
+            <h3>Phase 3 — Compression (Multi-Pass Shift Relief)</h3>
+            <p>Moves jobs <strong>earlier</strong> to fill underutilized weeks. Three passes with decreasing shift
+                sizes:</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Pass</th>
+                        <th>Shift</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td>5 workdays</td>
+                        <td>Try moving each overloaded-week job 1 full week earlier</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td>3 workdays</td>
+                        <td>Try 3 days earlier</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td>1 workday</td>
+                        <td>Try 1 day earlier</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p>Each move checks: target week has room, sequential dept order preserved, forward slack exists.</p>
+
+            <h3>Phase 4 — Validation</h3>
+            <ol>
+                <li><strong>Due Date Check:</strong> Is Assembly end date ≤ due date? If not → flagged
+                    <code>isLate</code>
+                </li>
+                <li><strong>Sequential Order Check:</strong> Do departments flow in correct order? Violations flagged as
+                    conflicts</li>
+            </ol>
+
+            <h3>Phase 5 — Analysis (Insights Generation)</h3>
+            <p>Reads the finalized schedule and produces decision-support data:</p>
+            <ul>
+                <li>Late Job List with bottleneck departments</li>
+                <li>Move Options (simulated job pushes — see §17)</li>
+                <li>OT Recommendations by tier</li>
+                <li>Projected Outcomes after moves + OT</li>
+                <li>Alert Impact from supervisor blockers</li>
+            </ul>
         </section>
 
         <!-- Section 12: Handling Overdue Jobs -->
         <section class="section" id="s12">
             <h2><span class="num">12</span> Handling Overdue Jobs</h2>
-            <p>If a job's scheduled start date has passed:</p>
+            <p>Embedded in Phase 1. If a job's backward-scheduled start falls <strong>before today</strong>:</p>
             <ol>
-                <li>System reschedules from <strong>TODAY</strong></li>
-                <li>Starts from <strong>current department</strong></li>
-                <li>Flags as overdue (<span class="tag red">red date</span>)</li>
-                <li>Uses <strong>Forward Scheduling</strong></li>
+                <li>Start from <strong>today</strong> (not original date)</li>
+                <li>Begin at the job's <strong>current department</strong> — skip completed departments</li>
+                <li>Forward-schedule remaining departments sequentially</li>
+                <li>Flag as overdue (<span class="tag red">red date badge</span>)</li>
             </ol>
+            <p>Overdue jobs are always scheduled <strong>first</strong> — before Big Rocks and batched jobs.</p>
         </section>
 
         <!-- Section 13: Progress Tracking -->
@@ -1567,9 +1672,185 @@
             </div>
         </section>
 
-        <!-- Section 17: Export Function -->
+        <!-- Section 17: Schedule Insights -->
         <section class="section" id="s17">
-            <h2><span class="num">17</span> Export Function</h2>
+            <h2><span class="num">17</span> Schedule Insights — Decision Support Panel</h2>
+            <p>Click the <strong>📊 Insights</strong> button on the Planning Board toolbar. This is the output of
+                <strong>Phase 5</strong> of the scheduling pipeline.
+            </p>
+
+            <div class="highlight-box" style="border-left-color: var(--accent);">
+                <h4>Design Principle</h4>
+                <p>The panel presents <strong>options, not orders</strong>. It simulates what-if scenarios against the
+                    current schedule and shows the manager the projected impact of each option.</p>
+            </div>
+
+            <h3>Summary Pipeline</h3>
+            <div class="formula">
+                Current State (12 late) → After Suggested Moves (6 late) → After Moves + Overtime (0 late)
+            </div>
+
+            <h3>Move Options — The Simulation Harness</h3>
+            <p>The engine <strong>simulates every possible move</strong> against a cloned schedule and scores the
+                outcome:</p>
+            <div class="formula">
+                1. Clone weekly load map → 2. Remove candidate job → 3. Place at +1/+2 weeks → 4. Count recovered late
+                jobs → 5. Restore (undo)
+            </div>
+            <p>This "clone → remove → evaluate → restore" pattern is the <strong>scheduling harness</strong> — the same
+                pattern used by the Quote Estimator (§18) for feasibility analysis.</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Move Type</th>
+                        <th>Scope</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Work Order (WO)</strong></td>
+                        <td>Single job</td>
+                        <td>Push one job +1 or +2 weeks. Top 20 non-late jobs (by points) evaluated.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Sales Order (SO)</strong></td>
+                        <td>All jobs in SO</td>
+                        <td>Push entire project's jobs together — safer because inter-job spacing is preserved.</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p><strong>Hard rules:</strong> Never push >2 weeks. Never push a late job. Manager makes all final
+                decisions.</p>
+
+            <h3>Overtime Recommendations</h3>
+            <p>For each week exceeding 850 pts, the engine finds the <strong>lowest OT tier</strong> that covers the
+                excess:</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tier</th>
+                        <th>Schedule</th>
+                        <th>Bonus Capacity</th>
+                        <th>Weekly Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>1</strong></td>
+                        <td>9-Hour Days (6am–3pm)</td>
+                        <td>+106 pts</td>
+                        <td>956 pts</td>
+                    </tr>
+                    <tr>
+                        <td><strong>2</strong></td>
+                        <td>10-Hour Days (6am–4pm)</td>
+                        <td>+213 pts</td>
+                        <td>1,063 pts</td>
+                    </tr>
+                    <tr>
+                        <td><strong>3</strong></td>
+                        <td>9hr + Saturday 6am–12pm</td>
+                        <td>+234 pts</td>
+                        <td>1,084 pts</td>
+                    </tr>
+                    <tr>
+                        <td><strong>4</strong></td>
+                        <td>10hr + Saturday 6am–12pm</td>
+                        <td>+341 pts</td>
+                        <td>1,191 pts</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Projected Outcome</h3>
+            <p>Applies moves+OT in a greedy, non-overlapping manner and reports: recovered late jobs, remaining late
+                jobs (escalation candidates), and net capacity change per week.</p>
+        </section>
+
+        <!-- Section 18: Quote Estimator -->
+        <section class="section" id="s18">
+            <h2><span class="num">18</span> Quote Estimator — Capacity-Aware Job Feasibility</h2>
+            <p>Answers: <em>"If a customer requests a new job worth $X, can we finish it — and by when?"</em> Uses the
+                same <strong>scheduling harness</strong> as Insights (§17).</p>
+
+            <h3>Dollar-to-Points Conversion</h3>
+            <div class="formula">
+                Points = round((Dollar Value / 650) × 10) / 10 &nbsp;&nbsp;|&nbsp;&nbsp; <strong>$650 = 1 Welding
+                    Point</strong>
+            </div>
+
+            <h3>Sequential Pipeline Simulation</h3>
+            <p>Each department completes <strong>entirely</strong> before the next starts (plus size-based gap). The
+                engine checks capacity — if a department-week is full, it slides to the next available week.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Job Size</th>
+                        <th>Department Gap</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Big Rock</strong> (≥70 pts)</td>
+                        <td>1 workday</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Medium</strong> (8–69 pts)</td>
+                        <td>0.5 workdays</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Small</strong> (<8 pts)</td>
+                        <td>No gap</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="highlight-box warning">
+                <h4>Big Rock Threshold Note</h4>
+                <p>The Quote Estimator uses <strong>70 points</strong> for Big Rock classification (department gap
+                    sizing). The urgency scoring system (§5) uses a separate <strong>50 point</strong> threshold for the
+                    +10 bonus. These serve different purposes.</p>
+            </div>
+
+            <h3>Three-Tier Feasibility Analysis</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tier</th>
+                        <th>Strategy</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>1 — As-Is</strong></td>
+                        <td>No changes</td>
+                        <td>Can the job fit into existing capacity (850 pts/week)?</td>
+                    </tr>
+                    <tr>
+                        <td><strong>2 — With Moves</strong></td>
+                        <td>Push buffer jobs</td>
+                        <td>Shift Engineering/Laser jobs with ≥7 days buffer, 7 workdays later</td>
+                    </tr>
+                    <tr>
+                        <td><strong>3 — With OT</strong></td>
+                        <td>Expand capacity</td>
+                        <td>Try each OT tier (956 → 1,191 pts/week), stop at first that works</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="formula">
+                Tier 1 → ACCEPT &nbsp;|&nbsp; Tier 2 → ACCEPT_WITH_MOVES &nbsp;|&nbsp; Tier 3 → ACCEPT_WITH_OT
+                &nbsp;|&nbsp; All fail → DECLINE
+            </div>
+        </section>
+
+        <!-- Section 19: Export Function -->
+        <section class="section" id="s19">
+            <h2><span class="num">19</span> Export Function</h2>
             <p>Click <strong>"Export"</strong> to download a PDF of the current schedule.</p>
             <p><strong>Fields included:</strong></p>
             <ul>
@@ -1580,9 +1861,9 @@
             </ul>
         </section>
 
-        <!-- Section 18: Complete Daily Flow -->
-        <section class="section" id="s18">
-            <h2><span class="num">18</span> Complete Flow: First Import to Next Day</h2>
+        <!-- Section 20: Complete Daily Flow -->
+        <section class="section" id="s20">
+            <h2><span class="num">20</span> Complete Flow: First Import to Next Day</h2>
 
             <h3>Day 1 (Monday) - Initial Import</h3>
             <ol>
@@ -1614,9 +1895,9 @@
             </ol>
         </section>
 
-        <!-- Section 19: Key Benefits Summary -->
-        <section class="section" id="s19">
-            <h2><span class="num">19</span> Key Benefits Summary</h2>
+        <!-- Section 21: Key Benefits Summary -->
+        <section class="section" id="s21">
+            <h2><span class="num">21</span> Key Benefits Summary</h2>
 
             <div class="comparison-table">
                 <div class="comparison-col before">
@@ -1646,9 +1927,9 @@
             </div>
         </section>
 
-        <!-- Section 20: Technical Details -->
-        <section class="section" id="s20">
-            <h2><span class="num">20</span> Technical Details</h2>
+        <!-- Section 22: Technical Details -->
+        <section class="section" id="s22">
+            <h2><span class="num">22</span> Technical Details</h2>
 
             <h3>Technology Stack</h3>
             <table>
@@ -1723,9 +2004,9 @@
             </table>
         </section>
 
-        <!-- Section 21: February 2026 Updates -->
-        <section class="section" id="s21">
-            <h2><span class="num">21</span> February 2026 Updates <span class="tag new">NEW</span></h2>
+        <!-- Section 23: February 2026 Updates -->
+        <section class="section" id="s23">
+            <h2><span class="num">23</span> February 2026 Updates</h2>
 
             <div class="version-badge">v7.3.0 — February 6, 2026</div>
 

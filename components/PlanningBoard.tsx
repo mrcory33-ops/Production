@@ -4,7 +4,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, query, where, getDocs, limit, doc, updateDoc, deleteDoc, writeBatch, onSnapshot, Timestamp, deleteField } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Job, Department, ScheduleInsights, SupervisorAlert } from '@/types';
-import { applyRemainingSchedule, scheduleJobs, scheduleAllJobs } from '@/lib/scheduler';
+import {
+    applyRemainingSchedule,
+    scheduleJobs,
+    scheduleAllJobs,
+    addWorkDays,
+    subtractWorkDays,
+    planAlertAdjustment
+} from '@/lib/scheduler';
 import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, format, startOfDay, differenceInDays } from 'date-fns';
@@ -17,7 +24,7 @@ import ScoringConfigPanel from './ScoringConfigPanel';
 import ScheduleInsightsPanel from './ScheduleInsightsPanel';
 import AlertManagementPanel from './AlertManagementPanel';
 import { calculateUrgencyScore } from '@/lib/scoring';
-import { deleteAlert, extendAlert, resolveAlert, subscribeToAlerts, updateAlert } from '@/lib/supervisorAlerts';
+import { deleteAlert, extendAlert, recordAlertAdjustment, resolveAlert, subscribeToAlerts, updateAlert } from '@/lib/supervisorAlerts';
 
 
 
@@ -131,6 +138,32 @@ const shiftScheduleDates = (
     return updated;
 };
 
+const shiftScheduleByWorkdayDelta = (
+    schedule: Record<string, { start: string; end: string }> | undefined,
+    deltaWorkDays: number
+) => {
+    if (!schedule) return undefined;
+    if (deltaWorkDays === 0) return { ...schedule };
+
+    const updated: Record<string, { start: string; end: string }> = {};
+    Object.entries(schedule).forEach(([dept, dates]) => {
+        const s = startOfDay(new Date(dates.start));
+        const e = startOfDay(new Date(dates.end));
+        if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return;
+
+        const start = deltaWorkDays >= 0
+            ? addWorkDays(s, deltaWorkDays)
+            : subtractWorkDays(s, Math.abs(deltaWorkDays));
+        const end = deltaWorkDays >= 0
+            ? addWorkDays(e, deltaWorkDays)
+            : subtractWorkDays(e, Math.abs(deltaWorkDays));
+
+        updated[dept] = { start: start.toISOString(), end: end.toISOString() };
+    });
+
+    return Object.keys(updated).length ? updated : undefined;
+};
+
 const getEarliestScheduleDate = (job: Job) => {
     const schedules = [
         job.remainingDepartmentSchedule,
@@ -228,7 +261,7 @@ export default function PlanningBoard() {
     const [dueEnd, setDueEnd] = useState<string>('');
     const [dateFilterMode, setDateFilterMode] = useState<'DUE' | 'SCHEDULED'>('DUE');
     const [searchQuery, setSearchQuery] = useState<string>('');
-    const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(true);
+    const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
     const [priorityListIdByDept, setPriorityListIdByDept] = useState<Record<string, string>>({});
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [isScoringConfigOpen, setIsScoringConfigOpen] = useState(false);
@@ -654,8 +687,11 @@ export default function PlanningBoard() {
     const alertsByJobId = useMemo(() => {
         const map: Record<string, SupervisorAlert[]> = {};
         for (const alert of activeSupervisorAlerts) {
-            if (!map[alert.jobId]) map[alert.jobId] = [];
-            map[alert.jobId].push(alert);
+            const allIds = [alert.jobId, ...(alert.additionalJobIds || [])];
+            for (const id of allIds) {
+                if (!map[id]) map[id] = [];
+                map[id].push(alert);
+            }
         }
         return map;
     }, [activeSupervisorAlerts]);
@@ -1323,6 +1359,131 @@ export default function PlanningBoard() {
                                 ? new Date(update.estimatedResolutionDate)
                                 : undefined
                         });
+                    }}
+                    onAdjust={async (alertRecord, mode, previewDecision) => {
+                        try {
+                            let decision = mode === 'apply' && previewDecision
+                                ? previewDecision
+                                : planAlertAdjustment(jobs, alertRecord);
+
+                            if (mode === 'apply') {
+                                const liveDecision = planAlertAdjustment(jobs, alertRecord);
+                                const previewShiftCount = decision.jobShifts.filter(shift => shift.workDays !== 0).length;
+                                const liveShiftCount = liveDecision.jobShifts.filter(shift => shift.workDays !== 0).length;
+                                if (
+                                    liveDecision.success &&
+                                    (
+                                        !previewDecision ||
+                                        previewShiftCount === 0 ||
+                                        (liveDecision.selectedStartDate || liveDecision.requestedStartDate) !==
+                                        (decision.selectedStartDate || decision.requestedStartDate) ||
+                                        liveShiftCount !== previewShiftCount
+                                    )
+                                ) {
+                                    decision = liveDecision;
+                                }
+                            }
+
+                            if (!decision.success) {
+                                return { success: false, message: decision.reason, decision };
+                            }
+
+                            if (mode === 'preview') {
+                                return { success: true, message: decision.reason, decision };
+                            }
+
+                            const actionableShifts = decision.jobShifts.filter(shift => shift.workDays !== 0);
+                            if (actionableShifts.length === 0) {
+                                return {
+                                    success: false,
+                                    message: `No schedule change to apply. ${decision.reason}`,
+                                    decision
+                                };
+                            }
+
+                            const updatesByJobId = new Map<string, Partial<Job>>();
+                            const batch = writeBatch(db);
+
+                            for (const shift of actionableShifts) {
+                                const job = jobs.find(j => j.id === shift.jobId);
+                                if (!job) continue;
+
+                                const updatedDepartmentSchedule = shiftScheduleByWorkdayDelta(job.departmentSchedule, shift.workDays);
+                                const updatedRemainingSchedule = shiftScheduleByWorkdayDelta(job.remainingDepartmentSchedule, shift.workDays);
+
+                                const activeSchedule = (updatedRemainingSchedule && Object.keys(updatedRemainingSchedule).length > 0)
+                                    ? updatedRemainingSchedule
+                                    : (updatedDepartmentSchedule || job.departmentSchedule || job.remainingDepartmentSchedule);
+
+                                let nextScheduledStartDate = job.scheduledStartDate;
+                                let nextForecastStartDate = job.forecastStartDate;
+                                let nextForecastDueDate = job.forecastDueDate;
+
+                                if (activeSchedule) {
+                                    const starts = Object.values(activeSchedule)
+                                        .map(window => startOfDay(new Date(window.start)))
+                                        .filter(date => !Number.isNaN(date.getTime()));
+                                    const ends = Object.values(activeSchedule)
+                                        .map(window => startOfDay(new Date(window.end)))
+                                        .filter(date => !Number.isNaN(date.getTime()));
+
+                                    if (starts.length > 0) {
+                                        const earliestStart = new Date(Math.min(...starts.map(date => date.getTime())));
+                                        nextScheduledStartDate = earliestStart;
+                                        nextForecastStartDate = earliestStart;
+                                    }
+                                    if (ends.length > 0) {
+                                        nextForecastDueDate = new Date(Math.max(...ends.map(date => date.getTime())));
+                                    }
+                                }
+
+                                const updates = removeUndefined({
+                                    departmentSchedule: updatedDepartmentSchedule || job.departmentSchedule,
+                                    remainingDepartmentSchedule: updatedRemainingSchedule || job.remainingDepartmentSchedule,
+                                    scheduledStartDate: nextScheduledStartDate || null,
+                                    forecastStartDate: nextForecastStartDate || null,
+                                    forecastDueDate: nextForecastDueDate || null,
+                                    updatedAt: new Date()
+                                });
+
+                                batch.update(doc(db, 'jobs', job.id), updates);
+                                updatesByJobId.set(job.id, updates);
+                            }
+
+                            if (updatesByJobId.size > 0) {
+                                await batch.commit();
+                                setJobs(prev =>
+                                    prev.map(job =>
+                                        updatesByJobId.has(job.id)
+                                            ? { ...job, ...(updatesByJobId.get(job.id) as Partial<Job>) }
+                                            : job
+                                    )
+                                );
+                            }
+
+                            const otSummary = decision.otRequirements && decision.otRequirements.length > 0
+                                ? decision.otRequirements
+                                    .map(requirement => `${requirement.department} ${requirement.weekKey}: Tier ${requirement.requiredTier}`)
+                                    .join(', ')
+                                : undefined;
+
+                            await recordAlertAdjustment(alertRecord.id, {
+                                selectedStartDate: decision.selectedStartDate || decision.requestedStartDate,
+                                strategy: decision.strategy || 'direct',
+                                reason: decision.reason,
+                                movedJobIds: actionableShifts.map(shift => shift.jobId),
+                                otSummary
+                            });
+
+                            return {
+                                success: true,
+                                message: `${decision.reason} Applied ${actionableShifts.length} shift${actionableShifts.length > 1 ? 's' : ''}.`,
+                                decision
+                            };
+                        } catch (error) {
+                            const message = error instanceof Error ? error.message : 'Adjust apply failed.';
+                            return { success: false, message };
+                        }
                     }}
                     onDelete={async (alertId) => {
                         await deleteAlert(alertId);
