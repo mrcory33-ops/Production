@@ -12,6 +12,21 @@ const FIXED_NOW_ISO = '2026-02-07T12:00:00.000Z';
 const createHarnessJiti = () =>
     createJiti(path.join(ROOT, 'scripts', 'regression', '__runner__.js'), { interopDefault: true });
 
+const resolveQuoteModulePath = () => {
+    const moduleCandidates = [
+        path.join(ROOT, 'lib', 'quoteEstimator.ts'),
+        path.join(ROOT, 'lib', 'whatIfScheduler.ts')
+    ];
+
+    for (const modulePath of moduleCandidates) {
+        if (fs.existsSync(modulePath)) {
+            return modulePath;
+        }
+    }
+
+    throw new Error('Could not find quote estimator module (expected lib/quoteEstimator.ts or lib/whatIfScheduler.ts).');
+};
+
 const withFixedNow = async (isoNow, fn) => {
     const RealDate = Date;
     const fixedMs = new RealDate(isoNow).getTime();
@@ -194,7 +209,7 @@ const firstDiffLine = (aText, bText) => {
 const createSnapshot = async () => {
     const jiti = createHarnessJiti();
     const scheduler = jiti(path.join(ROOT, 'lib', 'scheduler.ts'));
-    const quoteEstimator = jiti(path.join(ROOT, 'lib', 'quoteEstimator.ts'));
+    const quoteEstimator = jiti(resolveQuoteModulePath());
 
     const sourceJobs = buildJobsFixture();
     const schedulingInput = sourceJobs.map((job) => structuredClone(job));

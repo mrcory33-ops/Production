@@ -1,7 +1,7 @@
 'use client';
 
-import CrewDeck from '@/components/CrewDeck';
+import SupervisorSchedule from '@/components/SupervisorSchedule';
 
 export default function SupervisorPage() {
-    return <CrewDeck />;
+    return <SupervisorSchedule />;
 }

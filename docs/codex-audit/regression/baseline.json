@@ -395,6 +395,7 @@
           "fastShipBonus": 0,
           "harmonicBonus": 0,
           "paintingBonus": 0,
+          "poReceivedBoost": 0,
           "refJobBonus": 0,
           "slippageRisk": 0,
           "stallPenalty": 0
@@ -462,6 +463,7 @@
           "fastShipBonus": 0,
           "harmonicBonus": 0,
           "paintingBonus": 0,
+          "poReceivedBoost": 0,
           "refJobBonus": 0,
           "slippageRisk": 0,
           "stallPenalty": 0
@@ -529,6 +531,7 @@
           "fastShipBonus": 0,
           "harmonicBonus": 0,
           "paintingBonus": 0,
+          "poReceivedBoost": 0,
           "refJobBonus": 0,
           "slippageRisk": 0,
           "stallPenalty": 0
@@ -596,6 +599,7 @@
           "fastShipBonus": 25,
           "harmonicBonus": 0,
           "paintingBonus": 0,
+          "poReceivedBoost": 0,
           "refJobBonus": 0,
           "slippageRisk": 0,
           "stallPenalty": 0
@@ -664,6 +668,7 @@
           "fastShipBonus": 0,
           "harmonicBonus": 10,
           "paintingBonus": 15,
+          "poReceivedBoost": 0,
           "refJobBonus": 0,
           "slippageRisk": 0,
           "stallPenalty": 0
@@ -731,6 +736,7 @@
           "fastShipBonus": 0,
           "harmonicBonus": 0,
           "paintingBonus": 0,
+          "poReceivedBoost": 0,
           "refJobBonus": 0,
           "slippageRisk": 0,
           "stallPenalty": 0
@@ -798,6 +804,7 @@
           "fastShipBonus": 0,
           "harmonicBonus": 0,
           "paintingBonus": 0,
+          "poReceivedBoost": 0,
           "refJobBonus": 0,
           "slippageRisk": 0,
           "stallPenalty": 0
@@ -865,6 +872,7 @@
           "fastShipBonus": 0,
           "harmonicBonus": 0,
           "paintingBonus": 0,
+          "poReceivedBoost": 0,
           "refJobBonus": 0,
           "slippageRisk": 0,
           "stallPenalty": 0

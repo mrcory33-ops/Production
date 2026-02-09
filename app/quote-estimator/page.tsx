@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Job } from '@/types';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import QuoteEstimator from '@/components/QuoteEstimator';
+import WhatIfScheduler from '@/components/WhatIfScheduler';
 
 const toDate = (value: any): Date | null => {
     if (!value) return null;
@@ -55,7 +55,7 @@ export default function QuoteEstimatorPage() {
 
     return (
         <div className="min-h-screen bg-gray-700 py-8">
-            <QuoteEstimator existingJobs={jobs} />
+            <WhatIfScheduler existingJobs={jobs} />
         </div>
     );
 }

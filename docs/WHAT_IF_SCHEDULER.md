@@ -1,11 +1,12 @@
 # Advanced Quote Estimator — v2.0
+# What If Scheduler (fka Quote Estimator)
 
 > **Last Updated:** February 7, 2026  
 > **Status:** Production
 
 ## Overview
 
-The FAB Quote Estimator is a capacity-aware scheduling simulator that answers: *"If we accept this quote, when can we realistically deliver it?"*
+The What If Scheduler (fka Quote Estimator) is a capacity-aware scheduling simulator that answers: *"If we accept this quote, when can we realistically deliver it?"*
 
 It reads the live Firestore schedule, builds a per-department weekly capacity map, and simulates inserting the prospective job through the full 6-department pipeline. For Target Date mode, it runs a 3-tier feasibility analysis and returns a clear recommendation.
 

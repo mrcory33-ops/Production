@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-// @ts-ignore - Frappe Gantt has no types
+// @ts-expect-error - Frappe Gantt has no types
 import Gantt from 'frappe-gantt';
 import { Job } from '@/types';
 import { db } from '@/lib/firebase';

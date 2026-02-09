@@ -1,5 +1,5 @@
 import { Job, Department, ProductType } from '@/types';
-import { eachDayOfInterval, isSameDay, format, startOfWeek, endOfWeek, addDays, startOfDay, isWeekend } from 'date-fns';
+import { eachDayOfInterval, format, startOfWeek, endOfWeek, addDays, startOfDay, isWeekend } from 'date-fns';
 import { DEPARTMENT_CONFIG, getPoolForJob } from './departmentConfig';
 
 export interface DailyLoad {
@@ -60,9 +60,11 @@ export const calculateDailyLoads = (jobs: Job[], rangeStart: Date, rangeEnd: Dat
     const loadMap = new Map<string, DailyLoad>();
     days.forEach(day => {
         if (isWeekend(day)) return; // Skip weekends for now
+        const normalized = startOfDay(day);
+        const key = normalized.toISOString();
 
-        loadMap.set(day.toISOString(), {
-            date: day,
+        loadMap.set(key, {
+            date: normalized,
             departments: {
                 'Engineering': 0,
                 'Laser': 0,
@@ -98,11 +100,10 @@ export const calculateDailyLoads = (jobs: Job[], rangeStart: Date, rangeEnd: Dat
             jobDays.forEach(day => {
                 if (isWeekend(day)) return;
 
-                const normalizedDate = startOfDay(day);
-                const key = Array.from(loadMap.keys()).find(k => isSameDay(new Date(k), day));
+                const key = startOfDay(day).toISOString();
+                const entry = loadMap.get(key);
 
-                if (key) {
-                    const entry = loadMap.get(key)!;
+                if (entry) {
                     if (dept in entry.departments) {
                         entry.departments[dept as Department] += pointsPerDay;
                         entry.totalPoints += pointsPerDay;

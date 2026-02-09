@@ -102,7 +102,7 @@ export const setOvertimeConfig = (config: Partial<OvertimeConfig>) => {
     overtimeConfig = { ...overtimeConfig, ...config };
 };
 
-const normalizeBatchText = (value?: string): string =>
+export const normalizeBatchText = (value?: string): string =>
     (value || '')
         .toLowerCase()
         .replace(/[-_/]+/g, ' ')
@@ -115,7 +115,7 @@ const matchesAny = (text: string, patterns: string[]): boolean =>
 const hasToken = (text: string, token: string): boolean =>
     new RegExp(`\\b${token}\\b`).test(text);
 
-const getBatchCategory = (
+export const getBatchCategory = (
     text: string
 ): 'FRAME_KD' | 'FRAME_CO' | 'DOOR_LOCK_SEAM' | 'WALL_PANEL' | 'DISH_TABLE' | 'THREE_COMP_SINK' | 'WALL_SHELF' | 'CORNER_GUARD' | null => {
     if (matchesAny(text, FRAME_KD_PATTERNS)) return 'FRAME_KD';
@@ -129,7 +129,7 @@ const getBatchCategory = (
     return null;
 };
 
-const extractGauge = (text: string): string | null => {
+export const extractGauge = (text: string): string | null => {
     const gaMatch = text.match(/\b(\d{1,2})\s*(ga|gage)\b/);
     if (gaMatch) return gaMatch[1];
 
@@ -139,7 +139,7 @@ const extractGauge = (text: string): string | null => {
     return null;
 };
 
-const extractMaterial = (text: string): string | null => {
+export const extractMaterial = (text: string): string | null => {
     if (/\bss\s*316l\b/.test(text) || /\b316l\b/.test(text)) return 'SS316L';
     if (/\bss\s*316\b/.test(text) || /\b316\b/.test(text)) return 'SS316';
     if (/\bss\s*304\b/.test(text) || /\b304\b/.test(text)) return 'SS304';
@@ -152,7 +152,7 @@ const extractMaterial = (text: string): string | null => {
     return null;
 };
 
-const getDueWeekStart = (dueDate: Date): Date =>
+export const getDueWeekStart = (dueDate: Date): Date =>
     startOfWeek(startOfDay(dueDate), { weekStartsOn: BATCH_WEEK_STARTS_ON });
 
 const compareByDueDateAndSize = (a: Job, b: Job): number => {

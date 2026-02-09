@@ -11,14 +11,14 @@ import {
     calculateQuotePoints,
     simulateQuoteSchedule,
     checkAdvancedFeasibility,
-} from '@/lib/quoteEstimator';
+} from '@/lib/whatIfScheduler';
 import { format } from 'date-fns';
 
 interface QuoteEstimatorProps {
     existingJobs: Job[];
 }
 
-export default function QuoteEstimator({ existingJobs }: QuoteEstimatorProps) {
+export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
     const [totalValue, setTotalValue] = useState<string>('');
     const [totalQuantity, setTotalQuantity] = useState<string>('');
     const [hasBigRocks, setHasBigRocks] = useState(false);
@@ -131,7 +131,7 @@ export default function QuoteEstimator({ existingJobs }: QuoteEstimatorProps) {
                     {/* Header Section */}
                     <div className="bg-slate-900 px-8 py-10 text-white relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500 rounded-full blur-[100px] opacity-20 -mr-32 -mt-32"></div>
-                        <h1 className="text-3xl font-extrabold tracking-tight mb-2">FAB Quote Estimator</h1>
+                        <h1 className="text-3xl font-extrabold tracking-tight mb-2">What If Scheduler</h1>
                         <p className="text-slate-400 text-lg max-w-lg">
                             Enterprise-grade scheduling and point estimation for prospective fabrication jobs.
                         </p>

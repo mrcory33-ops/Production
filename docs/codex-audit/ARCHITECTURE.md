@@ -1,45 +1,74 @@
 # Architecture Overview
 
+Date: 2026-02-09
+
 ## Stack
 - Next.js 16 (App Router), React 19, TypeScript
 - Tailwind CSS
-- Firebase (Firestore, Auth initialized; Storage bucket configured but no direct usage found)
+- Firebase Web SDK (`firebase`): Firestore + Auth initialized in `lib/firebase.ts`
+- Firebase Hosting config present (`firebase.json`)
 
 ## Core App Flows
-- Home (`/` -> `app/page.tsx`): renders `components/PlanningBoard.tsx` (main scheduler UI).
-- Planning (`/planning` -> `app/planning/page.tsx`): wraps the same `PlanningBoard` with a header.
-- Upload (`/upload` -> `app/upload/page.tsx`): client-only CSV/XLSX import, parses to `Job[]`, then syncs to Firestore via `lib/jobs.ts`.
-- Insights (`/insights` -> `app/insights/page.tsx`): fetches active jobs and computes 30-day capacity/bottlenecks with `lib/analytics.ts`.
+- Home Portal: `app/page.tsx`
+  - Route cards navigate to planning, supervisor, quote estimator, upload, and design pages.
+- Planning Board: `app/planning/page.tsx` -> `components/MasterSchedule.tsx`
+  - Main production scheduling UI, Gantt interactions, bulk schedule edits, alert-driven adjustments.
+- Supervisor View: `app/supervisor/page.tsx` -> `components/SupervisorSchedule.tsx`
+  - Real-time floor view, roster management, per-department progress/assignments.
+- Import/Sync: `app/upload/page.tsx` -> `lib/parser.ts` -> `lib/jobs.ts`
+  - Parses CSV/XLSX export, computes job sync actions, writes batched Firestore updates.
+- Insights: `app/insights/page.tsx`
+  - Reads active jobs and computes 30-day capacity and bottlenecks via `lib/analytics.ts`.
+- What-if / Quote Estimation: `app/quote-estimator/page.tsx` + `components/WhatIfScheduler.tsx` + `lib/whatIfScheduler.ts`
+  - Simulates projected timelines and feasibility.
 
-## Firestore Interaction Points
-- `lib/firebase.ts`: initializes Firebase app + Firestore handle.
-- `lib/jobs.ts`:
-  - `syncJobsInput()` reads active jobs via `getDocs(query(collection('jobs'), where('status','in',...)))`.
-  - Schedules new jobs (`scheduleAllJobs`) and batch writes (set/update) to `jobs` collection.
-- `components/PlanningBoard.tsx`:
-  - `getDocs()` for active jobs (status in PENDING/IN_PROGRESS) with `limit(200)`.
-  - Multiple `updateDoc()` and `writeBatch()` operations for drag edits, schedule shifts, priority resets, and bulk deletes.
-- `app/insights/page.tsx`: `getDocs()` active jobs for analytics.
-- `components/Timeline.tsx`: `getDocs()` active jobs for Gantt (legacy view).
-- `lib/scoringConfig.ts`: reads/writes `settings/scoringWeights` with `getDoc`/`setDoc` (also caches in localStorage).
+## Firestore Touch Points
+- Initialization: `lib/firebase.ts`
+  - Exports `db`, `auth`.
+- Jobs collection read/write:
+  - `components/MasterSchedule.tsx`
+    - Reads active jobs (`status in PENDING/IN_PROGRESS/HOLD`) with `getDocs`.
+    - Writes via `updateDoc` and batched `writeBatch` for priority resets, bulk deletes, auto shifts, and alert adjustment applies.
+  - `components/SupervisorSchedule.tsx`
+    - Real-time jobs listener via `onSnapshot(query(...limit(500)))`.
+    - Updates assignments/progress with `updateDoc`.
+  - `lib/jobs.ts`
+    - Sync pipeline: fetch active jobs, then chunked batched set/update writes.
+- Alerts:
+  - `lib/supervisorAlerts.ts`
+    - `subscribeToAlerts` uses `onSnapshot`.
+    - create/update/resolve/delete/extend via `setDoc`/`updateDoc`/`deleteDoc`.
+- Scoring config:
+  - `lib/scoringConfig.ts`
+    - Reads/writes `settings/scoringWeights`.
+- Other read-only consumer:
+  - `components/Timeline.tsx`, `components/SupervisorDashboard.tsx`, `app/insights/page.tsx`.
 
 ## Cloud Storage
-- Firebase Storage is configured in `lib/firebase.ts` but no direct storage uploads/downloads were found in code.
+- Storage bucket is configured in `lib/firebase.ts` (`storageBucket` in config).
+- No direct Cloud Storage SDK reads/writes are referenced in current source (`firebase/storage` usage not found).
+
+## Build/Test/Lint/Typecheck Commands
+- Install deps: `npm install`
+- Lint: `npm run lint`
+- Typecheck: `npx tsc -p tsconfig.json --noEmit`
+- Build: `npm run build`
+- Regression harness:
+  - Baseline: `npm run regression:harness:baseline`
+  - Verify: `npm run regression:harness:verify`
+
+## Emulator Usage
+- Firebase emulator wiring was not found in app code (`connectFirestoreEmulator` / `connectStorageEmulator` absent).
+- `firebase.json` includes Firestore rules/indexes + Hosting config, but no emulator block.
 
 ## Performance-Sensitive Paths
-- `components/PlanningBoard.tsx`:
-  - Client-side filtering/sorting (`displayJobs`), scheduling updates, and analytics recalculation.
-  - Firestore batch updates for scheduling changes.
-- `components/CustomGanttTable.tsx`:
-  - Rendering of Gantt table with per-cell layout, drag/resize behavior.
-- `lib/scheduler.ts`:
-  - Capacity-aware scheduling and batching logic (CPU-heavy for large job sets).
-- `lib/analytics.ts`:
-  - Daily load aggregation and bottleneck detection.
-- `app/upload/page.tsx` + `lib/parser.ts`:
-  - Parsing large CSV/XLSX input on the client.
-
-## Build / Lint / Typecheck
-- Build: `npm run build`
-- Lint: `npm run lint`
-- Typecheck (no script): `npx tsc -p tsconfig.json --noEmit`
+- `components/CustomGanttTable.tsx`
+  - Cell-by-cell rendering and per-row segment overlays.
+- `components/MasterSchedule.tsx`
+  - Filtering/sorting, schedule normalization, bulk Firestore writes.
+- `lib/analytics.ts`
+  - Daily load/bottleneck aggregation loops over jobs x departments x dates.
+- `lib/scheduler.ts` and `lib/whatIfScheduler.ts`
+  - Capacity simulation and scheduling heuristics.
+- `lib/jobs.ts`
+  - Sync path for potentially large active-job sets and batch commits.

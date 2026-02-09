@@ -9,6 +9,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Department, Job, SupervisorAlert } from '@/types';
+import { format } from 'date-fns';
+import { normalizeBatchText, getBatchCategory, extractGauge, extractMaterial, getDueWeekStart } from '@/lib/scheduler';
 import { getDepartmentStatus, subscribeToAlerts } from '@/lib/supervisorAlerts';
 import { DEPT_ORDER, DEPARTMENT_CONFIG } from '@/lib/departmentConfig';
 import AlertCreateModal from './AlertCreateModal';
@@ -56,8 +58,8 @@ interface WorkerProfile {
 type ProductFilter = 'ALL' | 'FAB' | 'DOORS' | 'HARMONIC';
 
 // CrewDeck-specific department slots (splits Engineering into 2 sub-teams)
-type CrewDeckSlot = Department | 'Engineering F/H' | 'Engineering D';
-const CREWDECK_SLOTS: { label: string; slot: CrewDeckSlot; dept: Department }[] = [
+type SupervisorScheduleSlot = Department | 'Engineering F/H' | 'Engineering D';
+const SUPERVISOR_SCHEDULE_SLOTS: { label: string; slot: SupervisorScheduleSlot; dept: Department }[] = [
     { label: 'Engineering F/H', slot: 'Engineering F/H', dept: 'Engineering' },
     { label: 'Engineering D', slot: 'Engineering D', dept: 'Engineering' },
     { label: 'Laser', slot: 'Laser', dept: 'Laser' },
@@ -66,15 +68,15 @@ const CREWDECK_SLOTS: { label: string; slot: CrewDeckSlot; dept: Department }[] 
     { label: 'Polishing', slot: 'Polishing', dept: 'Polishing' },
     { label: 'Assembly', slot: 'Assembly', dept: 'Assembly' },
 ];
-const getSlotDept = (slot: CrewDeckSlot): Department => CREWDECK_SLOTS.find(s => s.slot === slot)?.dept || slot as Department;
+const getSlotDept = (slot: SupervisorScheduleSlot): Department => SUPERVISOR_SCHEDULE_SLOTS.find(s => s.slot === slot)?.dept || slot as Department;
 
 // ─────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────
 
-export default function CrewDeck() {
+export default function SupervisorSchedule() {
     const router = useRouter();
-    const [selectedSlot, setSelectedSlot] = useState<CrewDeckSlot>('Welding');
+    const [selectedSlot, setSelectedSlot] = useState<SupervisorScheduleSlot>('Welding');
     const [deptOpen, setDeptOpen] = useState(false);
     const selectedDept = getSlotDept(selectedSlot);
     const [activeView, setActiveView] = useState<NavView>('plan');
@@ -269,8 +271,8 @@ export default function CrewDeck() {
                             <Hammer className="w-5 h-5 drop-shadow-md text-slate-300" />
                         </div>
                         <div>
-                            <span className="block font-bold tracking-widest uppercase text-sm font-serif">Crew<span className="text-white">Deck</span></span>
-                            <span className="block text-[10px] text-[#666] tracking-widest uppercase">Supervisor Terminal</span>
+                            <span className="block font-bold tracking-widest uppercase text-sm font-serif">Supervisor<span className="text-white">Schedule</span></span>
+                            <span className="block text-[10px] text-[#666] tracking-widest uppercase">Operations Terminal</span>
                         </div>
                     </div>
                     <button onClick={() => router.push('/')} className="p-1.5 rounded border border-[#333] text-[#555] hover:text-white hover:border-[#555] transition-colors" title="Back to Portal">
@@ -291,7 +293,7 @@ export default function CrewDeck() {
                         </div>
                         {deptOpen && (
                             <div className="mt-1 bg-[#1a1a1a] border border-[#444] rounded shadow-xl overflow-hidden">
-                                {CREWDECK_SLOTS.map(({ label, slot }) => (
+                                {SUPERVISOR_SCHEDULE_SLOTS.map(({ label, slot }) => (
                                     <button key={slot} onClick={() => { setSelectedSlot(slot); setDeptOpen(false); }}
                                         className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between
                                             ${slot === selectedSlot ? 'bg-sky-600/20 text-sky-300 font-bold' : 'text-slate-400 hover:bg-[#222] hover:text-white'}`}>
@@ -463,7 +465,8 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
 }) {
     const [productFilter, setProductFilter] = useState<ProductFilter>('ALL');
 
-    // Sort jobs: active (has workers) first, then by due date
+    // Sort jobs: active first, then group by product type, then by description (batching), then by due date
+    const PRODUCT_TYPE_SORT: Record<string, number> = { DOORS: 0, FAB: 1, HARMONIC: 2 };
     const sorted = useMemo(() => {
         let filtered = [...jobs];
         if (productFilter !== 'ALL') {
@@ -474,9 +477,50 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
             const bActive = (b.assignedWorkers?.[department]?.length || 0) > 0;
             if (aActive && !bActive) return -1;
             if (!aActive && bActive) return 1;
+            // Group by product type within active/inactive
+            const aType = PRODUCT_TYPE_SORT[a.productType || 'FAB'] ?? 1;
+            const bType = PRODUCT_TYPE_SORT[b.productType || 'FAB'] ?? 1;
+            if (aType !== bType) return aType - bType;
+            // Group by description (batch key) within product type
+            const aDesc = (a.description || '').trim().toLowerCase();
+            const bDesc = (b.description || '').trim().toLowerCase();
+            if (aDesc !== bDesc) return aDesc.localeCompare(bDesc);
             return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
         });
     }, [jobs, department, productFilter]);
+
+    // Batch key uses the engine's getBatchCategory for specific item matching
+    // Only the 8 recognized categories get batched (frame KD, lock seam door, etc.)
+    const getBatchKey = (j: Job): string | null => {
+        const text = normalizeBatchText(j.description || '');
+        const category = getBatchCategory(text);
+        if (!category) return null; // Not a batchable item
+        const gauge = extractGauge(text);
+        const material = extractMaterial(text);
+        const weekStart = j.dueDate ? getDueWeekStart(new Date(j.dueDate)) : new Date();
+        const weekKey = format(weekStart, 'yyyy-MM-dd');
+        const isStrict = Boolean(gauge && material);
+        return isStrict
+            ? `strict:${category}|${gauge}|${material}|${weekKey}`
+            : `relaxed:${category}|${weekKey}`;
+    };
+
+    // Only batch jobs in Press Brake or earlier departments
+    const PRESS_BRAKE_INDEX = DEPT_ORDER.indexOf('Press Brake');
+    const isBatchEligible = (j: Job) => DEPT_ORDER.indexOf(j.currentDepartment) <= PRESS_BRAKE_INDEX;
+
+    const batchInfo = useMemo(() => {
+        const counts: Record<string, number> = {};
+        const labels: Record<string, string> = {};
+        sorted.forEach(j => {
+            if (!isBatchEligible(j)) return;
+            const key = getBatchKey(j);
+            if (!key) return; // Not a recognized batch category
+            counts[key] = (counts[key] || 0) + 1;
+            if (!labels[key]) labels[key] = j.description || j.productType || 'FAB';
+        });
+        return { counts, labels };
+    }, [sorted]);
 
     // Get jobs assigned to a specific worker
     const getWorkerJobs = (workerName: string) => jobs.filter(j => j.assignedWorkers?.[department]?.includes(workerName));
@@ -577,22 +621,46 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
                             <p className="text-xs text-center font-mono">No jobs in {department}</p>
                         </div>
                     )}
-                    {sorted.map(job => (
-                        <JobQueueCard
-                            key={job.id}
-                            job={job}
-                            department={department}
-                            rosterNames={rosterNames}
-                            onAssign={onAssignWorker}
-                            onUnassign={onUnassignWorker}
-                            onProgressUpdate={onProgressUpdate}
-                            isSaving={savingProgress === job.id}
-                            isAssigning={assigningJob === job.id}
-                            onSetAssigning={onSetAssigningJob}
-                            hasAlert={alerts.some(a => a.jobId === job.id)}
-                            onReportIssue={onReportIssue}
-                        />
-                    ))}
+                    {sorted.map((job, idx) => {
+                        const type = job.productType || 'FAB';
+                        const key = getBatchKey(job);
+                        const prevKey = idx > 0 ? getBatchKey(sorted[idx - 1]) : null;
+                        const batchCount = key ? (batchInfo.counts[key] || 0) : 0;
+                        const inBatchGroup = batchCount >= 2;
+                        const isGroupStart = key !== prevKey;
+                        const showBatchHeader = isGroupStart && inBatchGroup;
+                        const typeColor = PRODUCT_TYPE_COLORS[type] || PRODUCT_TYPE_COLORS.FAB;
+                        const batchAccent = type === 'FAB' ? '#0ea5e9' : type === 'DOORS' ? '#f59e0b' : '#8b5cf6';
+
+                        return (
+                            <React.Fragment key={job.id}>
+                                {showBatchHeader && (
+                                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-md border ${typeColor.border} ${typeColor.bg} ${idx > 0 ? 'mt-1' : ''}`}>
+                                        <span className="text-[10px]">⚙️</span>
+                                        <span className={`text-[10px] font-bold uppercase tracking-wider ${typeColor.text}`}>
+                                            {job.description} — {batchCount} jobs
+                                        </span>
+                                        <span className="text-[9px] text-[#777] font-mono italic">· Run together</span>
+                                    </div>
+                                )}
+                                <JobQueueCard
+                                    job={job}
+                                    department={department}
+                                    rosterNames={rosterNames}
+                                    onAssign={onAssignWorker}
+                                    onUnassign={onUnassignWorker}
+                                    onProgressUpdate={onProgressUpdate}
+                                    isSaving={savingProgress === job.id}
+                                    isAssigning={assigningJob === job.id}
+                                    onSetAssigning={onSetAssigningJob}
+                                    hasAlert={alerts.some(a => a.jobId === job.id)}
+                                    onReportIssue={onReportIssue}
+                                    inBatchGroup={inBatchGroup}
+                                    batchAccentColor={batchAccent}
+                                />
+                            </React.Fragment>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -604,7 +672,7 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
                     <div className="flex flex-col items-center justify-center w-full text-[#555]">
                         <Users className="w-12 h-12 mb-4 opacity-30" />
                         <p className="text-sm font-mono uppercase tracking-wider">No workers in roster</p>
-                        <p className="text-xs text-[#444] mt-2">Click "Manage Roster" to add workers</p>
+                        <p className="text-xs text-[#444] mt-2">Click &quot;Manage Roster&quot; to add workers</p>
                     </div>
                 ) : (
                     roster.map(worker => (
@@ -621,7 +689,7 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
 // JOB QUEUE CARD
 // ─────────────────────────────────────────────────────────────────
 
-function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onProgressUpdate, isSaving, isAssigning, onSetAssigning, hasAlert, onReportIssue }: {
+function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onProgressUpdate, isSaving, isAssigning, onSetAssigning, hasAlert, onReportIssue, inBatchGroup, batchAccentColor }: {
     job: Job; department: Department; rosterNames: string[];
     onAssign: (jobId: string, worker: string) => void;
     onUnassign: (jobId: string, worker: string) => void;
@@ -630,6 +698,8 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
     onSetAssigning: (v: string | null) => void;
     hasAlert: boolean;
     onReportIssue: (jobId: string) => void;
+    inBatchGroup?: boolean;
+    batchAccentColor?: string;
 }) {
     const assignedWorkers = job.assignedWorkers?.[department] || [];
     const isActive = assignedWorkers.length > 0;
@@ -640,7 +710,9 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
 
     return (
         <div className={`bg-gradient-to-b from-[#222] to-[#1c1c1c] border rounded-lg transition-all relative
-            ${hasAlert ? 'border-rose-800/60' : isActive ? 'border-emerald-800/50' : 'border-[#333]'}`}>
+            ${hasAlert ? 'border-rose-800/60' : isActive ? 'border-emerald-800/50' : 'border-[#333]'}
+            ${inBatchGroup ? 'border-l-[3px]' : ''}`}
+            style={inBatchGroup && batchAccentColor ? { borderLeftColor: batchAccentColor } : undefined}>
             {/* Product type color bar */}
             <div className="h-1.5 w-full rounded-t-lg"
                 style={{ backgroundColor: job.productType === 'FAB' ? '#0ea5e9' : job.productType === 'DOORS' ? '#f59e0b' : '#8b5cf6' }} />
@@ -1122,6 +1194,8 @@ function AlertsView({ alerts, allAlerts, departmentStatus }: {
 // ─────────────────────────────────────────────────────────────────
 
 function FutureWorkView({ jobs, department }: { jobs: Job[]; department: Department }) {
+    const nowMs = new Date().getTime();
+
     return (
         <div className="p-6 overflow-y-auto h-full space-y-4 max-w-4xl mx-auto">
             {jobs.length === 0 ? (
@@ -1136,7 +1210,7 @@ function FutureWorkView({ jobs, department }: { jobs: Job[]; department: Departm
                     {jobs.map(job => {
                         const schedule = job.departmentSchedule || job.remainingDepartmentSchedule;
                         const arrivalDate = schedule?.[department]?.start ? new Date(schedule[department].start) : null;
-                        const daysUntil = arrivalDate ? Math.ceil((arrivalDate.getTime() - Date.now()) / 86400000) : null;
+                        const daysUntil = arrivalDate ? Math.ceil((arrivalDate.getTime() - nowMs) / 86400000) : null;
                         return (
                             <div key={job.id} className="bg-gradient-to-b from-[#222] to-[#1c1c1c] border border-[#333] rounded-lg overflow-hidden hover:border-[#555] transition-colors">
                                 <div className="h-1 w-full bg-gradient-to-r from-[#333] via-[#444] to-[#333]" />

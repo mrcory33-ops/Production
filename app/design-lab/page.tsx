@@ -14,7 +14,7 @@ export default function DesignLab() {
             <section>
                 <div className="mb-4 flex items-center gap-4">
                     <span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold">1</span>
-                    <h2 className="text-xl font-bold text-slate-900">The "Unified Control Deck"</h2>
+                    <h2 className="text-xl font-bold text-slate-900">The &quot;Unified Control Deck&quot;</h2>
                 </div>
                 <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                     <div className="w-full bg-white border-b border-slate-200 p-4">
@@ -80,7 +80,7 @@ export default function DesignLab() {
             <section>
                 <div className="mb-4 flex items-center gap-4">
                     <span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold">2</span>
-                    <h2 className="text-xl font-bold text-slate-900">The "Swiss Minimalist"</h2>
+                    <h2 className="text-xl font-bold text-slate-900">The &quot;Swiss Minimalist&quot;</h2>
                 </div>
                 <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                     <div className="w-full bg-white p-6 border-b border-slate-100">
@@ -133,7 +133,7 @@ export default function DesignLab() {
             <section>
                 <div className="mb-4 flex items-center gap-4">
                     <span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold">3</span>
-                    <h2 className="text-xl font-bold text-slate-900">The "Tactile Industrial"</h2>
+                    <h2 className="text-xl font-bold text-slate-900">The &quot;Tactile Industrial&quot;</h2>
                 </div>
                 <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                     <div className="w-full bg-slate-50 p-4 border-b border-slate-300 shadow-sm">
@@ -175,7 +175,7 @@ export default function DesignLab() {
             <section>
                 <div className="mb-4 flex items-center gap-4">
                     <span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold">4</span>
-                    <h2 className="text-xl font-bold text-slate-900">The "Technical Wireframe"</h2>
+                    <h2 className="text-xl font-bold text-slate-900">The &quot;Technical Wireframe&quot;</h2>
                 </div>
                 <div className="border border-slate-900 rounded-xl overflow-hidden shadow-sm">
                     <div className="w-full bg-slate-950 p-4 text-slate-50 font-mono">
@@ -223,7 +223,7 @@ export default function DesignLab() {
             <section>
                 <div className="mb-4 flex items-center gap-4">
                     <span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold">5</span>
-                    <h2 className="text-xl font-bold text-slate-900">The "Glass & Steel"</h2>
+                    <h2 className="text-xl font-bold text-slate-900">The &quot;Glass & Steel&quot;</h2>
                 </div>
                 <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                     <div className="w-full bg-slate-100 p-6 relative overflow-hidden">

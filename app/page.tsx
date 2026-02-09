@@ -17,8 +17,8 @@ export default function HomePortal() {
 
   const modules = [
     {
-      title: 'Planning Board',
-      subtitle: 'Master Schedule',
+      title: 'Master Schedule',
+      subtitle: 'Planning Board',
       icon: <LayoutDashboard className="w-8 h-8" />,
       description: 'Capacity planning, global Gantt chart, and production tracking.',
       status: 'Operational',
@@ -26,8 +26,8 @@ export default function HomePortal() {
       href: '/planning',
     },
     {
-      title: 'Crew Command',
-      subtitle: 'Supervisor Deck',
+      title: 'Supervisor Schedule',
+      subtitle: 'Crew Command',
       icon: <Users className="w-8 h-8" />,
       description: 'Daily assignments, team roster, and shop floor management.',
       status: 'Active',
@@ -36,8 +36,8 @@ export default function HomePortal() {
       highlight: true,
     },
     {
-      title: 'Quote Estimator',
-      subtitle: 'Costing Engine',
+      title: 'What If Scheduler',
+      subtitle: 'Quote Estimator',
       icon: <Calculator className="w-8 h-8" />,
       description: 'Calculate points based on linear feet, difficulty, and material.',
       status: 'Ready',

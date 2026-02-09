@@ -170,7 +170,7 @@ export default function InsightsPage() {
                                                 <div className="absolute top-0 left-0 right-0 h-full pointer-events-none opacity-10 border-t border-b border-slate-500 border-dashed"></div>
 
                                                 {loads.map((load, i) => {
-                                                    // @ts-ignore
+                                                    // @ts-expect-error dynamic department key
                                                     const points = load.departments[dept] || 0;
                                                     const intensity = Math.min(points / 200, 1.5); // 1.0 = 100% cap
 

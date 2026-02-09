@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ScoringWeights, ScoringFactor, getScoringWeights, updateScoringWeights } from '@/lib/scoringConfig';
 import { X, Plus, Trash2, Save, RotateCcw } from 'lucide-react';
 
@@ -19,18 +19,10 @@ const FACTOR_LABELS: Record<string, string> = {
 };
 
 export default function ScoringConfigPanel({ isOpen, onClose, onSave }: ScoringConfigPanelProps) {
-    const [weights, setWeights] = useState<ScoringWeights | null>(null);
+    const [weights, setWeights] = useState<ScoringWeights>(() => JSON.parse(JSON.stringify(getScoringWeights())));
     const [activeTab, setActiveTab] = useState<'defaults' | 'custom'>('defaults');
 
-    // Load initial weights
-    useEffect(() => {
-        if (isOpen) {
-            // Deep copy to avoid mutating global state directly during edit
-            setWeights(JSON.parse(JSON.stringify(getScoringWeights())));
-        }
-    }, [isOpen]);
-
-    if (!isOpen || !weights) return null;
+    if (!isOpen) return null;
 
     const handleSave = () => {
         if (weights) {
@@ -42,7 +34,6 @@ export default function ScoringConfigPanel({ isOpen, onClose, onSave }: ScoringC
 
     const updateFactor = (key: keyof ScoringWeights, updates: Partial<ScoringFactor>) => {
         setWeights(prev => {
-            if (!prev) return null;
             return {
                 ...prev,
                 [key]: { ...prev[key], ...updates }
@@ -52,7 +43,7 @@ export default function ScoringConfigPanel({ isOpen, onClose, onSave }: ScoringC
 
     const updateCustomFactor = (id: string, updates: Partial<ScoringFactor>) => {
         setWeights(prev => {
-            if (!prev || !prev.customFactors) return prev;
+            if (!prev.customFactors) return prev;
             return {
                 ...prev,
                 customFactors: prev.customFactors.map(f => f.id === id ? { ...f, ...updates } : f)
@@ -71,7 +62,6 @@ export default function ScoringConfigPanel({ isOpen, onClose, onSave }: ScoringC
         };
 
         setWeights(prev => {
-            if (!prev) return null;
             return {
                 ...prev,
                 customFactors: [...(prev.customFactors || []), newFactor]
@@ -82,7 +72,7 @@ export default function ScoringConfigPanel({ isOpen, onClose, onSave }: ScoringC
 
     const removeCustomFactor = (id: string) => {
         setWeights(prev => {
-            if (!prev || !prev.customFactors) return prev;
+            if (!prev.customFactors) return prev;
             return {
                 ...prev,
                 customFactors: prev.customFactors.filter(f => f.id !== id)

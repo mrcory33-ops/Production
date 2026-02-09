@@ -352,7 +352,7 @@ export default function UploadPage() {
                             </table>
                             {parsedJobs.length > 50 && (
                                 <div className="p-4 text-center text-slate-500 text-sm border-t border-slate-800 font-mono">
-                                    // ...and {parsedJobs.length - 50} more records
+                                    ...and {parsedJobs.length - 50} more records
                                 </div>
                             )}
                         </div>

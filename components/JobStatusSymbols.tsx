@@ -212,9 +212,8 @@ function SymbolButton({ symbol }: SymbolButtonProps) {
     const popoverRef = useRef<HTMLDivElement>(null);
     const [popoverPos, setPopoverPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
-    // Calculate position when opening
-    useEffect(() => {
-        if (!open || !buttonRef.current) return;
+    const updatePopoverPosition = () => {
+        if (!buttonRef.current) return;
         const rect = buttonRef.current.getBoundingClientRect();
         const popoverWidth = 288; // w-72 = 18rem = 288px
 
@@ -235,7 +234,7 @@ function SymbolButton({ symbol }: SymbolButtonProps) {
         }
 
         setPopoverPos({ top, left });
-    }, [open]);
+    };
 
     // Close on outside click
     useEffect(() => {
@@ -268,7 +267,13 @@ function SymbolButton({ symbol }: SymbolButtonProps) {
                 ref={buttonRef}
                 onClick={(e) => {
                     e.stopPropagation();
-                    setOpen(!open);
+                    setOpen((prev) => {
+                        const next = !prev;
+                        if (next) {
+                            updatePopoverPosition();
+                        }
+                        return next;
+                    });
                 }}
                 className={`flex items-center justify-center min-w-[20px] h-5 px-1 ${symbol.bgClass} border ${symbol.borderClass} rounded cursor-pointer 
                            hover:brightness-95 active:scale-95 transition-all`}

@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInCalendarDays } from 'date-fns';
 import { Job, Department, SupervisorAlert } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
+import { normalizeBatchText, getBatchCategory, extractGauge, extractMaterial, getDueWeekStart } from '@/lib/scheduler';
 import SegmentEditPopover from './SegmentEditPopover';
 import JobStatusSymbols from './JobStatusSymbols';
 
@@ -102,6 +103,11 @@ export default function CustomGanttTable({
 
         return dates;
     }, [startDate, endDate]);
+
+    const dateColumnKeys = useMemo(
+        () => dateColumns.map((date) => date.toISOString().split('T')[0]),
+        [dateColumns]
+    );
 
     const dateIndexMap = useMemo(() => {
         const map = new Map<string, number>();
@@ -629,374 +635,431 @@ export default function CustomGanttTable({
                     </tr>
                 </thead>
                 <tbody>
-                    {jobs
-                        .filter(job => {
+                    {(() => {
+                        // Batch key uses the engine's getBatchCategory for specific item matching
+                        // Only the 8 recognized categories get batched (frame KD, lock seam door, etc.)
+                        const getGanttBatchKey = (j: Job): string | null => {
+                            const text = normalizeBatchText(j.description || '');
+                            const category = getBatchCategory(text);
+                            if (!category) return null; // Not a batchable item
+                            const gauge = extractGauge(text);
+                            const material = extractMaterial(text);
+                            const weekStart = j.dueDate ? getDueWeekStart(new Date(j.dueDate)) : new Date();
+                            const weekKey = format(weekStart, 'yyyy-MM-dd');
+                            const isStrict = Boolean(gauge && material);
+                            return isStrict
+                                ? `strict:${category}|${gauge}|${material}|${weekKey}`
+                                : `relaxed:${category}|${weekKey}`;
+                        };
+
+                        // Filter jobs first
+                        const filteredJobs = jobs.filter(job => {
                             if (!visibleDepartments || visibleDepartments.size === 0) return true;
-
                             const jobDeptIndex = DEPT_ORDER.indexOf(job.currentDepartment);
-
-                            // Find the furthest downstream department selected
-                            // (e.g. if Laser selected, index is 1. We want 0 and 1)
                             const visibleIndices = Array.from(visibleDepartments).map(d => DEPT_ORDER.indexOf(d));
                             const maxVisibleIndex = Math.max(...visibleIndices);
 
-                            // Active Only (ON): Show jobs currently IN selected depts OR scheduled for today in them
                             if (showActiveOnly) {
                                 const isCurrent = visibleDepartments.has(job.currentDepartment);
-
-                                // Also check if scheduled for today in any visible department
                                 const normalizedToday = startOfDay(today);
                                 const isScheduledToday = Array.from(visibleDepartments).some(dept => {
                                     const schedule = job.departmentSchedule?.[dept] || job.remainingDepartmentSchedule?.[dept];
                                     if (!schedule) return false;
-
-                                    // Normalize all dates to start of day for accurate comparison
                                     const start = startOfDay(new Date(schedule.start));
                                     const end = startOfDay(new Date(schedule.end));
-
                                     return normalizedToday >= start && normalizedToday <= end;
                                 });
-
                                 return isCurrent || isScheduledToday;
                             }
-
-                            // All Jobs (OFF): Pipeline View (Upstream + Current)
-                            // Show if job is in selected department OR upstream of it
                             return jobDeptIndex <= maxVisibleIndex;
-                        })
-                        .map((job, rowIndex) => {
+                        });
+
+                        // Only batch jobs in Press Brake or earlier departments
+                        const PRESS_BRAKE_INDEX = DEPT_ORDER.indexOf('Press Brake');
+                        const isBatchEligible = (j: Job) => DEPT_ORDER.indexOf(j.currentDepartment) <= PRESS_BRAKE_INDEX;
+
+                        const batchCounts: Record<string, number> = {};
+                        filteredJobs.forEach(j => {
+                            if (!isBatchEligible(j)) return;
+                            const key = getGanttBatchKey(j);
+                            if (!key) return; // Not a recognized batch category
+                            batchCounts[key] = (batchCounts[key] || 0) + 1;
+                        });
+
+                        // Sort: batch groups adjacent, then by due date within group
+                        const PRODUCT_TYPE_SORT: Record<string, number> = { DOORS: 0, FAB: 1, HARMONIC: 2 };
+                        const sortedJobs = [...filteredJobs].sort((a, b) => {
+                            const aType = PRODUCT_TYPE_SORT[a.productType || 'FAB'] ?? 1;
+                            const bType = PRODUCT_TYPE_SORT[b.productType || 'FAB'] ?? 1;
+                            if (aType !== bType) return aType - bType;
+                            const aDesc = (a.description || '').trim().toLowerCase();
+                            const bDesc = (b.description || '').trim().toLowerCase();
+                            if (aDesc !== bDesc) return aDesc.localeCompare(bDesc);
+                            return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+                        });
+
+                        return sortedJobs.map((job, rowIndex) => {
                             const segments = calculateDepartmentSegments(job);
+                            const segmentsByStartCol = new Map<number, Array<{ segment: DepartmentSegment; segIndex: number }>>();
+                            segments.forEach((segment, segIndex) => {
+                                const startSegments = segmentsByStartCol.get(segment.startCol);
+                                if (startSegments) {
+                                    startSegments.push({ segment, segIndex });
+                                } else {
+                                    segmentsByStartCol.set(segment.startCol, [{ segment, segIndex }]);
+                                }
+                            });
                             const dailyDeptMap = buildDailyDeptMap(job);
                             const isSelected = selectedJob?.id === job.id;
                             const jobAlerts = alertsByJobId[job.id] || [];
 
+                            // Batch group detection — only for recognized categories in Press Brake or earlier
+                            const batchKey = getGanttBatchKey(job);
+                            const prevBatchKey = rowIndex > 0 ? getGanttBatchKey(sortedJobs[rowIndex - 1]) : null;
+                            const jobEligible = isBatchEligible(job) && batchKey !== null;
+                            const batchCount = jobEligible ? (batchCounts[batchKey!] || 0) : 0;
+                            const inBatch = batchCount >= 2;
+                            const isFirstInBatch = batchKey !== prevBatchKey && inBatch;
+                            const productType = job.productType || 'FAB';
+                            const batchAccent = productType === 'FAB' ? '#0ea5e9' : productType === 'DOORS' ? '#f59e0b' : '#8b5cf6';
+
                             return (
-                                <tr
-                                    key={job.id}
-                                    className={`job-row ${isSelected ? 'row-selected' : ''}`}
-                                >
-                                    <td
-                                        className="sticky-job-cell"
-                                        onClick={() => onJobClick?.(job)}
+                                <>
+                                    {isFirstInBatch && (
+                                        <tr key={`batch-${batchKey}`} className="batch-header-row">
+                                            <td
+                                                colSpan={dateColumns.length + 1}
+                                                style={{ borderLeft: `3px solid ${batchAccent}` }}
+                                                className="px-3 py-1 bg-slate-100 border-b border-slate-300"
+                                            >
+                                                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: batchAccent }}>
+                                                    ⚙️ Batch: {job.description || productType} — {batchCount} items
+                                                </span>
+                                                <span className="text-[9px] text-slate-500 font-mono italic ml-2">· Run together</span>
+                                            </td>
+                                        </tr>
+                                    )}
+                                    <tr
+                                        key={job.id}
+                                        className={`job-row ${isSelected ? 'row-selected' : ''}`}
                                     >
-                                        <div className="job-cell-content">
-                                            <div className="flex items-center gap-1.5 overflow-visible relative">
-                                                <div className="job-name flex-1 min-w-0 cursor-pointer text-black font-bold"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onJobClick?.(job);
-                                                    }}
-                                                >
-                                                    {job.name}
-                                                </div>
-                                                {jobAlerts.length > 0 && (
-                                                    <div className="relative" data-alert-popover-root="true">
-                                                        <button
-                                                            ref={(el) => {
-                                                                if (el && openJobAlertInfoId === job.id) {
-                                                                    const rect = el.getBoundingClientRect();
-                                                                    const popoverEl = el.nextElementSibling as HTMLElement | null;
-                                                                    if (popoverEl) {
-                                                                        popoverEl.style.top = `${rect.bottom + 4}px`;
-                                                                        popoverEl.style.left = `${Math.max(8, rect.right - 280)}px`;
+                                        <td
+                                            className="sticky-job-cell"
+                                            onClick={() => onJobClick?.(job)}
+                                            style={inBatch ? { borderRight: `3px solid ${batchAccent}` } : undefined}
+                                        >
+                                            <div className="job-cell-content">
+                                                <div className="flex items-center gap-1.5 overflow-visible relative">
+                                                    <div className="job-name flex-1 min-w-0 cursor-pointer text-black font-bold"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            onJobClick?.(job);
+                                                        }}
+                                                    >
+                                                        {job.name}
+                                                    </div>
+                                                    {jobAlerts.length > 0 && (
+                                                        <div className="relative" data-alert-popover-root="true">
+                                                            <button
+                                                                ref={(el) => {
+                                                                    if (el && openJobAlertInfoId === job.id) {
+                                                                        const rect = el.getBoundingClientRect();
+                                                                        const popoverEl = el.nextElementSibling as HTMLElement | null;
+                                                                        if (popoverEl) {
+                                                                            popoverEl.style.top = `${rect.bottom + 4}px`;
+                                                                            popoverEl.style.left = `${Math.max(8, rect.right - 280)}px`;
+                                                                        }
                                                                     }
-                                                                }
-                                                            }}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setOpenJobAlertInfoId(prev => prev === job.id ? null : job.id);
-                                                            }}
-                                                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-red-600 border border-red-700 text-white font-extrabold shadow-sm hover:bg-red-700 transition-colors"
-                                                            title={`${jobAlerts.length} active supervisor alert${jobAlerts.length > 1 ? 's' : ''}`}
-                                                        >
-                                                            ! {jobAlerts.length}
-                                                        </button>
-                                                        {openJobAlertInfoId === job.id && (
-                                                            <div
-                                                                className="fixed w-[280px] rounded-lg border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl"
-                                                                style={{ zIndex: 9999 }}
-                                                                onClick={(e) => e.stopPropagation()}
+                                                                }}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setOpenJobAlertInfoId(prev => prev === job.id ? null : job.id);
+                                                                }}
+                                                                className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-red-600 border border-red-700 text-white font-extrabold shadow-sm hover:bg-red-700 transition-colors"
+                                                                title={`${jobAlerts.length} active supervisor alert${jobAlerts.length > 1 ? 's' : ''}`}
                                                             >
-                                                                <div className="px-3 py-2 border-b border-slate-700 text-[11px] font-bold">
-                                                                    Active Alerts ({jobAlerts.length})
-                                                                </div>
-                                                                <div className="max-h-56 overflow-y-auto px-3 py-2 space-y-2">
-                                                                    {jobAlerts.map((alertItem) => (
-                                                                        <div key={alertItem.id} className="rounded border border-slate-700 bg-slate-800/70 p-2 text-[10px] leading-relaxed">
-                                                                            <div className="text-red-300 font-semibold">
-                                                                                {alertItem.department} - resolve by {format(new Date(alertItem.estimatedResolutionDate), 'M/d')}
-                                                                            </div>
-                                                                            <div className="text-slate-200 mt-0.5">{alertItem.reason}</div>
-                                                                            {alertItem.lastAdjustmentAt && (
-                                                                                <div className="text-indigo-200 mt-1">
-                                                                                    Adjusted {format(new Date(alertItem.lastAdjustmentAt), 'M/d h:mm a')}
+                                                                ! {jobAlerts.length}
+                                                            </button>
+                                                            {openJobAlertInfoId === job.id && (
+                                                                <div
+                                                                    className="fixed w-[280px] rounded-lg border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl"
+                                                                    style={{ zIndex: 9999 }}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                >
+                                                                    <div className="px-3 py-2 border-b border-slate-700 text-[11px] font-bold">
+                                                                        Active Alerts ({jobAlerts.length})
+                                                                    </div>
+                                                                    <div className="max-h-56 overflow-y-auto px-3 py-2 space-y-2">
+                                                                        {jobAlerts.map((alertItem) => (
+                                                                            <div key={alertItem.id} className="rounded border border-slate-700 bg-slate-800/70 p-2 text-[10px] leading-relaxed">
+                                                                                <div className="text-red-300 font-semibold">
+                                                                                    {alertItem.department} - resolve by {format(new Date(alertItem.estimatedResolutionDate), 'M/d')}
                                                                                 </div>
-                                                                            )}
-                                                                        </div>
-                                                                    ))}
+                                                                                <div className="text-slate-200 mt-0.5">{alertItem.reason}</div>
+                                                                                {alertItem.lastAdjustmentAt && (
+                                                                                    <div className="text-indigo-200 mt-1">
+                                                                                        Adjusted {format(new Date(alertItem.lastAdjustmentAt), 'M/d h:mm a')}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                        )}
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    {/* Status Symbols — clickable with explanation popovers */}
+                                                    <JobStatusSymbols job={job} alerts={jobAlerts} />
+                                                </div>
+                                                <div
+                                                    className="job-id font-extrabold tracking-wide opacity-100"
+                                                    style={{ color: '#1f2937', fontSize: '12px', lineHeight: '1.1' }}
+                                                >
+                                                    {job.id}
+                                                </div>
+                                                <div className="text-[11px] text-black font-semibold mt-0.5 truncate leading-tight">
+                                                    {job.description || 'No description'}
+                                                </div>
+                                                <div className="flex justify-between items-center mt-1.5 text-[9px] text-black font-mono">
+                                                    <span className={differenceInCalendarDays(job.dueDate, today) < 0 ? "text-red-600 font-bold" : ""}>
+                                                        Due: {format(job.dueDate, 'M/d')}
+                                                    </span>
+                                                    <span className="bg-slate-300 border border-slate-400 px-1 py-px rounded text-black font-semibold">
+                                                        {Math.round(job.weldingPoints || 0)} pts
+                                                    </span>
+                                                </div>
+                                                {onNoGapsToggle && (
+                                                    <div className="mt-1.5">
+                                                        <button
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                await onNoGapsToggle(job.id, !job.noGaps);
+                                                            }}
+                                                            className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${job.noGaps
+                                                                ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold'
+                                                                : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                                                                }`}
+                                                            title={job.noGaps ? "Gaps removed - departments run back-to-back" : "Click to remove gaps between departments"}
+                                                        >
+                                                            {job.noGaps ? '⚡ No Gaps' : '+ No Gaps'}
+                                                        </button>
                                                     </div>
                                                 )}
-                                                {/* Status Symbols — clickable with explanation popovers */}
-                                                <JobStatusSymbols job={job} alerts={jobAlerts} />
-                                            </div>
-                                            <div
-                                                className="job-id font-extrabold tracking-wide opacity-100"
-                                                style={{ color: '#1f2937', fontSize: '12px', lineHeight: '1.1' }}
-                                            >
-                                                {job.id}
-                                            </div>
-                                            <div className="text-[11px] text-black font-semibold mt-0.5 truncate leading-tight">
-                                                {job.description || 'No description'}
-                                            </div>
-                                            <div className="flex justify-between items-center mt-1.5 text-[9px] text-black font-mono">
-                                                <span className={differenceInCalendarDays(job.dueDate, today) < 0 ? "text-red-600 font-bold" : ""}>
-                                                    Due: {format(job.dueDate, 'M/d')}
-                                                </span>
-                                                <span className="bg-slate-300 border border-slate-400 px-1 py-px rounded text-black font-semibold">
-                                                    {Math.round(job.weldingPoints || 0)} pts
-                                                </span>
-                                            </div>
-                                            {onNoGapsToggle && (
-                                                <div className="mt-1.5">
-                                                    <button
-                                                        onClick={async (e) => {
-                                                            e.stopPropagation();
-                                                            await onNoGapsToggle(job.id, !job.noGaps);
-                                                        }}
-                                                        className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${job.noGaps
-                                                            ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold'
-                                                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-                                                            }`}
-                                                        title={job.noGaps ? "Gaps removed - departments run back-to-back" : "Click to remove gaps between departments"}
-                                                    >
-                                                        {job.noGaps ? '⚡ No Gaps' : '+ No Gaps'}
-                                                    </button>
-                                                </div>
-                                            )}
-                                            {showActiveOnly && priorityDepartment && onPriorityUpdate && (
-                                                <div className="mt-2 flex items-center gap-2">
-                                                    <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wider">
-                                                        Priority #
-                                                    </span>
-                                                    <input
-                                                        type="number"
-                                                        min={1}
-                                                        value={
-                                                            priorityDrafts[job.id] ??
-                                                            (job.priorityByDept?.[priorityDepartment]?.value?.toString() || '')
-                                                        }
-                                                        onChange={(e) => {
-                                                            setPriorityDrafts(prev => ({ ...prev, [job.id]: e.target.value }));
-                                                        }}
-                                                        onBlur={async (e) => {
-                                                            const raw = e.target.value.trim();
-                                                            if (!raw) {
-                                                                await onPriorityUpdate(job.id, priorityDepartment, null);
-                                                                return;
+                                                {showActiveOnly && priorityDepartment && onPriorityUpdate && (
+                                                    <div className="mt-2 flex items-center gap-2">
+                                                        <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wider">
+                                                            Priority #
+                                                        </span>
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            value={
+                                                                priorityDrafts[job.id] ??
+                                                                (job.priorityByDept?.[priorityDepartment]?.value?.toString() || '')
                                                             }
-                                                            const num = Number(raw);
-                                                            if (!Number.isNaN(num)) {
-                                                                await onPriorityUpdate(job.id, priorityDepartment, num);
-                                                            }
-                                                        }}
-                                                        className="w-16 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
-                                                        placeholder="-"
-                                                    />
-                                                </div>
-                                            )}
-                                            {onJobRangeUpdate && (
-                                                <div className="mt-2">
-                                                    {editingJobRange?.job.id === job.id ? (
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="date"
-                                                                value={editingJobRange.startValue}
-                                                                onChange={(e) => setEditingJobRange({ ...editingJobRange, startValue: e.target.value })}
-                                                                className="w-[110px] bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
-                                                            />
-                                                            <span className="text-[10px] text-slate-400">-</span>
-                                                            <input
-                                                                type="date"
-                                                                value={editingJobRange.endValue}
-                                                                onChange={(e) => setEditingJobRange({ ...editingJobRange, endValue: e.target.value })}
-                                                                className="w-[110px] bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
-                                                            />
-                                                            <button
-                                                                className="px-2 py-0.5 rounded text-[10px] bg-blue-600 text-white hover:bg-blue-500"
-                                                                onClick={async (e) => {
-                                                                    e.stopPropagation();
-                                                                    const start = new Date(editingJobRange.startValue);
-                                                                    const end = new Date(editingJobRange.endValue);
-                                                                    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
-                                                                        await onJobRangeUpdate(job.id, startOfDay(start), startOfDay(end));
-                                                                    }
-                                                                    setEditingJobRange(null);
-                                                                }}
-                                                            >
-                                                                Save
-                                                            </button>
+                                                            onChange={(e) => {
+                                                                setPriorityDrafts(prev => ({ ...prev, [job.id]: e.target.value }));
+                                                            }}
+                                                            onBlur={async (e) => {
+                                                                const raw = e.target.value.trim();
+                                                                if (!raw) {
+                                                                    await onPriorityUpdate(job.id, priorityDepartment, null);
+                                                                    return;
+                                                                }
+                                                                const num = Number(raw);
+                                                                if (!Number.isNaN(num)) {
+                                                                    await onPriorityUpdate(job.id, priorityDepartment, num);
+                                                                }
+                                                            }}
+                                                            className="w-16 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
+                                                            placeholder="-"
+                                                        />
+                                                    </div>
+                                                )}
+                                                {onJobRangeUpdate && (
+                                                    <div className="mt-2">
+                                                        {editingJobRange?.job.id === job.id ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="date"
+                                                                    value={editingJobRange.startValue}
+                                                                    onChange={(e) => setEditingJobRange({ ...editingJobRange, startValue: e.target.value })}
+                                                                    className="w-[110px] bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
+                                                                />
+                                                                <span className="text-[10px] text-slate-400">-</span>
+                                                                <input
+                                                                    type="date"
+                                                                    value={editingJobRange.endValue}
+                                                                    onChange={(e) => setEditingJobRange({ ...editingJobRange, endValue: e.target.value })}
+                                                                    className="w-[110px] bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-700"
+                                                                />
+                                                                <button
+                                                                    className="px-2 py-0.5 rounded text-[10px] bg-blue-600 text-white hover:bg-blue-500"
+                                                                    onClick={async (e) => {
+                                                                        e.stopPropagation();
+                                                                        const start = new Date(editingJobRange.startValue);
+                                                                        const end = new Date(editingJobRange.endValue);
+                                                                        if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+                                                                            await onJobRangeUpdate(job.id, startOfDay(start), startOfDay(end));
+                                                                        }
+                                                                        setEditingJobRange(null);
+                                                                    }}
+                                                                >
+                                                                    Save
+                                                                </button>
+                                                                <button
+                                                                    className="px-2 py-0.5 rounded text-[10px] border border-slate-200 text-slate-600 hover:bg-slate-100"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setEditingJobRange(null);
+                                                                    }}
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </div>
+                                                        ) : (
                                                             <button
                                                                 className="px-2 py-0.5 rounded text-[10px] border border-slate-200 text-slate-600 hover:bg-slate-100"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    setEditingJobRange(null);
+                                                                    const range = getJobRange(job);
+                                                                    setEditingJobRange({
+                                                                        job,
+                                                                        startValue: format(range.start, 'yyyy-MM-dd'),
+                                                                        endValue: format(range.end, 'yyyy-MM-dd')
+                                                                    });
                                                                 }}
                                                             >
-                                                                Cancel
+                                                                Set Start/End
                                                             </button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </td>
+                                        {dateColumns.map((date, colIndex) => {
+                                            const isToday = isSameDay(date, today);
+                                            const startSegments = segmentsByStartCol.get(colIndex);
+                                            const hasSegmentStart = !!startSegments;
+                                            const dateKey = dateColumnKeys[colIndex];
+                                            const dayDepts = dailyDeptMap.get(dateKey) || [];
+                                            const hasOverlap = dayDepts.length > 1;
+
+                                            return (
+                                                <td
+                                                    key={colIndex}
+                                                    className={`date-cell ${hasSegmentStart ? 'has-segment' : ''} ${isToday ? 'today-column' : ''} ${isSaturday(date) ? 'saturday-column' : ''}`}
+                                                    style={{ minWidth: `${columnWidth}px`, width: `${columnWidth}px` }}
+                                                >
+                                                    {hasOverlap && (
+                                                        <div className="day-split-overlay">
+                                                            {dayDepts.map((dept) => (
+                                                                <div
+                                                                    key={`${job.id}-${dateKey}-${dept}`}
+                                                                    className="day-split-segment"
+                                                                    style={{ backgroundColor: getDepartmentColor(dept) }}
+                                                                />
+                                                            ))}
                                                         </div>
-                                                    ) : (
-                                                        <button
-                                                            className="px-2 py-0.5 rounded text-[10px] border border-slate-200 text-slate-600 hover:bg-slate-100"
+                                                    )}
+                                                    {startSegments?.map(({ segment, segIndex }) => (
+                                                        <div
+                                                            key={segIndex}
+                                                            className="job-bar-segment relative group/bar-tooltip"
+                                                            style={{
+                                                                width: `${segment.duration * columnWidth - 4}px`,
+                                                                backgroundColor: segment.color,
+                                                                borderColor: segment.color,
+                                                                left: `${2}px`,
+                                                                zIndex: 20 + segIndex,
+                                                                cursor: onJobShiftUpdate ? 'grab' : 'default', // Shift+drag moves all
+                                                                transition: 'all 0.3s ease'
+                                                            }}
+                                                            onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'move')}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                const range = getJobRange(job);
-                                                                setEditingJobRange({
-                                                                    job,
-                                                                    startValue: format(range.start, 'yyyy-MM-dd'),
-                                                                    endValue: format(range.end, 'yyyy-MM-dd')
-                                                                });
+                                                                if (isDragging || ignoreClickRef.current) return;
+                                                                if (onSegmentUpdate) {
+                                                                    setEditingSegment({ job, segment, segmentIndex: segIndex });
+                                                                } else {
+                                                                    onJobClick?.(job);
+                                                                }
                                                             }}
                                                         >
-                                                            Set Start/End
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </td>
-                                    {dateColumns.map((date, colIndex) => {
-                                        const isToday = isSameDay(date, today);
-                                        const hasSegmentStart = segments.some(seg => seg.startCol === colIndex);
-                                        const dateKey = date.toISOString().split('T')[0];
-                                        const dayDepts = dailyDeptMap.get(dateKey) || [];
-                                        const hasOverlap = dayDepts.length > 1;
+                                                            {/* ── Progress Overlay (supervisor-reported) ── */}
+                                                            {(() => {
+                                                                const progress = job.departmentProgress?.[segment.department];
+                                                                if (progress && progress > 0 && job.currentDepartment === segment.department) {
+                                                                    return (
+                                                                        <div
+                                                                            className="absolute inset-0 z-[1] pointer-events-none overflow-hidden rounded-[inherit]"
+                                                                            style={{ width: `${Math.min(progress, 100)}%` }}
+                                                                        >
+                                                                            <div className="absolute inset-0 bg-white/85" />
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            })()}
+                                                            {/* ── Progress % label inside bar ── */}
+                                                            {(() => {
+                                                                const progress = job.departmentProgress?.[segment.department];
+                                                                if (progress && progress > 0 && job.currentDepartment === segment.department) {
+                                                                    return (
+                                                                        <span className="absolute inset-0 flex items-center justify-center z-[3] text-[13px] font-black pointer-events-none"
+                                                                            style={{ color: segment.color || '#475569' }}>
+                                                                            {progress}%
+                                                                        </span>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            })()}
 
-                                        return (
-                                            <td
-                                                key={colIndex}
-                                                className={`date-cell ${hasSegmentStart ? 'has-segment' : ''} ${isToday ? 'today-column' : ''} ${isSaturday(date) ? 'saturday-column' : ''}`}
-                                                style={{ minWidth: `${columnWidth}px`, width: `${columnWidth}px` }}
-                                            >
-                                                {hasOverlap && (
-                                                    <div className="day-split-overlay">
-                                                        {dayDepts.map((dept, idx) => (
-                                                            <div
-                                                                key={`${job.id}-${dateKey}-${dept}`}
-                                                                className="day-split-segment"
-                                                                style={{ backgroundColor: getDepartmentColor(dept) }}
-                                                            />
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                {segments.map((segment, segIndex) => {
-                                                    // Standard rendering without react-state drag offset
-                                                    const visualOffset = 0;
-                                                    // Note: We no longer shift based on state, but transform directly in DOM.
-
-                                                    if (colIndex === segment.startCol) {
-                                                        return (
-                                                            <div
-                                                                key={segIndex}
-                                                                className="job-bar-segment relative group/bar-tooltip"
-                                                                style={{
-                                                                    width: `${segment.duration * columnWidth - 4}px`,
-                                                                    backgroundColor: segment.color,
-                                                                    borderColor: segment.color,
-                                                                    left: `${2}px`,
-                                                                    zIndex: 20 + segIndex,
-                                                                    cursor: onJobShiftUpdate ? 'grab' : 'default', // Shift+drag moves all
-                                                                    transition: 'all 0.3s ease'
-                                                                }}
-                                                                onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'move')}
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    if (isDragging || ignoreClickRef.current) return;
-                                                                    if (onSegmentUpdate) {
-                                                                        setEditingSegment({ job, segment, segmentIndex: segIndex });
-                                                                    } else {
-                                                                        onJobClick?.(job);
-                                                                    }
-                                                                }}
-                                                            >
-                                                                {/* ── Progress Overlay (supervisor-reported) ── */}
-                                                                {(() => {
-                                                                    const progress = job.departmentProgress?.[segment.department];
-                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
-                                                                        return (
-                                                                            <div
-                                                                                className="absolute inset-0 z-[1] pointer-events-none overflow-hidden rounded-[inherit]"
-                                                                                style={{ width: `${Math.min(progress, 100)}%` }}
-                                                                            >
-                                                                                <div className="absolute inset-0 bg-white/85" />
-                                                                            </div>
-                                                                        );
-                                                                    }
-                                                                    return null;
-                                                                })()}
-                                                                {/* ── Progress % label inside bar ── */}
-                                                                {(() => {
-                                                                    const progress = job.departmentProgress?.[segment.department];
-                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
-                                                                        return (
-                                                                            <span className="absolute inset-0 flex items-center justify-center z-[3] text-[13px] font-black pointer-events-none"
-                                                                                style={{ color: segment.color || '#475569' }}>
-                                                                                {progress}%
-                                                                            </span>
-                                                                        );
-                                                                    }
-                                                                    return null;
-                                                                })()}
-
-                                                                {/* Bar Tooltip — department & dates */}
-                                                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover/bar-tooltip:block pointer-events-none w-max">
-                                                                    <div className="px-2.5 py-1.5 bg-slate-800 text-white rounded shadow-xl text-xs whitespace-nowrap">
-                                                                        <span className="font-bold">{segment.department}</span>
-                                                                        <span className="text-slate-400 ml-2">{format(segment.startDate, 'M/d')} – {format(segment.endDate, 'M/d')}</span>
-                                                                        {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && (
-                                                                            <span className="text-emerald-300 ml-2 font-bold">{job.departmentProgress[segment.department]}% done</span>
-                                                                        )}
-                                                                    </div>
+                                                            {/* Bar Tooltip — department & dates */}
+                                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover/bar-tooltip:block pointer-events-none w-max">
+                                                                <div className="px-2.5 py-1.5 bg-slate-800 text-white rounded shadow-xl text-xs whitespace-nowrap">
+                                                                    <span className="font-bold">{segment.department}</span>
+                                                                    <span className="text-slate-400 ml-2">{format(segment.startDate, 'M/d')} – {format(segment.endDate, 'M/d')}</span>
+                                                                    {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && (
+                                                                        <span className="text-emerald-300 ml-2 font-bold">{job.departmentProgress[segment.department]}% done</span>
+                                                                    )}
                                                                 </div>
-
-                                                                {/* Resize handle - start */}
-                                                                {onSegmentUpdate && (
-                                                                    <div
-                                                                        className="segment-resize-handle segment-resize-start"
-                                                                        onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'resize', 'start')}
-                                                                        title="Drag to adjust start date"
-                                                                    />
-                                                                )}
-
-                                                                {/* Resize handle - end */}
-                                                                {onSegmentUpdate && (
-                                                                    <div
-                                                                        className="segment-resize-handle segment-resize-end"
-                                                                        onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'resize', 'end')}
-                                                                        title="Drag to adjust end date"
-                                                                    />
-                                                                )}
                                                             </div>
-                                                        );
-                                                    }
-                                                    return null;
-                                                })}
 
-                                                {/* Job name label - below the bars */}
-                                                {segments.length > 0 && colIndex === segments[0].startCol && (
-                                                    <div className="bar-label-below">
-                                                        {job.name}
-                                                    </div>
-                                                )}
-                                            </td>
-                                        );
-                                    })}
-                                </tr>
+                                                            {/* Resize handle - start */}
+                                                            {onSegmentUpdate && (
+                                                                <div
+                                                                    className="segment-resize-handle segment-resize-start"
+                                                                    onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'resize', 'start')}
+                                                                    title="Drag to adjust start date"
+                                                                />
+                                                            )}
+
+                                                            {/* Resize handle - end */}
+                                                            {onSegmentUpdate && (
+                                                                <div
+                                                                    className="segment-resize-handle segment-resize-end"
+                                                                    onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'resize', 'end')}
+                                                                    title="Drag to adjust end date"
+                                                                />
+                                                            )}
+                                                        </div>
+                                                    ))}
+
+                                                    {/* Job name label - below the bars */}
+                                                    {segments.length > 0 && colIndex === segments[0].startCol && (
+                                                        <div className="bar-label-below">
+                                                            {job.name}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                </>
                             );
-                        })}
+                        });
+                    })()}
                 </tbody>
             </table>
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, writeBatch, onSnapshot, Timestamp, deleteField } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, writeBatch, onSnapshot, Timestamp, deleteField, type WriteBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Job, Department, ScheduleInsights, SupervisorAlert } from '@/types';
 import {
@@ -12,7 +12,6 @@ import {
     subtractWorkDays,
     planAlertAdjustment
 } from '@/lib/scheduler';
-import { calculateDailyLoads, detectBottlenecks } from '@/lib/analytics';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, format, startOfDay, differenceInDays } from 'date-fns';
 import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator, MessageSquareWarning, Bell, ShieldAlert } from 'lucide-react';
@@ -85,12 +84,12 @@ const scaleSchedule = (
     const originalDurations = entries.map(e => Math.max(1, differenceInCalendarDays(e.end, e.start) + 1));
     const totalOriginal = originalDurations.reduce((sum, d) => sum + d, 0);
     const baseDays = new Array(deptCount).fill(1);
-    let remaining = totalDays - deptCount;
+    const remaining = totalDays - deptCount;
 
     if (remaining > 0) {
         const weighted = originalDurations.map(d => (d / totalOriginal) * remaining);
         const extra = weighted.map(w => Math.floor(w));
-        let extraUsed = extra.reduce((sum, d) => sum + d, 0);
+        const extraUsed = extra.reduce((sum, d) => sum + d, 0);
 
         // Distribute leftover days by largest fractional remainder
         const remainders = weighted.map((w, i) => ({ i, r: w - extra[i] }))
@@ -238,8 +237,18 @@ const removeUndefined = (value: any): any => {
 const MIN_COL_WIDTH = 32;
 const MAX_COL_WIDTH = 64;
 const ZOOM_STEPS = 200;
+const FIRESTORE_BATCH_CHUNK_SIZE = 450;
 
-export default function PlanningBoard() {
+const commitBatchedWrites = async (mutations: Array<(batch: WriteBatch) => void>) => {
+    for (let i = 0; i < mutations.length; i += FIRESTORE_BATCH_CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        const chunk = mutations.slice(i, i + FIRESTORE_BATCH_CHUNK_SIZE);
+        chunk.forEach((mutation) => mutation(batch));
+        await batch.commit();
+    }
+};
+
+export default function MasterSchedule() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(true);
@@ -247,8 +256,6 @@ export default function PlanningBoard() {
     const [showSmallRocks, setShowSmallRocks] = useState(true);
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-    const [capacityAlerts, setCapacityAlerts] = useState<any[]>([]);
-    const [updatingJobId, setUpdatingJobId] = useState<string | null>(null);
     const [today] = useState(() => startOfDay(new Date()));
     const [visibleDepartments, setVisibleDepartments] = useState<Set<Department>>(new Set(DEPT_ORDER));
     const [splitByProductType, setSplitByProductType] = useState(false);
@@ -513,17 +520,20 @@ export default function PlanningBoard() {
             const listId = new Date().toISOString();
             setPriorityListIdByDept(prev => ({ ...prev, [dept]: listId }));
 
-            const batch = writeBatch(db);
+            const mutations: Array<(batch: WriteBatch) => void> = [];
             const updatedJobs: Job[] = jobs.map(job => {
                 if (!job.priorityByDept?.[dept]) return job;
                 const next = { ...job.priorityByDept };
                 delete next[dept];
                 const ref = doc(db, 'jobs', job.id);
-                batch.update(ref, { priorityByDept: Object.keys(next).length ? next : deleteField() });
+                const priorityByDept = Object.keys(next).length ? next : deleteField();
+                mutations.push((batch) => batch.update(ref, { priorityByDept }));
                 return { ...job, priorityByDept: Object.keys(next).length ? next : undefined };
             });
 
-            await batch.commit();
+            if (mutations.length > 0) {
+                await commitBatchedWrites(mutations);
+            }
             setJobs(updatedJobs);
         } catch (error) {
             console.error('Failed to reset priority list:', error);
@@ -557,20 +567,17 @@ export default function PlanningBoard() {
 
         setLoading(true);
         try {
-            const batch = writeBatch(db);
-            let count = 0;
-
+            const mutations: Array<(batch: WriteBatch) => void> = [];
             jobs.forEach(job => {
                 // Safety check: only delete jobs we have IDs for
-                if (job.id) {
-                    const ref = doc(db, 'jobs', job.id);
-                    batch.delete(ref);
-                    count++;
-                }
+                if (!job.id) return;
+                const ref = doc(db, 'jobs', job.id);
+                mutations.push((batch) => batch.delete(ref));
             });
 
+            const count = mutations.length;
             if (count > 0) {
-                await batch.commit();
+                await commitBatchedWrites(mutations);
                 setJobs([]);
                 alert(`Successfully deleted ${count} jobs.`);
             }
@@ -651,12 +658,11 @@ export default function PlanningBoard() {
                 });
 
                 if (staleUpdates.length) {
-                    const batch = writeBatch(db);
-                    staleUpdates.forEach(u => {
+                    const mutations = staleUpdates.map(u => {
                         const ref = doc(db, 'jobs', u.id);
-                        batch.update(ref, u.updates);
+                        return (batch: WriteBatch) => batch.update(ref, u.updates);
                     });
-                    await batch.commit();
+                    await commitBatchedWrites(mutations);
                 }
 
                 setJobs(cleaned);
@@ -793,18 +799,6 @@ export default function PlanningBoard() {
             });
     }, [jobs, showSmallRocks, today, selectedProductTypes, minPoints, maxPoints, dueStart, dueEnd, dateFilterMode, searchQuery]); // Removed visibleDepartments dependency
 
-    // ...
-
-    {/* Right Panel: Analytics */ }
-    <aside className="h-full overflow-hidden bg-slate-900/50">
-        <DepartmentAnalyticsPanel
-            jobs={displayJobs}
-            selectedDates={selectedDates}
-            splitByProductType={splitByProductType}
-            visibleDepartments={visibleDepartments}
-        />
-    </aside>
-
     useEffect(() => {
         if (!selectedJob) return;
         const updated = jobs.find(job => job.id === selectedJob.id);
@@ -812,25 +806,6 @@ export default function PlanningBoard() {
             setSelectedJob(updated);
         }
     }, [jobs, selectedJob?.id]);
-
-    useEffect(() => {
-        if (!displayJobs.length) {
-            setCapacityAlerts([]);
-            return;
-        }
-
-        const jobsForLoad = displayJobs.map(job => ({
-            ...job,
-            departmentSchedule: job.remainingDepartmentSchedule || job.departmentSchedule
-        }));
-
-        const rangeStart = today;
-        const rangeEnd = addDays(rangeStart, 21);
-        const loads = calculateDailyLoads(jobsForLoad, rangeStart, rangeEnd);
-        const alerts = detectBottlenecks(loads, splitByProductType);
-
-        setCapacityAlerts(alerts);
-    }, [displayJobs, today]);
 
     useEffect(() => {
         if (!jobs.length) return;
@@ -874,16 +849,19 @@ export default function PlanningBoard() {
 
         const run = async () => {
             try {
-                const batch = writeBatch(db);
-                toShift.forEach(item => {
-                    batch.update(doc(db, 'jobs', item.jobId), removeUndefined(item.updates));
+                const shiftedByJobId = new Map<string, Record<string, any>>();
+                const mutations = toShift.map(item => {
+                    shiftedByJobId.set(item.jobId, item.updates);
+                    const ref = doc(db, 'jobs', item.jobId);
+                    const updates = removeUndefined(item.updates);
+                    return (batch: WriteBatch) => batch.update(ref, updates);
                 });
-                await batch.commit();
+                await commitBatchedWrites(mutations);
 
                 setJobs(prev =>
                     prev.map(job => {
-                        const match = toShift.find(item => item.jobId === job.id);
-                        return match ? { ...job, ...match.updates } : job;
+                        const match = shiftedByJobId.get(job.id);
+                        return match ? { ...job, ...match } : job;
                     })
                 );
             } catch (error) {
@@ -967,7 +945,7 @@ export default function PlanningBoard() {
                             <div className="flex items-center gap-3">
                                 <h1 className="text-lg font-black tracking-tight text-slate-800 uppercase flex items-center gap-2">
                                     <span className="w-2 h-2 rounded-full bg-blue-600 shadow-sm"></span>
-                                    Planning
+                                    Master Schedule
                                 </h1>
                                 <div className="h-4 w-px bg-slate-300 mx-1"></div>
                                 <button
@@ -1140,11 +1118,11 @@ export default function PlanningBoard() {
                                 <Upload size={16} />
                             </Link>
 
-                            <Link href="/quote-estimator" className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-100 transition-all" title="Quote Estimator">
+                            <Link href="/quote-estimator" className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-100 transition-all" title="What If Scheduler">
                                 <Calculator size={16} />
                             </Link>
 
-                            <Link href="/supervisor" className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-100 transition-all" title="Supervisor Dashboard">
+                            <Link href="/supervisor" className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-100 transition-all" title="Supervisor Schedule">
                                 <ShieldAlert size={16} />
                             </Link>
 
@@ -1340,11 +1318,13 @@ export default function PlanningBoard() {
                 />
             )}
 
-            <ScoringConfigPanel
-                isOpen={isScoringConfigOpen}
-                onClose={() => setIsScoringConfigOpen(false)}
-                onSave={handleScoringSave}
-            />
+            {isScoringConfigOpen && (
+                <ScoringConfigPanel
+                    isOpen={isScoringConfigOpen}
+                    onClose={() => setIsScoringConfigOpen(false)}
+                    onSave={handleScoringSave}
+                />
+            )}
 
             {showInsights && scheduleInsights && (
                 <ScheduleInsightsPanel
@@ -1414,7 +1394,7 @@ export default function PlanningBoard() {
                             }
 
                             const updatesByJobId = new Map<string, Partial<Job>>();
-                            const batch = writeBatch(db);
+                            const updateMutations: Array<(batch: WriteBatch) => void> = [];
 
                             for (const shift of actionableShifts) {
                                 const job = jobs.find(j => j.id === shift.jobId);
@@ -1458,12 +1438,13 @@ export default function PlanningBoard() {
                                     updatedAt: new Date()
                                 });
 
-                                batch.update(doc(db, 'jobs', job.id), updates);
+                                const ref = doc(db, 'jobs', job.id);
+                                updateMutations.push((batch) => batch.update(ref, updates));
                                 updatesByJobId.set(job.id, updates);
                             }
 
                             if (updatesByJobId.size > 0) {
-                                await batch.commit();
+                                await commitBatchedWrites(updateMutations);
                                 setJobs(prev =>
                                     prev.map(job =>
                                         updatesByJobId.has(job.id)
