@@ -29,23 +29,23 @@ export default function DesignConceptsPage() {
             <div className="absolute inset-0 z-0 bg-radial-gradient(circle, transparent 20%, #000 100%) pointer-events-none opacity-80" />
 
             {/* Simulation Controls */}
-            <div className="fixed top-4 right-4 z-50 flex gap-2 bg-black/90 p-1.5 rounded-lg border border-[#c4a484]/30 backdrop-blur-md shadow-[0_0_15px_rgba(0,0,0,0.8)]">
+            <div className="fixed top-4 right-4 z-50 flex gap-2 bg-black/90 p-1.5 rounded-lg border border-slate-700/50 backdrop-blur-md shadow-[0_0_15px_rgba(0,0,0,0.8)]">
                 <button
                     onClick={() => setView('portal')}
                     className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-all border border-transparent
                         ${view === 'portal'
-                            ? 'bg-gradient-to-b from-[#e6cba8] to-[#c4a484] text-black border-[#8b5a2b] shadow-inner'
-                            : 'text-[#c4a484] hover:text-[#e6cba8] hover:bg-white/5'}`}
+                            ? 'bg-gradient-to-b from-slate-200 to-slate-400 text-black border-slate-500 shadow-inner'
+                            : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                 >
                     Portal View
                 </button>
-                <div className="w-px bg-[#c4a484]/30 mx-1"></div>
+                <div className="w-px bg-slate-700 mx-1"></div>
                 <button
                     onClick={() => setView('supervisor')}
                     className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-all border border-transparent
                         ${view === 'supervisor'
-                            ? 'bg-gradient-to-b from-[#e6cba8] to-[#c4a484] text-black border-[#8b5a2b] shadow-inner'
-                            : 'text-[#c4a484] hover:text-[#e6cba8] hover:bg-white/5'}`}
+                            ? 'bg-gradient-to-b from-slate-200 to-slate-400 text-black border-slate-500 shadow-inner'
+                            : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                 >
                     Supervisor View
                 </button>
@@ -107,7 +107,7 @@ function PortalView() {
                     icon={<Users className="w-8 h-8" />}
                     description="Daily assignments, team roster, and shop floor management."
                     status="Active"
-                    statusColor="bg-[#c4a484]"
+                    statusColor="bg-sky-500"
                     highlight
                 />
                 <PortalCard
@@ -151,7 +151,7 @@ function PortalCard({ title, subtitle, icon, description, status, statusColor, h
     return (
         <div className={`
             group relative bg-[#222] border rounded-xl overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)]
-            ${highlight ? 'border-[#c4a484]/50 shadow-[0_0_20px_rgba(196,164,132,0.1)]' : 'border-[#333] hover:border-[#555]'}
+            ${highlight ? 'border-sky-500/50 shadow-[0_0_20px_rgba(56,189,248,0.1)]' : 'border-[#333] hover:border-[#555]'}
         `}>
             {/* Metallic Gradient Background on Hover */}
             <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -161,7 +161,7 @@ function PortalCard({ title, subtitle, icon, description, status, statusColor, h
 
             <div className="p-6 flex flex-col h-full relative z-10">
                 <div className="flex justify-between items-start mb-5">
-                    <div className={`p-3 rounded bg-gradient-to-br from-[#333] to-[#111] border border-[#444] shadow-inner text-[#c4a484] group-hover:text-[#e6cba8] transition-colors ${highlight ? 'text-[#e6cba8] border-[#c4a484]/30' : ''}`}>
+                    <div className={`p-3 rounded bg-gradient-to-br from-[#333] to-[#111] border border-[#444] shadow-inner text-slate-400 group-hover:text-white transition-colors ${highlight ? 'text-sky-300 border-sky-500/30' : ''}`}>
                         {icon}
                     </div>
                     {/* Status LED */}
@@ -171,7 +171,7 @@ function PortalCard({ title, subtitle, icon, description, status, statusColor, h
                     </div>
                 </div>
 
-                <h3 className={`text-xl font-bold font-serif uppercase tracking-wide mb-1 transition-colors ${highlight ? 'text-[#e6cba8]' : 'text-slate-200 group-hover:text-white'}`}>
+                <h3 className={`text-xl font-bold font-serif uppercase tracking-wide mb-1 transition-colors ${highlight ? 'text-sky-300' : 'text-slate-200 group-hover:text-white'}`}>
                     {title}
                 </h3>
                 <p className="text-xs font-bold text-[#666] uppercase tracking-widest mb-4 border-b border-[#333] pb-2">{subtitle}</p>
@@ -184,8 +184,8 @@ function PortalCard({ title, subtitle, icon, description, status, statusColor, h
                     <button className={`
                         px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2
                         ${highlight
-                            ? 'bg-gradient-to-b from-[#c4a484] to-[#8b5a2b] text-black shadow-[0_2px_10px_rgba(196,164,132,0.3)] hover:brightness-110'
-                            : 'bg-[#333] text-[#c4a484] border border-[#444] hover:bg-[#444] hover:border-[#666]'}
+                            ? 'bg-gradient-to-b from-sky-600 to-sky-800 text-white shadow-[0_2px_10px_rgba(56,189,248,0.3)] hover:brightness-110'
+                            : 'bg-[#333] text-slate-400 border border-[#444] hover:bg-[#444] hover:border-[#666]'}
                     `}>
                         Access Module <ChevronRight className="w-3 h-3" />
                     </button>
@@ -214,9 +214,9 @@ function SupervisorView() {
                 />
 
                 <div className="h-20 flex items-center px-6 border-b border-[#333] bg-gradient-to-b from-[#222] to-[#1a1a1a] relative">
-                    <div className="flex items-center gap-3 text-[#c4a484]">
+                    <div className="flex items-center gap-3 text-slate-400">
                         <div className="p-2 bg-[#111] border border-[#444] rounded shadow-inner">
-                            <Hammer className="w-5 h-5 drop-shadow-md" />
+                            <Hammer className="w-5 h-5 drop-shadow-md text-slate-300" />
                         </div>
                         <div>
                             <span className="block font-bold tracking-widest uppercase text-sm font-serif">Crew<span className="text-white">Deck</span></span>
@@ -229,12 +229,12 @@ function SupervisorView() {
 
                     {/* Dept Selector Gauge */}
                     <div className="bg-[#111] p-1 rounded-lg border border-[#333] shadow-inner">
-                        <div className="bg-[#222] border border-[#444] rounded p-3 relative group cursor-pointer hover:border-[#c4a484]/50 transition-colors">
+                        <div className="bg-[#222] border border-[#444] rounded p-3 relative group cursor-pointer hover:border-sky-500/50 transition-colors">
                             <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)] animate-pulse"></div>
                             <span className="text-[10px] text-[#666] uppercase tracking-widest font-bold block mb-1">Sector Control</span>
                             <div className="flex justify-between items-center">
-                                <span className="font-bold text-[#e6cba8] font-serif text-lg">WELDING A</span>
-                                <ChevronDown className="w-4 h-4 text-[#666] group-hover:text-[#c4a484]" />
+                                <span className="font-bold text-slate-200 font-serif text-lg group-hover:text-white">WELDING A</span>
+                                <ChevronDown className="w-4 h-4 text-[#666] group-hover:text-sky-400" />
                             </div>
                         </div>
                     </div>
@@ -290,7 +290,7 @@ function SupervisorView() {
                 {/* Top Bar */}
                 <div className="h-16 border-b border-[#333] bg-[#1a1a1a]/90 backdrop-blur flex items-center justify-between px-8 z-10 shadow-md">
                     <div className="flex items-center gap-6">
-                        <h2 className="text-xl font-bold text-[#e6cba8] font-serif uppercase tracking-wide">Daily Assignments</h2>
+                        <h2 className="text-xl font-bold text-slate-100 font-serif uppercase tracking-wide">Daily Assignments</h2>
                         <div className="h-6 w-px bg-[#333]"></div>
                         <div className="flex items-center gap-2 text-xs text-[#666] font-mono">
                             <span>SHIFT: 1</span>
@@ -300,7 +300,7 @@ function SupervisorView() {
                     </div>
 
                     <div className="flex items-center gap-4">
-                        <button className="px-4 py-1.5 bg-[#222] border border-[#444] rounded text-xs font-bold text-[#888] hover:text-[#c4a484] hover:border-[#c4a484] transition-all uppercase tracking-wider shadow-sm">
+                        <button className="px-4 py-1.5 bg-[#222] border border-[#444] rounded text-xs font-bold text-[#888] hover:text-white hover:border-slate-500 transition-all uppercase tracking-wider shadow-sm">
                             Print Sheet
                         </button>
                     </div>
@@ -315,7 +315,7 @@ function SupervisorView() {
                             <h3 className="font-bold text-[#888] text-xs uppercase tracking-widest flex items-center gap-2">
                                 <Grip className="w-3 h-3" /> Job Queue
                             </h3>
-                            <span className="bg-[#111] text-[#c4a484] border border-[#333] px-2 py-0.5 rounded text-xs font-mono">4</span>
+                            <span className="bg-[#111] text-sky-400 border border-[#333] px-2 py-0.5 rounded text-xs font-mono">4</span>
                         </div>
                         <div className="p-4 space-y-3 overflow-y-auto flex-1 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
                             <JobCard id="WO-4521" name="NYCHA 125th St" points={32} due="Feb 14" priority="high" />
@@ -351,7 +351,7 @@ function SupervisorView() {
                     <WorkerColumn
                         name="Tyrone J."
                         initials="TJ"
-                        color="amber"
+                        color="indigo"
                         load={44}
                         capacity={40}
                         overloaded
@@ -372,7 +372,7 @@ function NavSwitch({ icon, label, badge, active, alert }: any) {
         <div className={`
              relative group flex items-center gap-3 px-3 py-3 mx-2 rounded cursor-pointer transition-all border
             ${active
-                ? 'bg-[#222] border-[#c4a484]/50 shadow-[0_0_10px_rgba(196,164,132,0.1)]'
+                ? 'bg-[#222] border-sky-500/50 shadow-[0_0_10px_rgba(56,189,248,0.1)]'
                 : 'bg-transparent border-transparent hover:bg-[#222] hover:border-[#333]'}
         `}>
             <div className={`text-[#666] transition-colors ${active ? 'text-sky-300' : 'group-hover:text-[#ccc]'}`}>

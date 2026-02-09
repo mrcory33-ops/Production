@@ -219,10 +219,10 @@ export default function SupervisorDashboard() {
                                         )}
                                     </div>
                                     <p className="mt-2 text-xs text-slate-300 leading-relaxed">{alert.reason}</p>
-                                    {alert.isSpecialPurchase && alert.daysNeededAfterPO && (
+                                    {(alert.isSpecialPurchase || alert.isCsiNotReceived || alert.isOutOfStock) && alert.daysNeededAfterPO && (
                                         <div className="mt-1.5 text-[11px] text-sky-300 flex items-center gap-1">
                                             <Package className="w-3 h-3" />
-                                            {alert.daysNeededAfterPO} business days needed after PO received
+                                            {alert.daysNeededAfterPO} business days needed after issue clears
                                         </div>
                                     )}
                                     {alert.poReceivedEarly && (

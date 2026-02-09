@@ -43,6 +43,7 @@ export default function AlertCreateModal({
         () => selectedJobIds.map(id => jobsById.get(id)).filter(Boolean) as Job[],
         [selectedJobIds, jobsById]
     );
+    const needsPostReceiptDays = isSpecialPurchase || isCsiNotReceived || isOutOfStock;
 
     const primaryJob = selectedJobs[0] || null;
 
@@ -124,7 +125,7 @@ export default function AlertCreateModal({
                 additionalJobIds: additional.map(j => j.id),
                 additionalJobNames: additional.map(j => j.name),
                 isSpecialPurchase: isSpecialPurchase || undefined,
-                daysNeededAfterPO: isSpecialPurchase ? daysNeededAfterPO : undefined,
+                daysNeededAfterPO: needsPostReceiptDays ? daysNeededAfterPO : undefined,
                 isCsiNotReceived: isCsiNotReceived || undefined,
                 isOutOfStock: isOutOfStock || undefined
             });
@@ -288,10 +289,10 @@ export default function AlertCreateModal({
                             <Package className="w-4 h-4 text-sky-400" />
                             <span className="text-sm font-semibold text-sky-300">Special Purchase Issue</span>
                         </label>
-                        {isSpecialPurchase && (
+                        {needsPostReceiptDays && (
                             <div className="ml-6 mt-1 mb-1">
-                                <label className="text-xs font-bold uppercase tracking-wider text-sky-400">Days Needed After PO Received</label>
-                                <p className="text-[11px] text-slate-400 mt-0.5 mb-1.5">How many business days does this job need once parts arrive?</p>
+                                <label className="text-xs font-bold uppercase tracking-wider text-sky-400">Days Needed After Issue Clears</label>
+                                <p className="text-[11px] text-slate-400 mt-0.5 mb-1.5">How many business days does this job need once parts or required info are received?</p>
                                 <input
                                     type="number"
                                     min={1}

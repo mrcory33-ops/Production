@@ -363,10 +363,10 @@ export default function AlertManagementPanel({
                                     </div>
                                 </div>
 
-                                {alert.isSpecialPurchase && alert.daysNeededAfterPO && (
+                                {(alert.isSpecialPurchase || alert.isCsiNotReceived || alert.isOutOfStock) && alert.daysNeededAfterPO && (
                                     <div className="mt-2 rounded-md border border-sky-500/25 bg-sky-500/10 px-2 py-1.5 text-[11px] text-sky-200 flex items-center gap-1.5">
                                         <Package className="w-3.5 h-3.5 text-sky-400" />
-                                        <span>Special Purchase — <strong>{alert.daysNeededAfterPO} business days</strong> needed after PO received</span>
+                                        <span><strong>{alert.daysNeededAfterPO} business days</strong> needed after issue clears</span>
                                     </div>
                                 )}
 
@@ -547,3 +547,4 @@ export default function AlertManagementPanel({
         </div>
     );
 }
+
