@@ -9,8 +9,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Department, Job, SupervisorAlert } from '@/types';
-import { format } from 'date-fns';
-import { normalizeBatchText, getBatchCategory, extractGauge, extractMaterial, getDueWeekStart } from '@/lib/scheduler';
+import { format, startOfDay } from 'date-fns';
+import { normalizeBatchText, getBatchCategory, extractGauge, extractMaterial } from '@/lib/scheduler';
 import { getDepartmentStatus, subscribeToAlerts } from '@/lib/supervisorAlerts';
 import { DEPT_ORDER, DEPARTMENT_CONFIG } from '@/lib/departmentConfig';
 import AlertCreateModal from './AlertCreateModal';
@@ -490,19 +490,31 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
     }, [jobs, department, productFilter]);
 
     // Batch key: only the 8 defined categories are eligible for batching
+    // Key no longer includes week — window is controlled by the 12-business-day filter
     const getBatchKey = (j: Job): string | null => {
         const text = normalizeBatchText(j.description || '');
         const category = getBatchCategory(text);
         if (!category) return null; // Not a batchable item
         const gauge = extractGauge(text);
         const material = extractMaterial(text);
-        const weekStart = j.dueDate ? getDueWeekStart(new Date(j.dueDate)) : new Date();
-        const weekKey = format(weekStart, 'yyyy-MM-dd');
         const isStrict = Boolean(gauge && material);
         return isStrict
-            ? `strict:${category}|${gauge}|${material}|${weekKey}`
-            : `relaxed:${category}|${weekKey}`;
+            ? `strict:${category}|${gauge}|${material}`
+            : `relaxed:${category}`;
     };
+
+    // Calculate 12 business days ahead from today
+    const addBusinessDays = (from: Date, days: number): Date => {
+        const result = new Date(from);
+        let count = 0;
+        while (count < days) {
+            result.setDate(result.getDate() + 1);
+            const dow = result.getDay();
+            if (dow !== 0 && dow !== 6) count++;
+        }
+        return result;
+    };
+    const batchWindowEnd = addBusinessDays(startOfDay(new Date()), 12);
 
     // Only batch jobs in Press Brake or earlier departments
     const PRESS_BRAKE_INDEX = DEPT_ORDER.indexOf('Press Brake');
@@ -513,6 +525,8 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
         const labels: Record<string, string> = {};
         sorted.forEach(j => {
             if (!isBatchEligible(j)) return;
+            const dueDate = new Date(j.dueDate);
+            if (dueDate > batchWindowEnd) return; // Outside 12 business day window
             const key = getBatchKey(j);
             if (!key) return;
             counts[key] = (counts[key] || 0) + 1;

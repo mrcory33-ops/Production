@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInCalendarDays } from 'date-fns';
 import { Job, Department, SupervisorAlert } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
-import { normalizeBatchText, getBatchCategory, extractGauge, extractMaterial, getDueWeekStart } from '@/lib/scheduler';
+import { normalizeBatchText, getBatchCategory, extractGauge, extractMaterial } from '@/lib/scheduler';
 import SegmentEditPopover from './SegmentEditPopover';
 import JobStatusSymbols from './JobStatusSymbols';
 
@@ -637,19 +637,31 @@ export default function CustomGanttTable({
                 <tbody>
                     {(() => {
                         // Batch key: only the 8 defined categories are eligible for batching
+                        // Key no longer includes week — window is controlled by the 12-business-day filter
                         const getGanttBatchKey = (j: Job): string | null => {
                             const text = normalizeBatchText(j.description || '');
                             const category = getBatchCategory(text);
                             if (!category) return null; // Not a batchable item
                             const gauge = extractGauge(text);
                             const material = extractMaterial(text);
-                            const weekStart = j.dueDate ? getDueWeekStart(new Date(j.dueDate)) : new Date();
-                            const weekKey = format(weekStart, 'yyyy-MM-dd');
                             const isStrict = Boolean(gauge && material);
                             return isStrict
-                                ? `strict:${category}|${gauge}|${material}|${weekKey}`
-                                : `relaxed:${category}|${weekKey}`;
+                                ? `strict:${category}|${gauge}|${material}`
+                                : `relaxed:${category}`;
                         };
+
+                        // Calculate 12 business days ahead from today
+                        const addBusinessDays = (from: Date, days: number): Date => {
+                            const result = new Date(from);
+                            let count = 0;
+                            while (count < days) {
+                                result.setDate(result.getDate() + 1);
+                                const dow = result.getDay();
+                                if (dow !== 0 && dow !== 6) count++;
+                            }
+                            return result;
+                        };
+                        const batchWindowEnd = addBusinessDays(startOfDay(today), 12);
 
                         // Filter jobs first
                         const filteredJobs = jobs.filter(job => {
@@ -677,9 +689,12 @@ export default function CustomGanttTable({
                         const PRESS_BRAKE_INDEX = DEPT_ORDER.indexOf('Press Brake');
                         const isBatchEligible = (j: Job) => DEPT_ORDER.indexOf(j.currentDepartment) <= PRESS_BRAKE_INDEX;
 
+                        // Count batches within 12-business-day window
                         const batchCounts: Record<string, number> = {};
                         filteredJobs.forEach(j => {
                             if (!isBatchEligible(j)) return;
+                            const dueDate = new Date(j.dueDate);
+                            if (dueDate > batchWindowEnd) return; // Outside 12 business day window
                             const key = getGanttBatchKey(j);
                             if (!key) return;
                             batchCounts[key] = (batchCounts[key] || 0) + 1;
