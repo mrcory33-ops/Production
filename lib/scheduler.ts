@@ -105,7 +105,7 @@ export const setOvertimeConfig = (config: Partial<OvertimeConfig>) => {
 export const normalizeBatchText = (value?: string): string =>
     (value || '')
         .toLowerCase()
-        .replace(/[-_/]+/g, ' ')
+        .replace(/[-_/,;.]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 

@@ -1313,7 +1313,7 @@ export default function MasterSchedule() {
             `}</style>
             {isExportModalOpen && (
                 <ExportModal
-                    jobs={jobs}
+                    jobs={displayJobs}
                     onClose={() => setIsExportModalOpen(false)}
                 />
             )}
