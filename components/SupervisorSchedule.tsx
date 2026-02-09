@@ -10,7 +10,7 @@ import {
 import { db } from '@/lib/firebase';
 import { Department, Job, SupervisorAlert } from '@/types';
 import { format, startOfDay } from 'date-fns';
-import { normalizeBatchText, getBatchCategory, extractGauge, extractMaterial } from '@/lib/scheduler';
+import { normalizeBatchText, getBatchCategory } from '@/lib/scheduler';
 import { getDepartmentStatus, subscribeToAlerts } from '@/lib/supervisorAlerts';
 import { DEPT_ORDER, DEPARTMENT_CONFIG } from '@/lib/departmentConfig';
 import AlertCreateModal from './AlertCreateModal';
@@ -490,17 +490,12 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
     }, [jobs, department, productFilter]);
 
     // Batch key: only the 8 defined categories are eligible for batching
-    // Key no longer includes week — window is controlled by the 12-business-day filter
+    // Key is category-only — all items of the same type batch together
     const getBatchKey = (j: Job): string | null => {
         const text = normalizeBatchText(j.description || '');
         const category = getBatchCategory(text);
         if (!category) return null; // Not a batchable item
-        const gauge = extractGauge(text);
-        const material = extractMaterial(text);
-        const isStrict = Boolean(gauge && material);
-        return isStrict
-            ? `strict:${category}|${gauge}|${material}`
-            : `relaxed:${category}`;
+        return category;
     };
 
     // Calculate 12 business days ahead from today

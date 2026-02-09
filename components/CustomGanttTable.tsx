@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInCalendarDays } from 'date-fns';
 import { Job, Department, SupervisorAlert } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
-import { normalizeBatchText, getBatchCategory, extractGauge, extractMaterial } from '@/lib/scheduler';
+import { normalizeBatchText, getBatchCategory } from '@/lib/scheduler';
 import SegmentEditPopover from './SegmentEditPopover';
 import JobStatusSymbols from './JobStatusSymbols';
 
@@ -637,17 +637,13 @@ export default function CustomGanttTable({
                 <tbody>
                     {(() => {
                         // Batch key: only the 8 defined categories are eligible for batching
-                        // Key no longer includes week — window is controlled by the 12-business-day filter
+                        // Key is category-only — all items of the same type batch together
+                        // (the scheduler engine handles fine-grained gauge/material splitting internally)
                         const getGanttBatchKey = (j: Job): string | null => {
                             const text = normalizeBatchText(j.description || '');
                             const category = getBatchCategory(text);
                             if (!category) return null; // Not a batchable item
-                            const gauge = extractGauge(text);
-                            const material = extractMaterial(text);
-                            const isStrict = Boolean(gauge && material);
-                            return isStrict
-                                ? `strict:${category}|${gauge}|${material}`
-                                : `relaxed:${category}`;
+                            return category;
                         };
 
                         // Calculate 12 business days ahead from today
