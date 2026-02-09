@@ -489,26 +489,19 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
         });
     }, [jobs, department, productFilter]);
 
-    // Hybrid batch key: uses engine's getBatchCategory for known items,
-    // falls back to normalized description for any items with matching text
-    const getBatchKey = (j: Job): string => {
+    // Batch key: only the 8 defined categories are eligible for batching
+    const getBatchKey = (j: Job): string | null => {
         const text = normalizeBatchText(j.description || '');
-        if (!text) return `solo:${j.id}`; // No description = never batch
         const category = getBatchCategory(text);
+        if (!category) return null; // Not a batchable item
+        const gauge = extractGauge(text);
+        const material = extractMaterial(text);
         const weekStart = j.dueDate ? getDueWeekStart(new Date(j.dueDate)) : new Date();
         const weekKey = format(weekStart, 'yyyy-MM-dd');
-        if (category) {
-            // Known category: use strict/relaxed grouping
-            const gauge = extractGauge(text);
-            const material = extractMaterial(text);
-            const isStrict = Boolean(gauge && material);
-            return isStrict
-                ? `strict:${category}|${gauge}|${material}|${weekKey}`
-                : `relaxed:${category}|${weekKey}`;
-        }
-        // Fallback: group by exact normalized description + product type + due week
-        const type = j.productType || 'FAB';
-        return `desc:${type}|${text}|${weekKey}`;
+        const isStrict = Boolean(gauge && material);
+        return isStrict
+            ? `strict:${category}|${gauge}|${material}|${weekKey}`
+            : `relaxed:${category}|${weekKey}`;
     };
 
     // Only batch jobs in Press Brake or earlier departments
@@ -521,6 +514,7 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
         sorted.forEach(j => {
             if (!isBatchEligible(j)) return;
             const key = getBatchKey(j);
+            if (!key) return;
             counts[key] = (counts[key] || 0) + 1;
             if (!labels[key]) labels[key] = j.description || j.productType || 'FAB';
         });

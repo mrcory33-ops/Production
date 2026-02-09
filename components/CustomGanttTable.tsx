@@ -636,26 +636,19 @@ export default function CustomGanttTable({
                 </thead>
                 <tbody>
                     {(() => {
-                        // Hybrid batch key: uses engine's getBatchCategory for known items,
-                        // falls back to normalized description for any items with matching text
-                        const getGanttBatchKey = (j: Job): string => {
+                        // Batch key: only the 8 defined categories are eligible for batching
+                        const getGanttBatchKey = (j: Job): string | null => {
                             const text = normalizeBatchText(j.description || '');
-                            if (!text) return `solo:${j.id}`; // No description = never batch
                             const category = getBatchCategory(text);
+                            if (!category) return null; // Not a batchable item
+                            const gauge = extractGauge(text);
+                            const material = extractMaterial(text);
                             const weekStart = j.dueDate ? getDueWeekStart(new Date(j.dueDate)) : new Date();
                             const weekKey = format(weekStart, 'yyyy-MM-dd');
-                            if (category) {
-                                // Known category: use strict/relaxed grouping
-                                const gauge = extractGauge(text);
-                                const material = extractMaterial(text);
-                                const isStrict = Boolean(gauge && material);
-                                return isStrict
-                                    ? `strict:${category}|${gauge}|${material}|${weekKey}`
-                                    : `relaxed:${category}|${weekKey}`;
-                            }
-                            // Fallback: group by exact normalized description + product type + due week
-                            const type = j.productType || 'FAB';
-                            return `desc:${type}|${text}|${weekKey}`;
+                            const isStrict = Boolean(gauge && material);
+                            return isStrict
+                                ? `strict:${category}|${gauge}|${material}|${weekKey}`
+                                : `relaxed:${category}|${weekKey}`;
                         };
 
                         // Filter jobs first
@@ -688,18 +681,46 @@ export default function CustomGanttTable({
                         filteredJobs.forEach(j => {
                             if (!isBatchEligible(j)) return;
                             const key = getGanttBatchKey(j);
+                            if (!key) return;
                             batchCounts[key] = (batchCounts[key] || 0) + 1;
                         });
+                        // Build batch anchor dates: each batch group is positioned at
+                        // its earliest member's due date so the group stays together
+                        const batchAnchorDate: Record<string, number> = {};
+                        filteredJobs.forEach(j => {
+                            const key = getGanttBatchKey(j);
+                            if (!key) return;
+                            const count = batchCounts[key] || 0;
+                            if (count < 2) return; // Not actually in a batch group
+                            const due = new Date(j.dueDate).getTime();
+                            if (!(key in batchAnchorDate) || due < batchAnchorDate[key]) {
+                                batchAnchorDate[key] = due;
+                            }
+                        });
 
-                        // Sort: batch groups adjacent, then by due date within group
+                        // Sort: batch groups anchored at earliest member's due date,
+                        // then by individual due date within the group
                         const PRODUCT_TYPE_SORT: Record<string, number> = { DOORS: 0, FAB: 1, HARMONIC: 2 };
                         const sortedJobs = [...filteredJobs].sort((a, b) => {
+                            // Primary: product type
                             const aType = PRODUCT_TYPE_SORT[a.productType || 'FAB'] ?? 1;
                             const bType = PRODUCT_TYPE_SORT[b.productType || 'FAB'] ?? 1;
                             if (aType !== bType) return aType - bType;
-                            const aDesc = (a.description || '').trim().toLowerCase();
-                            const bDesc = (b.description || '').trim().toLowerCase();
-                            if (aDesc !== bDesc) return aDesc.localeCompare(bDesc);
+
+                            const aKey = getGanttBatchKey(a);
+                            const bKey = getGanttBatchKey(b);
+                            const aInBatch = aKey ? (batchCounts[aKey] || 0) >= 2 : false;
+                            const bInBatch = bKey ? (batchCounts[bKey] || 0) >= 2 : false;
+
+                            // Use anchor date for batched jobs, own due date for non-batch
+                            const aAnchor = (aInBatch && aKey) ? batchAnchorDate[aKey] : new Date(a.dueDate).getTime();
+                            const bAnchor = (bInBatch && bKey) ? batchAnchorDate[bKey] : new Date(b.dueDate).getTime();
+
+                            // Different anchor dates (or different batch groups) → sort by anchor
+                            if (aAnchor !== bAnchor) return aAnchor - bAnchor;
+
+                            // Same batch group → keep together, sort by batch key then due date
+                            if (aKey !== bKey) return (aKey || '').localeCompare(bKey || '');
                             return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
                         });
 
@@ -721,8 +742,8 @@ export default function CustomGanttTable({
                             // Batch group detection — only for recognized categories in Press Brake or earlier
                             const batchKey = getGanttBatchKey(job);
                             const prevBatchKey = rowIndex > 0 ? getGanttBatchKey(sortedJobs[rowIndex - 1]) : null;
-                            const jobEligible = isBatchEligible(job);
-                            const batchCount = jobEligible ? (batchCounts[batchKey] || 0) : 0;
+                            const jobEligible = isBatchEligible(job) && batchKey !== null;
+                            const batchCount = (jobEligible && batchKey) ? (batchCounts[batchKey] || 0) : 0;
                             const inBatch = batchCount >= 2;
                             const isFirstInBatch = batchKey !== prevBatchKey && inBatch;
                             const productType = job.productType || 'FAB';
