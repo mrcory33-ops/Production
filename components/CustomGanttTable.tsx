@@ -57,7 +57,6 @@ export default function CustomGanttTable({
     onDateSelect,
     alertsByJobId = {}
 }: CustomGanttTableProps) {
-    const [hoveredCell, setHoveredCell] = useState<{ row: number; col: number } | null>(null);
     const [editingSegment, setEditingSegment] = useState<{
         job: Job;
         segment: DepartmentSegment;
@@ -591,7 +590,7 @@ export default function CustomGanttTable({
                             return (
                                 <th
                                     key={colIndex}
-                                    className={`date-header ${isSelected ? 'selected' : ''} ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''} ${isSaturday(date) ? 'saturday-column' : ''}`}
+                                    className={`date-header ${isSelected ? 'selected' : ''} ${isToday ? 'today-column' : ''} ${isSaturday(date) ? 'saturday-column' : ''}`}
                                     style={{
                                         minWidth: `${columnWidth}px`,
                                         width: `${columnWidth}px`,
@@ -629,7 +628,7 @@ export default function CustomGanttTable({
                         })}
                     </tr>
                 </thead>
-                <tbody onMouseLeave={() => setHoveredCell(null)}>
+                <tbody>
                     {jobs
                         .filter(job => {
                             if (!visibleDepartments || visibleDepartments.size === 0) return true;
@@ -674,7 +673,7 @@ export default function CustomGanttTable({
                             return (
                                 <tr
                                     key={job.id}
-                                    className={`job-row ${hoveredCell?.row === rowIndex ? 'row-hover' : ''} ${isSelected ? 'row-selected' : ''}`}
+                                    className={`job-row ${isSelected ? 'row-selected' : ''}`}
                                 >
                                     <td
                                         className="sticky-job-cell"
@@ -879,9 +878,8 @@ export default function CustomGanttTable({
                                         return (
                                             <td
                                                 key={colIndex}
-                                                className={`date-cell ${hasSegmentStart ? 'has-segment' : ''} ${hoveredCell?.col === colIndex ? 'col-hover' : ''} ${isToday ? 'today-column' : ''} ${isSaturday(date) ? 'saturday-column' : ''}`}
+                                                className={`date-cell ${hasSegmentStart ? 'has-segment' : ''} ${isToday ? 'today-column' : ''} ${isSaturday(date) ? 'saturday-column' : ''}`}
                                                 style={{ minWidth: `${columnWidth}px`, width: `${columnWidth}px` }}
-                                                onMouseEnter={() => setHoveredCell({ row: rowIndex, col: colIndex })}
                                             >
                                                 {hasOverlap && (
                                                     <div className="day-split-overlay">
@@ -909,7 +907,7 @@ export default function CustomGanttTable({
                                                                     backgroundColor: segment.color,
                                                                     borderColor: segment.color,
                                                                     left: `${2}px`,
-                                                                    zIndex: segIndex,
+                                                                    zIndex: 20 + segIndex,
                                                                     cursor: onJobShiftUpdate ? 'grab' : 'default', // Shift+drag moves all
                                                                     transition: 'all 0.3s ease'
                                                                 }}
@@ -924,11 +922,43 @@ export default function CustomGanttTable({
                                                                     }
                                                                 }}
                                                             >
+                                                                {/* ── Progress Overlay (supervisor-reported) ── */}
+                                                                {(() => {
+                                                                    const progress = job.departmentProgress?.[segment.department];
+                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
+                                                                        return (
+                                                                            <div
+                                                                                className="absolute inset-0 z-[1] pointer-events-none overflow-hidden rounded-[inherit]"
+                                                                                style={{ width: `${Math.min(progress, 100)}%` }}
+                                                                            >
+                                                                                <div className="absolute inset-0 bg-white/85" />
+                                                                            </div>
+                                                                        );
+                                                                    }
+                                                                    return null;
+                                                                })()}
+                                                                {/* ── Progress % label inside bar ── */}
+                                                                {(() => {
+                                                                    const progress = job.departmentProgress?.[segment.department];
+                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
+                                                                        return (
+                                                                            <span className="absolute inset-0 flex items-center justify-center z-[3] text-[13px] font-black pointer-events-none"
+                                                                                style={{ color: segment.color || '#475569' }}>
+                                                                                {progress}%
+                                                                            </span>
+                                                                        );
+                                                                    }
+                                                                    return null;
+                                                                })()}
+
                                                                 {/* Bar Tooltip — department & dates */}
                                                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover/bar-tooltip:block pointer-events-none w-max">
                                                                     <div className="px-2.5 py-1.5 bg-slate-800 text-white rounded shadow-xl text-xs whitespace-nowrap">
                                                                         <span className="font-bold">{segment.department}</span>
                                                                         <span className="text-slate-400 ml-2">{format(segment.startDate, 'M/d')} – {format(segment.endDate, 'M/d')}</span>
+                                                                        {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && (
+                                                                            <span className="text-emerald-300 ml-2 font-bold">{job.departmentProgress[segment.department]}% done</span>
+                                                                        )}
                                                                     </div>
                                                                 </div>
 
@@ -955,18 +985,10 @@ export default function CustomGanttTable({
                                                     return null;
                                                 })}
 
-                                                {/* Job label overlay - spans all segments */}
+                                                {/* Job name label - below the bars */}
                                                 {segments.length > 0 && colIndex === segments[0].startCol && (
-                                                    <div
-                                                        className="job-label-overlay"
-                                                        style={{
-                                                            width: `${segments.reduce((sum, seg) => sum + seg.duration, 0) * columnWidth - 4}px`,
-                                                            left: '2px'
-                                                        }}
-                                                    >
-                                                        <span className="bar-label">
-                                                            {job.name}
-                                                        </span>
+                                                    <div className="bar-label-below">
+                                                        {job.name}
                                                     </div>
                                                 )}
                                             </td>

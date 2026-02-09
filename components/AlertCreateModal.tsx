@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { addDays, format } from 'date-fns';
 import { AlertTriangle, FileX2, Package, PackageX, Search, X } from 'lucide-react';
 import { Job } from '@/types';
@@ -11,6 +11,7 @@ interface AlertCreateModalProps {
     jobs: Job[];
     onClose: () => void;
     onCreated?: () => void;
+    prefillJobId?: string; // Pre-select a job when opening from CrewDeck
 }
 
 const toDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
@@ -19,7 +20,8 @@ export default function AlertCreateModal({
     isOpen,
     jobs,
     onClose,
-    onCreated
+    onCreated,
+    prefillJobId
 }: AlertCreateModalProps) {
     const [jobQuery, setJobQuery] = useState('');
     const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
@@ -58,6 +60,13 @@ export default function AlertCreateModal({
             )
             .slice(0, 20);
     }, [jobQuery, jobs]);
+
+    // Pre-fill job when opened with prefillJobId
+    useEffect(() => {
+        if (isOpen && prefillJobId && !selectedJobIds.includes(prefillJobId)) {
+            setSelectedJobIds([prefillJobId]);
+        }
+    }, [isOpen, prefillJobId]);
 
     const resetForm = () => {
         setJobQuery('');

@@ -254,10 +254,6 @@
     background: #ffffff;
 }
 
-.gantt-table tbody tr:hover td {
-    background: #f1f5f9 !important;
-}
-
 .gantt-table tbody tr:nth-child(even) .sticky-job-cell,
 .gantt-table tbody tr:nth-child(even) .job-cell-content {
     background: #f8fafc !important;
@@ -270,26 +266,6 @@
 
 .gantt-table tbody tr:nth-child(even) .date-cell {
     background: #f8fafc;
-}
-
-/* ===== CROSSHAIR HOVER ===== */
-
-.gantt-table tr.row-hover {
-    background: rgba(0, 243, 255, 0.08) !important;
-}
-
-.gantt-table tr.row-hover .sticky-job-cell {
-    background: #0e1b2b !important;
-    border-left: 3px solid #00f3ff;
-}
-
-.gantt-table tr.row-hover .date-cell {
-    background: rgba(0, 243, 255, 0.08) !important;
-}
-
-.gantt-table .date-header.col-hover,
-.gantt-table .date-cell.col-hover {
-    background: rgba(0, 243, 255, 0.06) !important;
 }
 
 /* ===== ROW SELECTION ===== */
@@ -357,11 +333,19 @@
     border-right: none;
 }
 
-.bar-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
+/* Job name label below the bar */
+.bar-label-below {
+    position: absolute;
+    top: 44px;
+    left: 2px;
     white-space: nowrap;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    font-size: 9px;
+    font-weight: 600;
+    color: #475569;
+    pointer-events: none;
+    z-index: 10;
+    letter-spacing: 0.01em;
+    line-height: 1;
 }
 
 .job-bar-segment:hover {
@@ -369,22 +353,6 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     filter: brightness(1.15);
     z-index: 50 !important;
-}
-
-/* Job label overlay - spans all segments */
-.job-label-overlay {
-    position: absolute;
-    top: 6px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    padding: 0 10px;
-    pointer-events: none;
-    z-index: 30;
-}
-
-.job-label-overlay .bar-label {
-    pointer-events: none;
 }
 
 /* Segment resize handles */

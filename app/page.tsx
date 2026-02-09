@@ -36,15 +36,6 @@ export default function HomePortal() {
       highlight: true,
     },
     {
-      title: 'Alert System',
-      subtitle: 'Blocker Reports',
-      icon: <AlertTriangle className="w-8 h-8" />,
-      description: 'Real-time issue tracking: OOS parts, machines down, personnel.',
-      status: '3 Alerts',
-      statusColor: 'bg-rose-500 animate-pulse',
-      href: '/supervisor?view=alerts',
-    },
-    {
       title: 'Quote Estimator',
       subtitle: 'Costing Engine',
       icon: <Calculator className="w-8 h-8" />,
@@ -124,15 +115,29 @@ export default function HomePortal() {
           </div>
         </header>
 
-        {/* ─── Module Grid ─── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl w-full">
-          {modules.map((mod) => (
-            <PortalCard
-              key={mod.title}
-              {...mod}
-              onClick={() => router.push(mod.href)}
-            />
-          ))}
+        {/* ─── Module Grid: 2 on top centered, 3 on bottom ─── */}
+        <div className="max-w-6xl w-full space-y-8">
+          {/* Top Row — 2 cards, centered */}
+          <div className="flex justify-center gap-8">
+            {modules.slice(0, 2).map((mod) => (
+              <div key={mod.title} className="w-full max-w-[380px]">
+                <PortalCard
+                  {...mod}
+                  onClick={() => router.push(mod.href)}
+                />
+              </div>
+            ))}
+          </div>
+          {/* Bottom Row — 3 cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {modules.slice(2).map((mod) => (
+              <PortalCard
+                key={mod.title}
+                {...mod}
+                onClick={() => router.push(mod.href)}
+              />
+            ))}
+          </div>
         </div>
 
         {/* ─── Footer Stamp ─── */}

@@ -139,7 +139,7 @@ export default function UploadPage() {
     };
 
     return (
-        <div className="min-h-screen bg-grid bg-fixed p-8 relative">
+        <div className="min-h-screen bg-gray-700 bg-grid bg-fixed p-8 relative">
             {/* Schedule Insights Panel */}
             {showInsights && scheduleInsights && (
                 <ScheduleInsightsPanel
@@ -153,8 +153,8 @@ export default function UploadPage() {
                 <button
                     onClick={() => setShowInsights(true)}
                     className={`fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-xl shadow-xl transition-all hover:scale-105 active:scale-95 ${(scheduleInsights.lateJobs.length > 0 || scheduleInsights.overloadedWeeks.length > 0)
-                            ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/30 text-white'
-                            : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/30 text-white'
+                        ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/30 text-white'
+                        : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/30 text-white'
                         }`}
                 >
                     <MessageSquareWarning className="w-5 h-5" />

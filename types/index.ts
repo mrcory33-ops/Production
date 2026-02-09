@@ -128,6 +128,8 @@ export interface Job {
     priorityByDept?: Partial<Record<Department, { value: number; setAt: string; listId: string }>>;
     noGaps?: boolean; // Override: Remove all department gaps for this job
     requiresPainting?: boolean; // HARMONIC jobs that need off-site painting (adds ~1 week to Assembly)
+    departmentProgress?: Partial<Record<Department, number>>; // Supervisor-reported % complete per department (0-100)
+    assignedWorkers?: Partial<Record<Department, string[]>>; // Workers assigned to this job per department
 
     // Due Date Change Tracking
     dueDateChanged?: boolean; // Flag: due date differs from previous upload

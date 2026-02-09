@@ -125,9 +125,9 @@ export default function QuoteEstimator({ existingJobs }: QuoteEstimatorProps) {
         : null;
 
     return (
-        <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6">
+        <div className="min-h-screen bg-gray-700 py-12 px-4 sm:px-6">
             <div className="max-w-4xl mx-auto">
-                <div className="bg-white rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.05)] overflow-hidden">
+                <div className="bg-white rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden">
                     {/* Header Section */}
                     <div className="bg-slate-900 px-8 py-10 text-white relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500 rounded-full blur-[100px] opacity-20 -mr-32 -mt-32"></div>
@@ -148,7 +148,7 @@ export default function QuoteEstimator({ existingJobs }: QuoteEstimatorProps) {
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-2">
-                                        <label className="block text-sm font-semibold text-black">
+                                        <label className="block text-sm font-semibold text-slate-300">
                                             Total Job Value ($)
                                         </label>
                                         <div className="relative">
@@ -163,7 +163,7 @@ export default function QuoteEstimator({ existingJobs }: QuoteEstimatorProps) {
                                         </div>
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="block text-sm font-semibold text-black">
+                                        <label className="block text-sm font-semibold text-slate-300">
                                             Total Quantity (Items)
                                         </label>
                                         <input
@@ -505,7 +505,7 @@ export default function QuoteEstimator({ existingJobs }: QuoteEstimatorProps) {
                     </div>
                 </div>
 
-                <p className="text-center text-slate-400 text-xs mt-8 font-medium">
+                <p className="text-center text-slate-600 text-xs mt-8 font-medium">
                     &copy; {new Date().getFullYear()} EMJAC Manufacturing Systems &bull; V7.3.0 Engine &bull; All Rights Reserved
                 </p>
             </div>
