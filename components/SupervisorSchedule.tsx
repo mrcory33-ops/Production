@@ -489,20 +489,26 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
         });
     }, [jobs, department, productFilter]);
 
-    // Batch key uses the engine's getBatchCategory for specific item matching
-    // Only the 8 recognized categories get batched (frame KD, lock seam door, etc.)
-    const getBatchKey = (j: Job): string | null => {
+    // Hybrid batch key: uses engine's getBatchCategory for known items,
+    // falls back to normalized description for any items with matching text
+    const getBatchKey = (j: Job): string => {
         const text = normalizeBatchText(j.description || '');
+        if (!text) return `solo:${j.id}`; // No description = never batch
         const category = getBatchCategory(text);
-        if (!category) return null; // Not a batchable item
-        const gauge = extractGauge(text);
-        const material = extractMaterial(text);
         const weekStart = j.dueDate ? getDueWeekStart(new Date(j.dueDate)) : new Date();
         const weekKey = format(weekStart, 'yyyy-MM-dd');
-        const isStrict = Boolean(gauge && material);
-        return isStrict
-            ? `strict:${category}|${gauge}|${material}|${weekKey}`
-            : `relaxed:${category}|${weekKey}`;
+        if (category) {
+            // Known category: use strict/relaxed grouping
+            const gauge = extractGauge(text);
+            const material = extractMaterial(text);
+            const isStrict = Boolean(gauge && material);
+            return isStrict
+                ? `strict:${category}|${gauge}|${material}|${weekKey}`
+                : `relaxed:${category}|${weekKey}`;
+        }
+        // Fallback: group by exact normalized description + product type + due week
+        const type = j.productType || 'FAB';
+        return `desc:${type}|${text}|${weekKey}`;
     };
 
     // Only batch jobs in Press Brake or earlier departments
@@ -515,7 +521,6 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
         sorted.forEach(j => {
             if (!isBatchEligible(j)) return;
             const key = getBatchKey(j);
-            if (!key) return; // Not a recognized batch category
             counts[key] = (counts[key] || 0) + 1;
             if (!labels[key]) labels[key] = j.description || j.productType || 'FAB';
         });
