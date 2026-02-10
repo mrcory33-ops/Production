@@ -10,11 +10,13 @@ import {
     scheduleAllJobs,
     addWorkDays,
     subtractWorkDays,
-    planAlertAdjustment
+    planAlertAdjustment,
+    suggestReschedule,
+    RescheduleSuggestion
 } from '@/lib/scheduler';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, format, startOfDay, differenceInDays } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator, MessageSquareWarning, Bell, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator, MessageSquareWarning, Bell, ShieldAlert, CheckSquare } from 'lucide-react';
 import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
@@ -22,6 +24,8 @@ import ExportModal from './export/ExportModal';
 import ScoringConfigPanel from './ScoringConfigPanel';
 import ScheduleInsightsPanel from './ScheduleInsightsPanel';
 import AlertManagementPanel from './AlertManagementPanel';
+import RescheduleSuggestionPopover from './RescheduleSuggestionPopover';
+import CompletedJobsPanel from './CompletedJobsPanel';
 import { calculateUrgencyScore } from '@/lib/scoring';
 import { deleteAlert, extendAlert, recordAlertAdjustment, resolveAlert, subscribeToAlerts, updateAlert } from '@/lib/supervisorAlerts';
 
@@ -276,6 +280,9 @@ export default function MasterSchedule() {
     const [showInsights, setShowInsights] = useState(false);
     const [supervisorAlerts, setSupervisorAlerts] = useState<SupervisorAlert[]>([]);
     const [showAlertPanel, setShowAlertPanel] = useState(false);
+    const [rescheduleSuggestion, setRescheduleSuggestion] = useState<RescheduleSuggestion | null>(null);
+    const [completedJobs, setCompletedJobs] = useState<Job[]>([]);
+    const [showCompletedPanel, setShowCompletedPanel] = useState(false);
 
     const columnWidth = useMemo(() => {
         const t = Math.min(1, Math.max(0, zoomLevel / ZOOM_STEPS));
@@ -610,6 +617,7 @@ export default function MasterSchedule() {
                         scheduledStartDate: toDate(data.scheduledStartDate),
                         forecastStartDate: toDate(data.forecastStartDate),
                         forecastDueDate: toDate(data.forecastDueDate),
+                        previousDueDate: toDate(data.previousDueDate as any),
                         departmentSchedule: normalizedDepartmentSchedule,
                         remainingDepartmentSchedule: normalizedRemainingSchedule
                     });
@@ -682,6 +690,41 @@ export default function MasterSchedule() {
         });
 
         return () => unsubscribe();
+    }, []);
+
+    // Fetch completed jobs (last 30 days)
+    useEffect(() => {
+        const fetchCompleted = async () => {
+            try {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const q = query(
+                    collection(db, 'jobs'),
+                    where('status', '==', 'COMPLETED'),
+                    where('updatedAt', '>=', thirtyDaysAgo)
+                );
+                const snapshot = await getDocs(q);
+                const completed: Job[] = [];
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data() as Job;
+                    completed.push({
+                        ...data,
+                        dueDate: toDate(data.dueDate) || new Date(),
+                        updatedAt: toDate((data as any).updatedAt) || new Date(),
+                    });
+                });
+                // Sort by completion date descending
+                completed.sort((a, b) => {
+                    const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                    const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                    return bTime - aTime;
+                });
+                setCompletedJobs(completed);
+            } catch (err) {
+                console.error('Failed to fetch completed jobs:', err);
+            }
+        };
+        fetchCompleted();
     }, []);
 
     const activeSupervisorAlerts = useMemo(
@@ -886,8 +929,9 @@ export default function MasterSchedule() {
         let latest = addDays(today, 30);
 
         displayJobs.forEach(job => {
-            const jobStart = job.forecastStartDate || job.scheduledStartDate || job.dueDate;
-            const jobEnd = job.forecastDueDate || job.dueDate;
+            // Use schedule windows so the chart always reflects actual segment dates.
+            const jobStart = getEarliestScheduleDate(job);
+            const jobEnd = getLatestScheduleDate(job);
 
             if (jobStart < earliest) earliest = jobStart;
             if (jobEnd > latest) latest = jobEnd;
@@ -1159,6 +1203,22 @@ export default function MasterSchedule() {
                                 )}
                             </button>
 
+                            <button
+                                onClick={() => setShowCompletedPanel(true)}
+                                className={`relative p-1.5 rounded-lg border transition-all ${completedJobs.length > 0
+                                    ? 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-200 bg-emerald-50'
+                                    : 'text-slate-600 hover:text-black hover:bg-slate-50 border-transparent hover:border-slate-200'
+                                    }`}
+                                title="Completed Jobs"
+                            >
+                                <CheckSquare size={16} />
+                                {completedJobs.length > 0 && (
+                                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold leading-4 text-center">
+                                        {completedJobs.length > 99 ? '99+' : completedJobs.length}
+                                    </span>
+                                )}
+                            </button>
+
                             <button onClick={() => setIsExportModalOpen(true)} className="p-1.5 text-slate-600 hover:text-black hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 transition-all" title="Export">
                                 <FileDown size={16} />
                             </button>
@@ -1215,6 +1275,12 @@ export default function MasterSchedule() {
                             selectedDates={selectedDates}
                             onDateSelect={setSelectedDates}
                             alertsByJobId={alertsByJobId}
+                            onRescheduleRequest={(jobId) => {
+                                const job = jobs.find(j => j.id === jobId);
+                                if (!job) return;
+                                const suggestion = suggestReschedule(job, jobs);
+                                setRescheduleSuggestion(suggestion);
+                            }}
                         />
                     ) : (
                         <div className="flex flex-1 items-center justify-center">
@@ -1236,34 +1302,38 @@ export default function MasterSchedule() {
                     )}
                 </div>
 
-                {/* Right Panel: Analytics (Slide-Out) */}
-                <aside
-                    className={`absolute top-0 right-0 z-[9999] h-full w-[320px] border-l border-slate-300 transition-transform duration-300 ${isAnalyticsOpen ? 'translate-x-0 bg-white opacity-100' : 'translate-x-[320px] bg-slate-100 opacity-100'}`}
-                    style={{ isolation: 'isolate' }}
-                >
-                    <div className="relative h-full overflow-hidden bg-white">
-                        <div className="absolute inset-0 bg-white z-40" />
-                        <div className="relative z-50 h-full">
-                            <DepartmentAnalyticsPanel
-                                jobs={displayJobs}
-                                selectedDates={selectedDates}
-                                splitByProductType={splitByProductType}
-                                visibleDepartments={visibleDepartments}
-                            />
-                        </div>
-                    </div>
-                </aside>
+                {/* Right Panel: Analytics (Slide-Out) — hidden when Completed Jobs panel is open */}
+                {!showCompletedPanel && (
+                    <>
+                        <aside
+                            className={`absolute top-0 right-0 z-[9999] h-full w-[320px] border-l border-slate-300 transition-transform duration-300 ${isAnalyticsOpen ? 'translate-x-0 bg-white opacity-100' : 'translate-x-[320px] bg-slate-100 opacity-100'}`}
+                            style={{ isolation: 'isolate' }}
+                        >
+                            <div className="relative h-full overflow-hidden bg-white">
+                                <div className="absolute inset-0 bg-white z-40" />
+                                <div className="relative z-50 h-full">
+                                    <DepartmentAnalyticsPanel
+                                        jobs={displayJobs}
+                                        selectedDates={selectedDates}
+                                        splitByProductType={splitByProductType}
+                                        visibleDepartments={visibleDepartments}
+                                    />
+                                </div>
+                            </div>
+                        </aside>
 
-                {/* Slide-Out Tab */}
-                <button
-                    onClick={() => setIsAnalyticsOpen(!isAnalyticsOpen)}
-                    className={`absolute top-1/2 -translate-y-1/2 right-0 z-[10000] h-28 w-8 rounded-l-lg border border-slate-300 bg-white text-slate-500 hover:text-blue-600 transition-all shadow-md ${isAnalyticsOpen ? 'translate-x-0' : '-translate-x-8'}`}
-                    title={isAnalyticsOpen ? 'Hide Analytics' : 'Show Analytics'}
-                >
-                    <span className="block text-[10px] font-semibold tracking-widest rotate-90">
-                        ANALYTICS
-                    </span>
-                </button>
+                        {/* Slide-Out Tab */}
+                        <button
+                            onClick={() => setIsAnalyticsOpen(!isAnalyticsOpen)}
+                            className={`absolute top-1/2 -translate-y-1/2 right-0 z-[10000] h-28 w-8 rounded-l-lg border border-slate-300 bg-white text-slate-500 hover:text-blue-600 transition-all shadow-md ${isAnalyticsOpen ? 'translate-x-0' : '-translate-x-8'}`}
+                            title={isAnalyticsOpen ? 'Hide Analytics' : 'Show Analytics'}
+                        >
+                            <span className="block text-[10px] font-semibold tracking-widest rotate-90">
+                                ANALYTICS
+                            </span>
+                        </button>
+                    </>
+                )}
             </div>
 
             <style jsx global>{`
@@ -1352,14 +1422,19 @@ export default function MasterSchedule() {
                                 : undefined
                         });
                     }}
-                    onAdjust={async (alertRecord, mode, previewDecision) => {
+                    onAdjust={async (alertRecord, mode, previewDecision, overrideDate) => {
                         try {
+                            // If an override date is provided, create a modified alert targeting that date
+                            const effectiveAlert = overrideDate
+                                ? { ...alertRecord, estimatedResolutionDate: new Date(overrideDate).toISOString() }
+                                : alertRecord;
+
                             let decision = mode === 'apply' && previewDecision
                                 ? previewDecision
-                                : planAlertAdjustment(jobs, alertRecord);
+                                : planAlertAdjustment(jobs, effectiveAlert);
 
                             if (mode === 'apply') {
-                                const liveDecision = planAlertAdjustment(jobs, alertRecord);
+                                const liveDecision = planAlertAdjustment(jobs, effectiveAlert);
                                 const previewShiftCount = decision.jobShifts.filter(shift => shift.workDays !== 0).length;
                                 const liveShiftCount = liveDecision.jobShifts.filter(shift => shift.workDays !== 0).length;
                                 if (
@@ -1505,6 +1580,89 @@ export default function MasterSchedule() {
                     }}
                     onDelete={async (alertId) => {
                         await deleteAlert(alertId);
+                    }}
+                />
+            )}
+
+            {showCompletedPanel && (
+                <CompletedJobsPanel
+                    jobs={completedJobs}
+                    onClose={() => setShowCompletedPanel(false)}
+                />
+            )}
+
+            {rescheduleSuggestion && (
+                <RescheduleSuggestionPopover
+                    suggestion={rescheduleSuggestion}
+                    onAccept={async (suggestion) => {
+                        try {
+                            const job = jobs.find(j => j.id === suggestion.jobId);
+                            if (!job) return;
+
+                            const updateMutations: Array<(batch: WriteBatch) => void> = [];
+                            const updatesByJobId = new Map<string, Partial<Job>>();
+
+                            // Update target job schedule
+                            const targetUpdates = removeUndefined({
+                                departmentSchedule: suggestion.suggestedSchedule,
+                                needsReschedule: false,
+                                dueDateChanged: false,
+                                updatedAt: new Date()
+                            });
+                            const targetRef = doc(db, 'jobs', suggestion.jobId);
+                            updateMutations.push((batch) => batch.update(targetRef, targetUpdates));
+                            updatesByJobId.set(suggestion.jobId, targetUpdates);
+
+                            // Apply Tier 2 job shifts
+                            for (const shift of suggestion.jobShifts) {
+                                const shiftJob = jobs.find(j => j.id === shift.jobId);
+                                if (!shiftJob) continue;
+
+                                const updatedDeptSched = shiftScheduleByWorkdayDelta(shiftJob.departmentSchedule, shift.workDays);
+                                const updatedRemSched = shiftScheduleByWorkdayDelta(shiftJob.remainingDepartmentSchedule, shift.workDays);
+
+                                const shiftUpdates = removeUndefined({
+                                    departmentSchedule: updatedDeptSched || shiftJob.departmentSchedule,
+                                    remainingDepartmentSchedule: updatedRemSched || shiftJob.remainingDepartmentSchedule,
+                                    updatedAt: new Date()
+                                });
+                                const shiftRef = doc(db, 'jobs', shift.jobId);
+                                updateMutations.push((batch) => batch.update(shiftRef, shiftUpdates));
+                                updatesByJobId.set(shift.jobId, shiftUpdates);
+                            }
+
+                            await commitBatchedWrites(updateMutations);
+                            setJobs(prev =>
+                                prev.map(j =>
+                                    updatesByJobId.has(j.id)
+                                        ? { ...j, ...(updatesByJobId.get(j.id) as Partial<Job>) }
+                                        : j
+                                )
+                            );
+                            setRescheduleSuggestion(null);
+                        } catch (error) {
+                            console.error('Failed to apply reschedule suggestion:', error);
+                        }
+                    }}
+                    onDismiss={async (jobId) => {
+                        try {
+                            const jobRef = doc(db, 'jobs', jobId);
+                            await updateDoc(jobRef, {
+                                needsReschedule: false,
+                                dueDateChanged: false,
+                                updatedAt: new Date()
+                            });
+                            setJobs(prev =>
+                                prev.map(j =>
+                                    j.id === jobId
+                                        ? { ...j, needsReschedule: false, dueDateChanged: false }
+                                        : j
+                                )
+                            );
+                        } catch (error) {
+                            console.error('Failed to dismiss reschedule:', error);
+                        }
+                        setRescheduleSuggestion(null);
                     }}
                 />
             )}

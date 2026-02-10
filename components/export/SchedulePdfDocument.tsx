@@ -1,15 +1,51 @@
-import { Document, Page, StyleSheet, Text } from '@react-pdf/renderer';
+import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer';
 import { Job, Department } from '@/types';
-import DepartmentSection from './DepartmentSection';
+import { format } from 'date-fns';
+import DepartmentSection, { getDepartmentExportColumns } from './DepartmentSection';
 
 const styles = StyleSheet.create({
     page: {
-        padding: 30,
+        paddingHorizontal: 30,
+        paddingTop: 84,
+        paddingBottom: 36,
         backgroundColor: '#ffffff',
+    },
+    columnHeaderContainer: {
+        position: 'absolute',
+        top: 16,
+        left: 30,
+        right: 30,
+    },
+    columnHeaderMeta: {
+        marginBottom: 6,
+        fontSize: 9,
+        fontFamily: 'Helvetica-Bold',
+        color: '#475569',
+    },
+    columnHeaderRow: {
+        flexDirection: 'row',
+        backgroundColor: '#1e293b',
+        borderStyle: 'solid',
+        borderWidth: 1,
+        borderColor: '#334155',
+        borderBottomWidth: 0,
+    },
+    columnHeaderCol: {
+        borderStyle: 'solid',
+        borderWidth: 1,
+        borderColor: '#334155',
+        borderTopWidth: 0,
+        borderLeftWidth: 0,
+    },
+    columnHeaderText: {
+        margin: 5,
+        fontSize: 10,
+        fontFamily: 'Helvetica-Bold',
+        color: '#ffffff',
     },
     footer: {
         position: 'absolute',
-        bottom: 20,
+        bottom: 10,
         left: 30,
         right: 30,
         fontSize: 8,
@@ -27,43 +63,59 @@ interface SchedulePdfDocumentProps {
 }
 
 export default function SchedulePdfDocument({ groupedJobs, departments, dateRange }: SchedulePdfDocumentProps) {
-    // Filter out departments with no jobs if we want to save paper?
-    // Req 2: "Page 1... Welding... Page 2... Assembly"
-    // implies page breaks between departments.
-    // We can use `break` prop on View, or distinct Pages.
-    // Distinct Pages gives better control over headers/footers per page.
-    // However, if a table spans multiple pages, @react-pdf handles it better within a single Page with wrapping Views?
-    // No, @react-pdf tables are tricky across pages.
-    // Safest bet for "header per department":
-    // Iterate departments.
-    // If we put them all in one Document, @react-pdf will paginate.
-    // If we use `<DepartmentSection break />`, it forces a new page for the section start.
+    const formatDateRange = () => {
+        if (dateRange.start && dateRange.end) {
+            return `${format(dateRange.start, 'MM/dd/yyyy')} - ${format(dateRange.end, 'MM/dd/yyyy')}`;
+        }
+        if (dateRange.start) return `Starting ${format(dateRange.start, 'MM/dd/yyyy')}`;
+        if (dateRange.end) return `Through ${format(dateRange.end, 'MM/dd/yyyy')}`;
+        return 'All Scheduled Dates';
+    };
 
+    const generatedAt = format(new Date(), 'MM/dd/yyyy');
     return (
         <Document title="Production Schedule Export" author="Emjac Industries">
-            <Page size="LETTER" orientation="landscape" style={styles.page}>
-                {departments.map((dept) => {
-                    const jobs = groupedJobs[dept];
-                    // Skip empty departments? 
-                    // "Iterate through user's selected departments". If selected but empty, maybe show empty?
-                    // Let's show filtered results. If user selected it, they expect a report.
+            {departments.map((dept) => {
+                const jobs = groupedJobs[dept] || [];
+                const columns = getDepartmentExportColumns(dept);
 
-                    if (!jobs) return null;
+                return (
+                    <Page key={dept} size="LETTER" orientation="landscape" style={styles.page}>
+                        <View style={styles.columnHeaderContainer} fixed>
+                            <Text style={styles.columnHeaderMeta}>
+                                {dept} | {formatDateRange()} | Generated {generatedAt}
+                            </Text>
+                            <View style={styles.columnHeaderRow}>
+                                {columns.map((col, idx) => (
+                                    <View
+                                        key={`${dept}-${col.field}`}
+                                        style={[
+                                            styles.columnHeaderCol,
+                                            {
+                                                width: col.width,
+                                                borderLeftWidth: idx === 0 ? 1 : 0
+                                            }
+                                        ]}
+                                    >
+                                        <Text style={styles.columnHeaderText}>{col.header}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        </View>
 
-                    return (
                         <DepartmentSection
-                            key={dept}
                             department={dept}
                             jobs={jobs}
                             dateRange={dateRange}
+                            showTableHeader={false}
                         />
-                    );
-                })}
 
-                <Text style={styles.footer} render={({ pageNumber, totalPages }) => (
-                    `Page ${pageNumber} of ${totalPages} - Generated on ${new Date().toLocaleDateString()} - Emjac Production Scheduler`
-                )} fixed />
-            </Page>
+                        <Text style={styles.footer} render={({ pageNumber, totalPages }) => (
+                            `Page ${pageNumber} of ${totalPages} - Emjac Production Scheduler`
+                        )} fixed />
+                    </Page>
+                );
+            })}
         </Document>
     );
 }

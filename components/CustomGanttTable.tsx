@@ -1,5 +1,7 @@
 'use client';
 
+import React from 'react';
+
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInCalendarDays } from 'date-fns';
 import { Job, Department, SupervisorAlert } from '@/types';
@@ -36,6 +38,7 @@ interface CustomGanttTableProps {
     selectedDates?: Date[];
     onDateSelect?: (dates: Date[]) => void;
     alertsByJobId?: Record<string, SupervisorAlert[]>;
+    onRescheduleRequest?: (jobId: string) => void;
 }
 
 export default function CustomGanttTable({
@@ -56,7 +59,8 @@ export default function CustomGanttTable({
     showActiveOnly = false,
     selectedDates = [],
     onDateSelect,
-    alertsByJobId = {}
+    alertsByJobId = {},
+    onRescheduleRequest
 }: CustomGanttTableProps) {
     const [editingSegment, setEditingSegment] = useState<{
         job: Job;
@@ -325,6 +329,11 @@ export default function CustomGanttTable({
         if (!schedule) return map;
 
         Object.entries(schedule).forEach(([dept, dates]) => {
+            // Respect isolated department view for overlap overlays.
+            if (visibleDepartments && visibleDepartments.size > 0 && !visibleDepartments.has(dept as Department)) {
+                return;
+            }
+
             const start = startOfDay(new Date(dates.start));
             const end = startOfDay(new Date(dates.end));
             if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
@@ -346,6 +355,18 @@ export default function CustomGanttTable({
         });
 
         return map;
+    };
+
+    const isJobScheduledInDepartmentOnDate = (job: Job, dept: Department, date: Date): boolean => {
+        const schedule = job.remainingDepartmentSchedule?.[dept] || job.departmentSchedule?.[dept];
+        if (!schedule) return false;
+
+        const start = startOfDay(new Date(schedule.start));
+        const end = startOfDay(new Date(schedule.end));
+        const target = startOfDay(date);
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+
+        return target >= start && target <= end;
     };
 
     // Refs for High-Performance Animation Loop
@@ -658,6 +679,9 @@ export default function CustomGanttTable({
                             return result;
                         };
                         const batchWindowEnd = addBusinessDays(startOfDay(today), 12);
+                        const isolatedDepartment = visibleDepartments && visibleDepartments.size === 1
+                            ? Array.from(visibleDepartments)[0]
+                            : null;
 
                         // Filter jobs first
                         const filteredJobs = jobs.filter(job => {
@@ -667,15 +691,10 @@ export default function CustomGanttTable({
                             const maxVisibleIndex = Math.max(...visibleIndices);
 
                             if (showActiveOnly) {
+                                const isScheduledToday = Array.from(visibleDepartments).some(
+                                    (dept) => isJobScheduledInDepartmentOnDate(job, dept, today)
+                                );
                                 const isCurrent = visibleDepartments.has(job.currentDepartment);
-                                const normalizedToday = startOfDay(today);
-                                const isScheduledToday = Array.from(visibleDepartments).some(dept => {
-                                    const schedule = job.departmentSchedule?.[dept] || job.remainingDepartmentSchedule?.[dept];
-                                    if (!schedule) return false;
-                                    const start = startOfDay(new Date(schedule.start));
-                                    const end = startOfDay(new Date(schedule.end));
-                                    return normalizedToday >= start && normalizedToday <= end;
-                                });
                                 return isCurrent || isScheduledToday;
                             }
                             return jobDeptIndex <= maxVisibleIndex;
@@ -759,11 +778,15 @@ export default function CustomGanttTable({
                             const isFirstInBatch = batchKey !== prevBatchKey && inBatch;
                             const productType = job.productType || 'FAB';
                             const batchAccent = productType === 'FAB' ? '#0ea5e9' : productType === 'DOORS' ? '#f59e0b' : '#8b5cf6';
+                            const highlightActiveInIsolatedView = !!isolatedDepartment && !showActiveOnly;
+                            const isCurrentInIsolatedDept = isolatedDepartment
+                                ? job.currentDepartment === isolatedDepartment
+                                : false;
 
                             return (
-                                <>
+                                <React.Fragment key={job.id}>
                                     {isFirstInBatch && (
-                                        <tr key={`batch-${batchKey}`} className="batch-header-row">
+                                        <tr className="batch-header-row">
                                             <td
                                                 colSpan={dateColumns.length + 1}
                                                 style={{ borderLeft: `3px solid ${batchAccent}` }}
@@ -777,7 +800,6 @@ export default function CustomGanttTable({
                                         </tr>
                                     )}
                                     <tr
-                                        key={job.id}
                                         className={`job-row ${isSelected ? 'row-selected' : ''}`}
                                     >
                                         <td
@@ -846,7 +868,7 @@ export default function CustomGanttTable({
                                                         </div>
                                                     )}
                                                     {/* Status Symbols — clickable with explanation popovers */}
-                                                    <JobStatusSymbols job={job} alerts={jobAlerts} />
+                                                    <JobStatusSymbols job={job} alerts={jobAlerts} onRescheduleRequest={onRescheduleRequest} />
                                                 </div>
                                                 <div
                                                     className="job-id font-extrabold tracking-wide opacity-100"
@@ -857,11 +879,11 @@ export default function CustomGanttTable({
                                                 <div className="text-[11px] text-black font-semibold mt-0.5 truncate leading-tight">
                                                     {job.description || 'No description'}
                                                 </div>
-                                                <div className="flex justify-between items-center mt-1.5 text-[9px] text-black font-mono">
+                                                <div className="flex justify-between items-center mt-1.5 text-[11px] text-black font-mono">
                                                     <span className={differenceInCalendarDays(job.dueDate, today) < 0 ? "text-red-600 font-bold" : ""}>
                                                         Due: {format(job.dueDate, 'M/d')}
                                                     </span>
-                                                    <span className="bg-slate-300 border border-slate-400 px-1 py-px rounded text-black font-semibold">
+                                                    <span className="bg-slate-300 border border-slate-400 px-1.5 py-0.5 rounded text-[11px] text-black font-bold">
                                                         {Math.round(job.weldingPoints || 0)} pts
                                                     </span>
                                                 </div>
@@ -999,89 +1021,96 @@ export default function CustomGanttTable({
                                                             ))}
                                                         </div>
                                                     )}
-                                                    {startSegments?.map(({ segment, segIndex }) => (
-                                                        <div
-                                                            key={segIndex}
-                                                            className="job-bar-segment relative group/bar-tooltip"
-                                                            style={{
-                                                                width: `${segment.duration * columnWidth - 4}px`,
-                                                                backgroundColor: segment.color,
-                                                                borderColor: segment.color,
-                                                                left: `${2}px`,
-                                                                zIndex: 20 + segIndex,
-                                                                cursor: onJobShiftUpdate ? 'grab' : 'default', // Shift+drag moves all
-                                                                transition: 'all 0.3s ease'
-                                                            }}
-                                                            onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'move')}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                if (isDragging || ignoreClickRef.current) return;
-                                                                if (onSegmentUpdate) {
-                                                                    setEditingSegment({ job, segment, segmentIndex: segIndex });
-                                                                } else {
-                                                                    onJobClick?.(job);
-                                                                }
-                                                            }}
-                                                        >
-                                                            {/* ── Progress Overlay (supervisor-reported) ── */}
-                                                            {(() => {
-                                                                const progress = job.departmentProgress?.[segment.department];
-                                                                if (progress && progress > 0 && job.currentDepartment === segment.department) {
-                                                                    return (
-                                                                        <div
-                                                                            className="absolute inset-0 z-[1] pointer-events-none overflow-hidden rounded-[inherit]"
-                                                                            style={{ width: `${Math.min(progress, 100)}%` }}
-                                                                        >
-                                                                            <div className="absolute inset-0 bg-white/85" />
-                                                                        </div>
-                                                                    );
-                                                                }
-                                                                return null;
-                                                            })()}
-                                                            {/* ── Progress % label inside bar ── */}
-                                                            {(() => {
-                                                                const progress = job.departmentProgress?.[segment.department];
-                                                                if (progress && progress > 0 && job.currentDepartment === segment.department) {
-                                                                    return (
-                                                                        <span className="absolute inset-0 flex items-center justify-center z-[3] text-[13px] font-black pointer-events-none"
-                                                                            style={{ color: segment.color || '#475569' }}>
-                                                                            {progress}%
-                                                                        </span>
-                                                                    );
-                                                                }
-                                                                return null;
-                                                            })()}
+                                                    {startSegments?.map(({ segment, segIndex }) => {
+                                                        const isActiveCurrentSegment =
+                                                            highlightActiveInIsolatedView &&
+                                                            isCurrentInIsolatedDept &&
+                                                            segment.department === isolatedDepartment;
 
-                                                            {/* Bar Tooltip — department & dates */}
-                                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover/bar-tooltip:block pointer-events-none w-max">
-                                                                <div className="px-2.5 py-1.5 bg-slate-800 text-white rounded shadow-xl text-xs whitespace-nowrap">
-                                                                    <span className="font-bold">{segment.department}</span>
-                                                                    <span className="text-slate-400 ml-2">{format(segment.startDate, 'M/d')} – {format(segment.endDate, 'M/d')}</span>
-                                                                    {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && (
-                                                                        <span className="text-emerald-300 ml-2 font-bold">{job.departmentProgress[segment.department]}% done</span>
-                                                                    )}
+                                                        return (
+                                                            <div
+                                                                key={segIndex}
+                                                                className={`job-bar-segment relative group/bar-tooltip ${isActiveCurrentSegment ? 'job-bar-segment-active-isolated' : ''}`}
+                                                                style={{
+                                                                    width: `${segment.duration * columnWidth - 4}px`,
+                                                                    backgroundColor: segment.color,
+                                                                    borderColor: segment.color,
+                                                                    left: `${2}px`,
+                                                                    zIndex: 20 + segIndex,
+                                                                    cursor: onJobShiftUpdate ? 'grab' : 'default', // Shift+drag moves all
+                                                                    transition: 'all 0.3s ease'
+                                                                }}
+                                                                onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'move')}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (isDragging || ignoreClickRef.current) return;
+                                                                    if (onSegmentUpdate) {
+                                                                        setEditingSegment({ job, segment, segmentIndex: segIndex });
+                                                                    } else {
+                                                                        onJobClick?.(job);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {/* ── Progress Overlay (supervisor-reported) ── */}
+                                                                {(() => {
+                                                                    const progress = job.departmentProgress?.[segment.department];
+                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
+                                                                        return (
+                                                                            <div
+                                                                                className="absolute inset-0 z-[1] pointer-events-none overflow-hidden rounded-[inherit]"
+                                                                                style={{ width: `${Math.min(progress, 100)}%` }}
+                                                                            >
+                                                                                <div className="absolute inset-0 bg-white/85" />
+                                                                            </div>
+                                                                        );
+                                                                    }
+                                                                    return null;
+                                                                })()}
+                                                                {/* ── Progress % label inside bar ── */}
+                                                                {(() => {
+                                                                    const progress = job.departmentProgress?.[segment.department];
+                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
+                                                                        return (
+                                                                            <span className="absolute inset-0 flex items-center justify-center z-[3] text-[13px] font-black pointer-events-none"
+                                                                                style={{ color: segment.color || '#475569' }}>
+                                                                                {progress}%
+                                                                            </span>
+                                                                        );
+                                                                    }
+                                                                    return null;
+                                                                })()}
+
+                                                                {/* Bar Tooltip — department & dates */}
+                                                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover/bar-tooltip:block pointer-events-none w-max">
+                                                                    <div className="px-2.5 py-1.5 bg-slate-800 text-white rounded shadow-xl text-xs whitespace-nowrap">
+                                                                        <span className="font-bold">{segment.department}</span>
+                                                                        <span className="text-slate-400 ml-2">{format(segment.startDate, 'M/d')} – {format(segment.endDate, 'M/d')}</span>
+                                                                        {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && (
+                                                                            <span className="text-emerald-300 ml-2 font-bold">{job.departmentProgress[segment.department]}% done</span>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
+
+                                                                {/* Resize handle - start */}
+                                                                {onSegmentUpdate && (
+                                                                    <div
+                                                                        className="segment-resize-handle segment-resize-start"
+                                                                        onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'resize', 'start')}
+                                                                        title="Drag to adjust start date"
+                                                                    />
+                                                                )}
+
+                                                                {/* Resize handle - end */}
+                                                                {onSegmentUpdate && (
+                                                                    <div
+                                                                        className="segment-resize-handle segment-resize-end"
+                                                                        onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'resize', 'end')}
+                                                                        title="Drag to adjust end date"
+                                                                    />
+                                                                )}
                                                             </div>
-
-                                                            {/* Resize handle - start */}
-                                                            {onSegmentUpdate && (
-                                                                <div
-                                                                    className="segment-resize-handle segment-resize-start"
-                                                                    onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'resize', 'start')}
-                                                                    title="Drag to adjust start date"
-                                                                />
-                                                            )}
-
-                                                            {/* Resize handle - end */}
-                                                            {onSegmentUpdate && (
-                                                                <div
-                                                                    className="segment-resize-handle segment-resize-end"
-                                                                    onMouseDown={(e) => onMouseDown(e, job, segment, segIndex, 'resize', 'end')}
-                                                                    title="Drag to adjust end date"
-                                                                />
-                                                            )}
-                                                        </div>
-                                                    ))}
+                                                        );
+                                                    })}
 
                                                     {/* Job name label - below the bars */}
                                                     {segments.length > 0 && colIndex === segments[0].startCol && (
@@ -1093,7 +1122,7 @@ export default function CustomGanttTable({
                                             );
                                         })}
                                     </tr>
-                                </>
+                                </React.Fragment>
                             );
                         });
                     })()}

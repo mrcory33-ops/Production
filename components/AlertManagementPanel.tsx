@@ -15,7 +15,8 @@ interface AlertManagementPanelProps {
     onAdjust: (
         alert: SupervisorAlert,
         mode: 'preview' | 'apply',
-        previewDecision?: AlertAdjustmentDecision
+        previewDecision?: AlertAdjustmentDecision,
+        overrideDate?: string
     ) => Promise<{ success: boolean; message: string; decision?: AlertAdjustmentDecision }>;
     onDelete: (alertId: string) => Promise<void>;
 }
@@ -71,6 +72,7 @@ export default function AlertManagementPanel({
     const [editDate, setEditDate] = useState('');
     const [adjustFeedback, setAdjustFeedback] = useState<Record<string, { success: boolean; message: string }>>({});
     const [adjustPreview, setAdjustPreview] = useState<Record<string, AlertAdjustmentDecision>>({});
+    const [manualDateOverride, setManualDateOverride] = useState<Record<string, string>>({});
 
     const activeAlerts = useMemo(
         () => alerts.filter(alert => alert.status === 'active'),
@@ -157,10 +159,10 @@ export default function AlertManagementPanel({
         }
     };
 
-    const handleAdjustPreview = async (alert: SupervisorAlert) => {
+    const handleAdjustPreview = async (alert: SupervisorAlert, overrideDate?: string) => {
         setBusyId(alert.id);
         try {
-            const result = await onAdjust(alert, 'preview');
+            const result = await onAdjust(alert, 'preview', undefined, overrideDate);
             if (result.success && result.decision) {
                 setAdjustPreview(prev => ({
                     ...prev,
@@ -482,7 +484,35 @@ export default function AlertManagementPanel({
                                         <div className="font-semibold">
                                             Suggested date: {preview.selectedStartDate || preview.requestedStartDate}
                                         </div>
-                                        <div className="mt-0.5">
+
+                                        {/* Manual date override */}
+                                        <div className="mt-2 pt-2 border-t border-indigo-500/20">
+                                            <div className="text-[10px] text-indigo-300/70 font-semibold uppercase tracking-wider mb-1">
+                                                Or enter your own date
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="date"
+                                                    value={manualDateOverride[alert.id] || ''}
+                                                    onChange={(e) => setManualDateOverride(prev => ({ ...prev, [alert.id]: e.target.value }))}
+                                                    className="rounded-lg border border-indigo-500/30 bg-indigo-950/50 text-sm text-indigo-100 px-2 py-1"
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        const dateVal = manualDateOverride[alert.id];
+                                                        if (dateVal) {
+                                                            handleAdjustPreview(alert, dateVal);
+                                                        }
+                                                    }}
+                                                    disabled={isBusy || !manualDateOverride[alert.id]}
+                                                    className="px-2.5 py-1 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white text-[11px] font-semibold disabled:opacity-50 transition-colors"
+                                                >
+                                                    Recalculate
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-2">
                                             Method: {preview.strategy ? (STRATEGY_LABEL[preview.strategy] || preview.strategy) : 'Not specified'}
                                         </div>
                                         {preview.strategy === 'move_jobs' && (
@@ -510,6 +540,11 @@ export default function AlertManagementPanel({
                                             <button
                                                 onClick={() => {
                                                     setAdjustPreview(prev => {
+                                                        const next = { ...prev };
+                                                        delete next[alert.id];
+                                                        return next;
+                                                    });
+                                                    setManualDateOverride(prev => {
                                                         const next = { ...prev };
                                                         delete next[alert.id];
                                                         return next;

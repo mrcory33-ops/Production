@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Job, Department, ProductType } from '@/types';
-import { startOfDay, endOfDay } from 'date-fns';
+import { getDepartmentWindowForExport, isDepartmentScheduledInDateRange } from '@/lib/exportSchedule';
 
 export interface ExportFilters {
     dateRange: {
@@ -11,15 +11,6 @@ export interface ExportFilters {
     bigRocksOnly: boolean;
     departments: Set<Department>;
 }
-
-const DEPARTMENT_SEQUENCE: Department[] = [
-    'Engineering',
-    'Laser',
-    'Press Brake',
-    'Welding',
-    'Polishing',
-    'Assembly',
-];
 
 export function usePdfExportFilter(
     jobs: Job[],
@@ -52,7 +43,7 @@ export function usePdfExportFilter(
         filtered.forEach(job => {
             // For each selected department, check if this job is relevant
             filters.departments.forEach(dept => {
-                if (hasWorkForDept(job, dept, filters.dateRange)) {
+                if (isDepartmentScheduledInDateRange(job, dept, filters.dateRange)) {
                     grouped[dept].push(job);
                 }
             });
@@ -60,94 +51,17 @@ export function usePdfExportFilter(
 
         // 3. Sorting
         filters.departments.forEach(dept => {
-            grouped[dept].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+            grouped[dept].sort((a, b) => {
+                const aWindow = getDepartmentWindowForExport(a, dept);
+                const bWindow = getDepartmentWindowForExport(b, dept);
+                const aStart = aWindow ? aWindow.start.getTime() : Number.MAX_SAFE_INTEGER;
+                const bStart = bWindow ? bWindow.start.getTime() : Number.MAX_SAFE_INTEGER;
+
+                if (aStart !== bStart) return aStart - bStart;
+                return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+            });
         });
 
         return grouped;
     }, [jobs, filters]);
-}
-
-function hasWorkForDept(
-    job: Job,
-    dept: Department,
-    dateRange: { start: Date | null; end: Date | null }
-): boolean {
-    const normalizedCurrentDept = normalizeDepartment(job.currentDepartment);
-    const currentDeptIndex = normalizedCurrentDept ? DEPARTMENT_SEQUENCE.indexOf(normalizedCurrentDept) : -1;
-    const targetDeptIndex = DEPARTMENT_SEQUENCE.indexOf(dept);
-
-    // If a job has already progressed beyond this department, it is not active work for that department.
-    if (currentDeptIndex !== -1 && targetDeptIndex !== -1 && currentDeptIndex > targetDeptIndex) {
-        return false;
-    }
-
-    // Prefer remaining schedule so completed departments are not exported as active work.
-    const hasRemainingSchedule = !!job.remainingDepartmentSchedule && Object.keys(job.remainingDepartmentSchedule).length > 0;
-    const schedule = hasRemainingSchedule
-        ? job.remainingDepartmentSchedule
-        : (job.departmentSchedule || job.remainingDepartmentSchedule);
-    const deptWindow = getDepartmentWindow(schedule, dept) || getFallbackWindow(job, dept);
-
-    if (!deptWindow) {
-        return false;
-    }
-
-    const deptStart = startOfDay(new Date(deptWindow.start));
-    const deptEnd = endOfDay(new Date(deptWindow.end));
-
-    if (Number.isNaN(deptStart.getTime()) || Number.isNaN(deptEnd.getTime())) {
-        return false;
-    }
-
-    const filterStart = dateRange.start ? startOfDay(dateRange.start) : null;
-    const filterEnd = dateRange.end ? endOfDay(dateRange.end) : null;
-
-    if (filterStart && deptEnd < filterStart) return false;
-    if (filterEnd && deptStart > filterEnd) return false;
-
-    return true;
-}
-
-function normalizeDepartment(value: string | undefined): Department | null {
-    if (!value) return null;
-    const normalized = value.trim().toLowerCase();
-    return DEPARTMENT_SEQUENCE.find((dept) => dept.toLowerCase() === normalized) || null;
-}
-
-function getDepartmentWindow(
-    schedule: Job['departmentSchedule'] | Job['remainingDepartmentSchedule'] | undefined,
-    dept: Department
-): { start: string; end: string } | null {
-    if (!schedule) return null;
-
-    const direct = schedule[dept];
-    if (direct) return direct;
-
-    for (const [key, value] of Object.entries(schedule)) {
-        if (normalizeDepartment(key) === dept) {
-            return value;
-        }
-    }
-
-    return null;
-}
-
-function getFallbackWindow(
-    job: Job,
-    dept: Department
-): { start: string; end: string } | null {
-    if (normalizeDepartment(job.currentDepartment) !== dept) {
-        return null;
-    }
-
-    const startCandidate = job.scheduledStartDate || job.forecastStartDate || job.dueDate;
-    const endCandidate = job.scheduledEndDate || job.forecastDueDate || job.dueDate;
-
-    const start = new Date(startCandidate);
-    const end = new Date(endCandidate);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-        return null;
-    }
-
-    return { start: start.toISOString(), end: end.toISOString() };
 }

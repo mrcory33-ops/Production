@@ -13,6 +13,8 @@ interface StatusSymbol {
     borderClass: string;
     textClass: string;
     explanation: string;
+    actionType?: 'reschedule';
+    jobId?: string;
 }
 
 function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
@@ -95,8 +97,9 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
             explanation: `The customer or sales team changed this job's due date. ` +
                 `Previous: ${prev} → Now: ${curr}. ` +
                 `The schedule was built with the old due date, so this job may need to be ` +
-                `re-prioritized or rescheduled to meet the new deadline. ` +
-                `Re-import the schedule or manually adjust dates on the Gantt chart.`
+                `re-prioritized or rescheduled to meet the new deadline.`,
+            actionType: 'reschedule',
+            jobId: job.id
         });
     }
 
@@ -204,9 +207,10 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
 
 interface SymbolButtonProps {
     symbol: StatusSymbol;
+    onRescheduleRequest?: (jobId: string) => void;
 }
 
-function SymbolButton({ symbol }: SymbolButtonProps) {
+function SymbolButton({ symbol, onRescheduleRequest }: SymbolButtonProps) {
     const [open, setOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
@@ -312,6 +316,18 @@ function SymbolButton({ symbol }: SymbolButtonProps) {
                     </div>
                     <div className="px-3 py-2.5">
                         <p className="text-[11px] text-slate-300 leading-relaxed">{symbol.explanation}</p>
+                        {symbol.actionType === 'reschedule' && onRescheduleRequest && symbol.jobId && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpen(false);
+                                    onRescheduleRequest(symbol.jobId!);
+                                }}
+                                className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold rounded transition-colors"
+                            >
+                                📅 View Suggested Placement →
+                            </button>
+                        )}
                     </div>
                 </div>,
                 document.body
@@ -323,16 +339,17 @@ function SymbolButton({ symbol }: SymbolButtonProps) {
 interface JobStatusSymbolsProps {
     job: Job;
     alerts?: SupervisorAlert[];
+    onRescheduleRequest?: (jobId: string) => void;
 }
 
-export default function JobStatusSymbols({ job, alerts }: JobStatusSymbolsProps) {
+export default function JobStatusSymbols({ job, alerts, onRescheduleRequest }: JobStatusSymbolsProps) {
     const symbols = getJobSymbols(job, alerts);
     if (symbols.length === 0) return null;
 
     return (
         <div className="flex items-center gap-0.5 shrink-0">
             {symbols.map(s => (
-                <SymbolButton key={s.key} symbol={s} />
+                <SymbolButton key={s.key} symbol={s} onRescheduleRequest={onRescheduleRequest} />
             ))}
         </div>
     );

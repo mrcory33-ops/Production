@@ -3078,6 +3078,253 @@ const schedulePipeline = (jobs: Job[]): { jobs: Job[]; insights: ScheduleInsight
     return { jobs: validated, insights };
 };
 
+// ---- Due Date Change: Smart Reschedule Suggestion ----
+
+export interface RescheduleSuggestion {
+    jobId: string;
+    jobName: string;
+    previousDueDate: string;       // ISO date
+    newDueDate: string;            // ISO date
+    currentSchedule: Record<string, { start: string; end: string }>;
+    suggestedSchedule: Record<string, { start: string; end: string }>;
+    strategy: 'direct' | 'move_jobs' | 'ot' | 'no_fit';
+    hasConflict: boolean;
+    shiftDirection: 'earlier' | 'later' | 'unchanged';
+    shiftWorkDays: number;
+    jobShifts: Array<{
+        jobId: string;
+        jobName: string;
+        workDays: number;
+        reason: string;
+    }>;
+    otRequirements?: Array<{
+        weekKey: string;
+        department: string;
+        excess: number;
+        requiredTier: 1 | 2 | 3 | 4;
+        tierLabel: string;
+        bonusPoints: number;
+    }>;
+    summary: string;
+}
+
+/**
+ * Suggest optimal placement for a job whose due date has changed.
+ * Uses 3-tier capacity-aware strategy:
+ *   Tier 1: Direct Fit — place at ideal spot if capacity allows
+ *   Tier 2: Shift Flexible Jobs — nudge non-late jobs to open slots
+ *   Tier 3: OT Coverage — calculate overtime needed for remaining excess
+ *   Fallback: warn that due date can't be met
+ */
+export const suggestReschedule = (targetJob: Job, allJobs: Job[]): RescheduleSuggestion => {
+    const MOVE_SHIFT_DAYS = 5; // Max days to nudge flexible jobs
+
+    // Safe date parser: handles Firestore Timestamps, Date objects, ISO strings
+    const safeDate = (val: any): Date | null => {
+        if (!val) return null;
+        if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+        if (typeof val?.toDate === 'function') return val.toDate();
+        const d = new Date(val);
+        return isNaN(d.getTime()) ? null : d;
+    };
+
+    const jobName = targetJob.name || targetJob.id;
+    const prevDate = safeDate(targetJob.previousDueDate);
+    const previousDueDate = prevDate ? prevDate.toISOString().split('T')[0] : '?';
+    const curDate = safeDate(targetJob.dueDate);
+    const newDueDate = curDate ? curDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+    const currentSchedule = targetJob.departmentSchedule || {};
+
+    // Step 1: Compute ideal placement with the new due date
+    const idealJob = placeIdeal(targetJob);
+    const suggestedSchedule = idealJob.departmentSchedule || {};
+
+    // Calculate shift direction and magnitude
+    const currentFirstStart = getEarliestStart(currentSchedule);
+    const suggestedFirstStart = getEarliestStart(suggestedSchedule);
+    let shiftDirection: 'earlier' | 'later' | 'unchanged' = 'unchanged';
+    let shiftWorkDays = 0;
+
+    if (currentFirstStart && suggestedFirstStart) {
+        shiftWorkDays = Math.abs(calculateWorkdayDelta(currentFirstStart, suggestedFirstStart));
+        if (suggestedFirstStart < currentFirstStart) shiftDirection = 'earlier';
+        else if (suggestedFirstStart > currentFirstStart) shiftDirection = 'later';
+    }
+
+    // Step 2: Check capacity impact of the new placement
+    // Build scenario: all jobs EXCEPT the target, + the target at new placement
+    const otherJobs = allJobs.filter(j => j.id !== targetJob.id);
+    const scenarioJobs = [...otherJobs.map(buildEffectiveCapacityJob), idealJob];
+
+    const weeklyLoad = computeWeeklyLoad(scenarioJobs);
+    const targetWeekDeptKeys = collectWeekDeptKeys(idealJob);
+    const overloads = getImpactedOverloads(weeklyLoad, targetWeekDeptKeys);
+
+    // Tier 1: Direct Fit — no overloads in the target job's slots
+    if (overloads.length === 0) {
+        const directionText = shiftDirection === 'unchanged'
+            ? 'No schedule change needed'
+            : `Moves ${shiftWorkDays} work day${shiftWorkDays !== 1 ? 's' : ''} ${shiftDirection}`;
+
+        return {
+            jobId: targetJob.id,
+            jobName,
+            previousDueDate,
+            newDueDate,
+            currentSchedule,
+            suggestedSchedule,
+            strategy: 'direct',
+            hasConflict: !!idealJob.schedulingConflict,
+            shiftDirection,
+            shiftWorkDays,
+            jobShifts: [],
+            summary: `✅ Clean fit. ${directionText}. All capacity slots are available.`
+                + (idealJob.schedulingConflict ? ' ⚠ However, the job will finish after the new due date.' : '')
+        };
+    }
+
+    // Tier 2: Try shifting non-late jobs
+    const targetJobIdSet = new Set([targetJob.id]);
+
+    // Find jobs contributing to overloaded slots that can be shifted
+    const reliefByJob = new Map<string, number>();
+    for (const overload of overloads) {
+        const contributions = weeklyLoad[overload.weekKey]?.[overload.department]?.contributions || [];
+        for (const contribution of contributions) {
+            if (targetJobIdSet.has(contribution.jobId)) continue;
+            reliefByJob.set(
+                contribution.jobId,
+                (reliefByJob.get(contribution.jobId) || 0) + contribution.pts
+            );
+        }
+    }
+
+    // Find movable candidates (non-late jobs with slack)
+    const scenarioJobsById = new Map(scenarioJobs.map(j => [j.id, j]));
+    const movableCandidates = Array.from(reliefByJob.entries())
+        .map(([jobId, reliefPoints]) => {
+            const candidate = scenarioJobsById.get(jobId);
+            if (!candidate || !candidate.departmentSchedule) return null;
+            if (isLateAgainstDueDate(candidate)) return null;
+
+            const shiftedCandidate = shiftCapacityJob(candidate, MOVE_SHIFT_DAYS);
+            if (isLateAgainstDueDate(shiftedCandidate)) return null;
+
+            return { jobId, reliefPoints, shiftedCandidate, jobName: candidate.name || candidate.id };
+        })
+        .filter((v): v is NonNullable<typeof v> => !!v)
+        .sort((a, b) => b.reliefPoints - a.reliefPoints);
+
+    if (movableCandidates.length > 0) {
+        const moveScenarioJobs = new Map(scenarioJobsById);
+        const appliedShifts: RescheduleSuggestion['jobShifts'] = [];
+
+        for (const candidate of movableCandidates) {
+            moveScenarioJobs.set(candidate.jobId, candidate.shiftedCandidate);
+            appliedShifts.push({
+                jobId: candidate.jobId,
+                jobName: candidate.jobName,
+                workDays: MOVE_SHIFT_DAYS,
+                reason: `Shift +${MOVE_SHIFT_DAYS} work days to free capacity (stays on-time)`
+            });
+
+            // Recheck overloads
+            const loadAfterMoves = computeWeeklyLoad(Array.from(moveScenarioJobs.values()));
+            const remainingOverloads = getImpactedOverloads(loadAfterMoves, targetWeekDeptKeys);
+            if (remainingOverloads.length === 0) {
+                const directionText = shiftDirection === 'unchanged'
+                    ? 'No schedule change needed'
+                    : `Moves ${shiftWorkDays} work day${shiftWorkDays !== 1 ? 's' : ''} ${shiftDirection}`;
+
+                return {
+                    jobId: targetJob.id,
+                    jobName,
+                    previousDueDate,
+                    newDueDate,
+                    currentSchedule,
+                    suggestedSchedule,
+                    strategy: 'move_jobs',
+                    hasConflict: !!idealJob.schedulingConflict,
+                    shiftDirection,
+                    shiftWorkDays,
+                    jobShifts: appliedShifts,
+                    summary: `🔄 Requires shifting ${appliedShifts.length} job${appliedShifts.length !== 1 ? 's' : ''}. ${directionText}. All shifted jobs remain on-time.`
+                        + (idealJob.schedulingConflict ? ' ⚠ However, the job will finish after the new due date.' : '')
+                };
+            }
+        }
+    }
+
+    // Tier 3: OT coverage
+    const otRequirements: RescheduleSuggestion['otRequirements'] = [];
+    let otCanCover = true;
+    for (const overload of overloads) {
+        const tier = OT_TIERS.find(t => t.bonusPts >= overload.excess);
+        if (!tier) {
+            otCanCover = false;
+            break;
+        }
+        otRequirements.push({
+            weekKey: overload.weekKey,
+            department: overload.department,
+            excess: overload.excess,
+            requiredTier: tier.tier,
+            tierLabel: tier.label,
+            bonusPoints: tier.bonusPts
+        });
+    }
+
+    if (otCanCover && otRequirements.length > 0) {
+        const maxTier = otRequirements.reduce((acc, r) => (r.requiredTier > acc ? r.requiredTier : acc), 1 as 1 | 2 | 3 | 4);
+        const directionText = shiftDirection === 'unchanged'
+            ? 'No schedule change needed'
+            : `Moves ${shiftWorkDays} work day${shiftWorkDays !== 1 ? 's' : ''} ${shiftDirection}`;
+
+        return {
+            jobId: targetJob.id,
+            jobName,
+            previousDueDate,
+            newDueDate,
+            currentSchedule,
+            suggestedSchedule,
+            strategy: 'ot',
+            hasConflict: !!idealJob.schedulingConflict,
+            shiftDirection,
+            shiftWorkDays,
+            jobShifts: [],
+            otRequirements,
+            summary: `⏱ Requires overtime (up to Tier ${maxTier}). ${directionText}. ` +
+                `${otRequirements.length} department-week slot${otRequirements.length !== 1 ? 's' : ''} need OT coverage.`
+                + (idealJob.schedulingConflict ? ' ⚠ However, the job will finish after the new due date.' : '')
+        };
+    }
+
+    // Fallback: No fit possible
+    return {
+        jobId: targetJob.id,
+        jobName,
+        previousDueDate,
+        newDueDate,
+        currentSchedule,
+        suggestedSchedule,
+        strategy: 'no_fit',
+        hasConflict: true,
+        shiftDirection,
+        shiftWorkDays,
+        jobShifts: [],
+        otRequirements,
+        summary: `⚠ Cannot cleanly meet the new due date. The ideal placement creates overloads that cannot be resolved with job moves or overtime. ` +
+            `The suggested schedule is the best-effort backward placement from the new due date.`
+    };
+};
+
+/** Helper: get earliest start date from a department schedule */
+const getEarliestStart = (schedule: Record<string, { start: string; end: string }>): Date | null => {
+    const starts = Object.values(schedule).map(s => new Date(s.start)).filter(d => !isNaN(d.getTime()));
+    if (starts.length === 0) return null;
+    return new Date(Math.min(...starts.map(d => d.getTime())));
+};
+
 // ---- Public Entry Points (updated to use pipeline) ----
 
 /**

@@ -1,6 +1,7 @@
 import { Text, View, StyleSheet } from '@react-pdf/renderer';
 import { Job, Department } from '@/types';
 import { format } from 'date-fns';
+import { getDepartmentWindowForExport, isDepartmentScheduledInDateRange } from '@/lib/exportSchedule';
 
 const styles = StyleSheet.create({
     section: {
@@ -68,18 +69,61 @@ interface DepartmentSectionProps {
     department: Department;
     jobs: Job[];
     dateRange: { start: Date | null; end: Date | null };
+    showTableHeader?: boolean;
 }
 
-export default function DepartmentSection({ department, jobs, dateRange }: DepartmentSectionProps) {
-    // Columns Configuration
-    const columns = [
-        { header: 'Job #', width: '12%', field: 'id' },
-        { header: 'Job Name', width: '18%', field: 'name' },
-        { header: 'Description', width: '32%', field: 'description' },
-        { header: 'Due Date', width: '14%', field: 'dueDate' },
-        { header: 'Points', width: '12%', field: 'weldingPoints' },
-        { header: 'Priority', width: '12%', field: 'priority' },
+type DepartmentExportField =
+    | 'jobNumber'
+    | 'jobName'
+    | 'description'
+    | 'deptStart'
+    | 'deptEnd'
+    | 'points'
+    | 'poStatus'
+    | 'priority';
+
+export interface DepartmentExportColumn {
+    header: string;
+    width: string;
+    field: DepartmentExportField;
+}
+
+export const getDepartmentExportColumns = (department: Department): DepartmentExportColumn[] => {
+    const includePoStatus = department === 'Welding' || department === 'Assembly';
+
+    const columns: DepartmentExportColumn[] = [
+        { header: 'Job #', width: includePoStatus ? '8%' : '9%', field: 'jobNumber' },
+        { header: 'Job Name', width: includePoStatus ? '14%' : '16%', field: 'jobName' },
+        { header: 'Description', width: includePoStatus ? '24%' : '30%', field: 'description' },
+        { header: 'Date Entering Depart', width: '12%', field: 'deptStart' },
+        { header: 'Depart Due Date', width: '12%', field: 'deptEnd' },
+        { header: 'Points', width: '7%', field: 'points' },
     ];
+
+    if (includePoStatus) {
+        columns.push({ header: 'PO Status', width: '11%', field: 'poStatus' });
+    }
+
+    columns.push({ header: 'Priority', width: includePoStatus ? '12%' : '14%', field: 'priority' });
+    return columns;
+};
+
+export default function DepartmentSection({ department, jobs, dateRange, showTableHeader = true }: DepartmentSectionProps) {
+    const columns = getDepartmentExportColumns(department);
+    const getPoStatus = (job: Job): string => {
+        if (job.openPOs && !job.closedPOs) return 'Open';
+        if (job.openPOs && job.closedPOs) return 'Partial';
+        if (!job.openPOs && job.closedPOs) return 'Received';
+        return '';
+    };
+
+    const rows = jobs
+        .filter((job) => isDepartmentScheduledInDateRange(job, department, dateRange))
+        .map((job) => ({
+            job,
+            departmentWindow: getDepartmentWindowForExport(job, department),
+        }))
+        .filter((entry): entry is { job: Job; departmentWindow: { start: Date; end: Date } } => !!entry.departmentWindow);
 
     const formatDateRange = () => {
         if (dateRange.start && dateRange.end) {
@@ -88,8 +132,35 @@ export default function DepartmentSection({ department, jobs, dateRange }: Depar
         return format(new Date(), 'MMMM d, yyyy');
     };
 
+    const getCellValue = (
+        field: string,
+        job: Job,
+        departmentWindow: { start: Date; end: Date }
+    ) => {
+        switch (field) {
+            case 'jobNumber':
+                return job.id;
+            case 'jobName':
+                return job.name || '-';
+            case 'description':
+                return job.description || '-';
+            case 'deptStart':
+                return format(departmentWindow.start, 'MM/dd/yy');
+            case 'deptEnd':
+                return format(departmentWindow.end, 'MM/dd/yy');
+            case 'points':
+                return Math.round(job.weldingPoints || 0);
+            case 'poStatus':
+                return getPoStatus(job);
+            case 'priority':
+                return job.priorityByDept?.[department]?.value ?? '';
+            default:
+                return '';
+        }
+    };
+
     return (
-        <View style={styles.section} break>
+        <View style={styles.section}>
             <View style={styles.header}>
                 <Text>{department} Schedule</Text>
                 <Text style={styles.headerDate}>{formatDateRange()}</Text>
@@ -97,16 +168,18 @@ export default function DepartmentSection({ department, jobs, dateRange }: Depar
 
             <View style={styles.table}>
                 {/* Table Header */}
-                <View style={[styles.tableRow, styles.tableHeaderRow]}>
-                    {columns.map((col, idx) => (
-                        <View key={idx} style={[styles.tableCol, { width: col.width, borderColor: '#334155' }]}>
-                            <Text style={styles.tableHeaderCell}>{col.header}</Text>
-                        </View>
-                    ))}
-                </View>
+                {showTableHeader && (
+                    <View style={[styles.tableRow, styles.tableHeaderRow]}>
+                        {columns.map((col, idx) => (
+                            <View key={idx} style={[styles.tableCol, { width: col.width, borderColor: '#334155' }]}>
+                                <Text style={styles.tableHeaderCell}>{col.header}</Text>
+                            </View>
+                        ))}
+                    </View>
+                )}
 
                 {/* Table Rows */}
-                {jobs.map((job, rowIdx) => (
+                {rows.map(({ job, departmentWindow }, rowIdx) => (
                     <View
                         key={job.id}
                         style={[
@@ -114,34 +187,17 @@ export default function DepartmentSection({ department, jobs, dateRange }: Depar
                             { backgroundColor: rowIdx % 2 === 1 ? '#f8fafc' : '#ffffff' }
                         ]}
                     >
-                        <View style={[styles.tableCol, { width: columns[0].width }]}>
-                            <Text style={styles.tableCell}>{job.id}</Text>
-                        </View>
-                        <View style={[styles.tableCol, { width: columns[1].width }]}>
-                            <Text style={styles.tableCell}>{job.name}</Text>
-                        </View>
-                        <View style={[styles.tableCol, { width: columns[2].width }]}>
-                            <Text style={styles.tableCell}>{job.description}</Text>
-                        </View>
-                        <View style={[styles.tableCol, { width: columns[3].width }]}>
-                            <Text style={styles.tableCell}>
-                                {job.dueDate ? format(new Date(job.dueDate), 'MM/dd/yy') : '-'}
-                            </Text>
-                        </View>
-                        <View style={[styles.tableCol, { width: columns[4].width }]}>
-                            <Text style={styles.tableCell}>
-                                {Math.round(job.weldingPoints || 0)}
-                            </Text>
-                        </View>
-                        <View style={[styles.tableCol, { width: columns[5].width }]}>
-                            <Text style={styles.tableCell}>
-                                {job.priorityByDept?.[department]?.value ?? ''}
-                            </Text>
-                        </View>
+                        {columns.map((col, colIdx) => (
+                            <View key={`${job.id}-${col.field}-${colIdx}`} style={[styles.tableCol, { width: col.width }]}>
+                                <Text style={styles.tableCell}>
+                                    {getCellValue(col.field, job, departmentWindow)}
+                                </Text>
+                            </View>
+                        ))}
                     </View>
                 ))}
 
-                {jobs.length === 0 && (
+                {rows.length === 0 && (
                     <View style={[styles.tableRow, { padding: 20, justifyContent: 'center' }]}>
                         <Text style={{ fontSize: 10, color: '#94a3b8', fontStyle: 'italic' }}>
                             No jobs scheduled for this period.
