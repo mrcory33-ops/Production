@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emjac Production Scheduler — Complete Scheduling Logic Reference</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface2: #334155;
+            --border: #475569;
+            --text: #e2e8f0;
+            --text-dim: #94a3b8;
+            --accent: #3b82f6;
+            --accent2: #8b5cf6;
+            --green: #10b981;
+            --red: #ef4444;
+            --amber: #f59e0b;
+            --cyan: #06b6d4;
+            --pink: #ec4899
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            padding: 0
+        }
+
+        .hero {
+            background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 50%, #1a1033 100%);
+            padding: 80px 40px;
+            text-align: center;
+            border-bottom: 1px solid var(--border)
+        }
+
+        .hero h1 {
+            font-size: 3rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, var(--accent), var(--accent2), var(--cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 12px;
+            letter-spacing: -1px
+        }
+
+        .hero p {
+            color: var(--text-dim);
+            font-size: 1.1rem;
+            max-width: 700px;
+            margin: 0 auto
+        }
+
+        .hero .badge {
+            display: inline-block;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 4px 16px;
+            font-size: .8rem;
+            color: var(--cyan);
+            margin-top: 16px;
+            font-weight: 600
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 32px
+        }
+
+        .toc {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 48px
+        }
+
+        .toc h2 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 16px
+        }
+
+        .toc ol {
+            padding-left: 24px
+        }
+
+        .toc li {
+            margin: 6px 0
+        }
+
+        .toc a {
+            color: var(--cyan);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color .2s
+        }
+
+        .toc a:hover {
+            color: var(--accent)
+        }
+
+        section {
+            margin-bottom: 56px
+        }
+
+        h2 {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--accent);
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--surface2);
+            letter-spacing: -0.5px
+        }
+
+        h3 {
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: var(--text);
+            margin: 28px 0 12px
+        }
+
+        h4 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--cyan);
+            margin: 20px 0 8px
+        }
+
+        p {
+            margin-bottom: 14px;
+            color: var(--text-dim)
+        }
+
+        strong {
+            color: var(--text)
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0 24px;
+            background: var(--surface);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border)
+        }
+
+        th {
+            background: var(--surface2);
+            color: var(--text);
+            font-weight: 700;
+            text-align: left;
+            padding: 12px 16px;
+            font-size: .85rem;
+            text-transform: uppercase;
+            letter-spacing: .5px
+        }
+
+        td {
+            padding: 10px 16px;
+            border-top: 1px solid var(--border);
+            font-size: .92rem;
+            color: var(--text-dim)
+        }
+
+        tr:hover td {
+            background: rgba(59, 130, 246, .05)
+        }
+
+        .formula {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin: 14px 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: .9rem;
+            color: var(--cyan);
+            overflow-x: auto
+        }
+
+        .callout {
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin: 16px 0;
+            font-size: .92rem;
+            border-left: 4px solid
+        }
+
+        .callout.info {
+            background: rgba(59, 130, 246, .08);
+            border-color: var(--accent);
+            color: var(--text-dim)
+        }
+
+        .callout.warn {
+            background: rgba(245, 158, 11, .08);
+            border-color: var(--amber);
+            color: var(--text-dim)
+        }
+
+        .callout.critical {
+            background: rgba(239, 68, 68, .08);
+            border-color: var(--red);
+            color: var(--text-dim)
+        }
+
+        .callout.success {
+            background: rgba(16, 185, 129, .08);
+            border-color: var(--green);
+            color: var(--text-dim)
+        }
+
+        .callout strong {
+            color: var(--text)
+        }
+
+        .phase-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 24px;
+            margin: 16px 0
+        }
+
+        .phase-card .phase-num {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            font-weight: 800;
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-size: .85rem;
+            margin-bottom: 10px
+        }
+
+        .phase-card h3 {
+            margin-top: 0;
+            color: var(--text)
+        }
+
+        .flow {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 16px 0
+        }
+
+        .flow .step {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: .85rem;
+            font-weight: 600;
+            color: var(--text)
+        }
+
+        .flow .arrow {
+            color: var(--accent);
+            font-size: 1.2rem
+        }
+
+        .color-dot {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            vertical-align: middle;
+            margin-right: 6px;
+            border: 2px solid rgba(255, 255, 255, .2)
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px
+        }
+
+        @media(max-width:768px) {
+            .grid-2 {
+                grid-template-columns: 1fr
+            }
+
+            .hero h1 {
+                font-size: 2rem
+            }
+
+            .container {
+                padding: 24px 16px
+            }
+        }
+
+        ul {
+            padding-left: 24px;
+            margin: 8px 0 16px
+        }
+
+        li {
+            margin: 4px 0;
+            color: var(--text-dim)
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--surface2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: .85em;
+            color: var(--cyan)
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 6px;
+            font-size: .75rem;
+            font-weight: 700;
+            margin-right: 6px
+        }
+
+        .tag-fab {
+            background: rgba(59, 130, 246, .15);
+            color: var(--accent)
+        }
+
+        .tag-doors {
+            background: rgba(239, 68, 68, .15);
+            color: var(--red)
+        }
+
+        .tag-harmonic {
+            background: rgba(139, 92, 246, .15);
+            color: var(--accent2)
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="hero">
+        <h1>Emjac Production Scheduler</h1>
+        <p>Complete Reference Guide — Every Algorithm, Rule, and Decision That Drives the Scheduling Engine</p>
+        <div class="badge">February 2026 · v2.0</div>
+    </div>
+
+    <div class="container">
+
+        <!-- TABLE OF CONTENTS -->
+        <div class="toc">
+            <h2>📋 Table of Contents</h2>
+            <ol>
+                <li><a href="#pipeline">The 5-Phase Scheduling Pipeline</a></li>
+                <li><a href="#departments">Department Configurations & Worker Pools</a></li>
+                <li><a href="#duration">Duration Calculation Engine</a></li>
+                <li><a href="#products">Product-Type Routing (FAB / DOORS / HARMONIC)</a></li>
+                <li><a href="#door-welding">Door Welding Sub-Pipeline</a></li>
+                <li><a href="#batching">Batching Logic</a></li>
+                <li><a href="#urgency">Urgency Scoring System</a></li>
+                <li><a href="#capacity">Capacity Buckets & Weekly Load</a></li>
+                <li><a href="#overtime">Overtime Tier System</a></li>
+                <li><a href="#calendar">Work Calendar & Gap Rules</a></li>
+                <li><a href="#data">Data Import & Synchronization</a></li>
+            </ol>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 1: 5-PHASE PIPELINE -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="pipeline">
+            <h2>1. The 5-Phase Scheduling Pipeline</h2>
+            <p>Every time jobs are imported or recalculated, they pass through a <strong>5-Phase Pipeline</strong> in
+                <code>schedulePipeline()</code>. Each phase transforms the schedule incrementally.</p>
+
+            <div class="flow">
+                <div class="step">Phase 1: Ideal Placement</div><span class="arrow">→</span>
+                <div class="step">Phase 2: Capacity Audit</div><span class="arrow">→</span>
+                <div class="step">Phase 3: Compression</div><span class="arrow">→</span>
+                <div class="step">Phase 4: Validation</div><span class="arrow">→</span>
+                <div class="step">Phase 5: Analysis</div>
+            </div>
+
+            <div class="phase-card">
+                <div class="phase-num">Phase 1</div>
+                <h3>Ideal Placement (No Capacity Checking)</h3>
+                <p>Every job gets an "ideal" schedule based purely on its due date and durations — <strong>no capacity
+                        limits are enforced</strong>.</p>
+                <h4>Overdue Jobs (Forward from Today)</h4>
+                <ul>
+                    <li>Jobs whose due date is <strong>in the past</strong> are identified first.</li>
+                    <li>Sorted by <strong>most overdue first</strong> (days past due, descending).</li>
+                    <li>Scheduled <strong>forward from today</strong> — starting at the job's current department and
+                        working through remaining departments.</li>
+                    <li>These jobs reserve capacity in <code>CapacityBuckets</code>, ensuring they get first priority.
+                    </li>
+                </ul>
+                <h4>On-Time Jobs (Backward from Due Date)</h4>
+                <ul>
+                    <li>Sorted by <strong>due date ascending</strong>, then by size (welding points).</li>
+                    <li>Reordered by the <strong>batch ordering algorithm</strong> (see Section 6) to cluster similar
+                        jobs together.</li>
+                    <li>Urgency scores are computed for each job.</li>
+                    <li>Scheduled <strong>backward from the due date</strong>: Assembly finishes first (due date minus
+                        1-day buffer), then each preceding department is placed before it.</li>
+                    <li>If any department would start before today, the <strong>entire job is shifted forward</strong>
+                        so the earliest department starts today.</li>
+                </ul>
+            </div>
+
+            <div class="phase-card">
+                <div class="phase-num">Phase 2</div>
+                <h3>Capacity Audit</h3>
+                <p>Computes <strong>weekly load</strong> across all departments. Counts how many week-department pairs
+                    exceed the weekly target of <strong>850 points</strong>. This is a diagnostic step — it doesn't move
+                    jobs, but sets up data for Phase 3.</p>
+            </div>
+
+            <div class="phase-card">
+                <div class="phase-num">Phase 3</div>
+                <h3>Compression (Load Balancing)</h3>
+                <p>Iteratively pushes flexible jobs <strong>later (toward their due date)</strong> to relieve overloaded
+                    near-term weeks. Runs up to <strong>10 passes</strong>:</p>
+                <ul>
+                    <li>Identifies overloaded week-department pairs (exceeding 850 pts/week).</li>
+                    <li>Sorts overloads by <strong>highest excess first</strong>.</li>
+                    <li>For each overloaded pair, finds <strong>moveable jobs</strong>:
+                        <ul>
+                            <li>Must have ≥ 3 work days of <strong>forward slack</strong> (gap between last department
+                                end and due date).</li>
+                            <li>Must NOT be overdue.</li>
+                            <li>Sorted by most forward slack first, then smallest jobs first (easiest to move).</li>
+                        </ul>
+                    </li>
+                    <li>Attempts to shift each candidate <strong>5, 3, or 1 work days later</strong>. Accepts the first
+                        shift that doesn't push the job past its due date.</li>
+                    <li>Stops early if a pass makes no moves (balanced), or after 10 passes.</li>
+                </ul>
+            </div>
+
+            <div class="phase-card">
+                <div class="phase-num">Phase 4</div>
+                <h3>Validation</h3>
+                <p>Final check on every job:</p>
+                <ul>
+                    <li><strong>Due Date Check:</strong> Does the last department end <em>after</em> the due date? → Job
+                        is flagged as <code>schedulingConflict</code> and status set to <code>SLIPPING</code>.</li>
+                    <li><strong>Sequence Check:</strong> Are departments in the correct order? (Each department must
+                        start after the previous one ends.) → If out of order, status is <code>STALLED</code>.</li>
+                    <li>Jobs that pass both checks are <code>ON_TRACK</code>.</li>
+                </ul>
+            </div>
+
+            <div class="phase-card">
+                <div class="phase-num">Phase 5</div>
+                <h3>Schedule Analysis (Decision Support)</h3>
+                <p>Generates actionable insights for management:</p>
+                <ul>
+                    <li><strong>Late Job Detection:</strong> Identifies all jobs that will miss their due date and
+                        calculates days late.</li>
+                    <li><strong>Overloaded Weeks:</strong> Lists every week-department pair exceeding 850 pts.</li>
+                    <li><strong>Move Options:</strong> Suggests which jobs could be moved (from Engineering/Laser) to
+                        relieve bottlenecks without causing them to miss their own due date.</li>
+                    <li><strong>OT Recommendations:</strong> Recommends which overtime tier would resolve each
+                        overloaded week (see Section 9).</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 2: DEPARTMENTS -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="departments">
+            <h2>2. Department Configurations & Worker Pools</h2>
+            <p>The shop has <strong>6 production departments</strong>, each with its own worker count, output rate, and
+                capacity. Some departments have <strong>split pools</strong> for different product types.</p>
+
+            <div class="flow">
+                <div class="step"><span class="color-dot" style="background:#3b82f6"></span>Engineering</div><span
+                    class="arrow">→</span>
+                <div class="step"><span class="color-dot" style="background:#f97316"></span>Laser</div><span
+                    class="arrow">→</span>
+                <div class="step"><span class="color-dot" style="background:#eab308"></span>Press Brake</div><span
+                    class="arrow">→</span>
+                <div class="step"><span class="color-dot" style="background:#ef4444"></span>Welding</div><span
+                    class="arrow">→</span>
+                <div class="step"><span class="color-dot" style="background:#14b8a6"></span>Polishing</div><span
+                    class="arrow">→</span>
+                <div class="step"><span class="color-dot" style="background:#8b5cf6"></span>Assembly</div>
+            </div>
+
+            <table>
+                <tr>
+                    <th>Department</th>
+                    <th>Workers</th>
+                    <th>Output/Day</th>
+                    <th>Daily Capacity</th>
+                    <th>Max Per Project</th>
+                    <th>Notes</th>
+                </tr>
+                <tr>
+                    <td><span class="color-dot" style="background:#3b82f6"></span><strong>Engineering</strong></td>
+                    <td>9</td>
+                    <td>22 pts/day</td>
+                    <td>198 pts</td>
+                    <td>1</td>
+                    <td>Parallelism disabled</td>
+                </tr>
+                <tr>
+                    <td><span class="color-dot" style="background:#f97316"></span><strong>Laser</strong></td>
+                    <td>3</td>
+                    <td>67.5 pts/day</td>
+                    <td>202.5 pts</td>
+                    <td>2</td>
+                    <td>Requires "Ready to Nest" flag</td>
+                </tr>
+                <tr>
+                    <td><span class="color-dot" style="background:#eab308"></span><strong>Press Brake</strong></td>
+                    <td>6</td>
+                    <td>33 pts/day</td>
+                    <td>198 pts</td>
+                    <td>4</td>
+                    <td>—</td>
+                </tr>
+                <tr>
+                    <td><span class="color-dot" style="background:#ef4444"></span><strong>Welding</strong></td>
+                    <td>13 total</td>
+                    <td>15 pts/day</td>
+                    <td>195 pts</td>
+                    <td>—</td>
+                    <td>Split pools (see below)</td>
+                </tr>
+                <tr>
+                    <td><span class="color-dot" style="background:#14b8a6"></span><strong>Polishing</strong></td>
+                    <td>11 total</td>
+                    <td>18 pts/day</td>
+                    <td>198 pts</td>
+                    <td>—</td>
+                    <td>Split pools (see below)</td>
+                </tr>
+                <tr>
+                    <td><span class="color-dot" style="background:#8b5cf6"></span><strong>Assembly</strong></td>
+                    <td>12</td>
+                    <td>16 pts/day</td>
+                    <td>192 pts</td>
+                    <td>3</td>
+                    <td>1.25× time multiplier</td>
+                </tr>
+            </table>
+
+            <h3>Split Worker Pools (Welding & Polishing)</h3>
+            <p>Welding and Polishing have separate pools for different product lines. A DOORS job
+                <strong>cannot</strong> use FAB capacity and vice versa.</p>
+
+            <table>
+                <tr>
+                    <th>Department</th>
+                    <th>Pool</th>
+                    <th>Workers</th>
+                    <th>Handles</th>
+                </tr>
+                <tr>
+                    <td rowspan="2"><strong>Welding</strong></td>
+                    <td>Pool 1 (DOORS)</td>
+                    <td>6 workers @ 15 pts/day</td>
+                    <td><span class="tag tag-doors">DOORS</span></td>
+                </tr>
+                <tr>
+                    <td>Pool 2 (FAB/HARMONIC)</td>
+                    <td>7 workers @ 15 pts/day</td>
+                    <td><span class="tag tag-fab">FAB</span> <span class="tag tag-harmonic">HARMONIC</span></td>
+                </tr>
+                <tr>
+                    <td rowspan="2"><strong>Polishing</strong></td>
+                    <td>Pool 1 (FAB/HARMONIC)</td>
+                    <td>6 workers @ 18 pts/day</td>
+                    <td><span class="tag tag-fab">FAB</span> <span class="tag tag-harmonic">HARMONIC</span></td>
+                </tr>
+                <tr>
+                    <td>Pool 2 (DOORS)</td>
+                    <td>5 workers @ 18 pts/day</td>
+                    <td><span class="tag tag-doors">DOORS</span></td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 3: DURATION -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="duration">
+            <h2>3. Duration Calculation Engine</h2>
+            <p>The system calculates how many <strong>work days</strong> a job needs in each department using two
+                functions: <code>calculateDeptDuration()</code> (low-level) and <code>calculateAllDurations()</code>
+                (job-level wrapper).</p>
+
+            <h3>Standard Formula</h3>
+            <div class="formula">Duration = (Job Points / (Effective Workers × Output Per Day)) × Time Multiplier</div>
+            <ul>
+                <li><strong>Effective Workers</strong> = <code>min(maxPerProject, poolWorkerCount)</code></li>
+                <li><strong>Rounding:</strong> All durations are rounded up to the nearest <strong>0.5 days</strong>
+                    (half-day precision).</li>
+                <li><strong>Minimum:</strong> Every department that has work gets at least <strong>0.5 days</strong>.
+                </li>
+            </ul>
+
+            <h3>Special Duration Rules</h3>
+            <table>
+                <tr>
+                    <th>Rule</th>
+                    <th>Trigger</th>
+                    <th>Effect</th>
+                </tr>
+                <tr>
+                    <td><strong>Door Leaf Minimum</strong></td>
+                    <td><code>productType === 'DOORS'</code></td>
+                    <td>Minimum <strong>2 days</strong> in Welding</td>
+                </tr>
+                <tr>
+                    <td><strong>NYCHA Minimum</strong></td>
+                    <td>Job name contains "NYCHA"</td>
+                    <td>Minimum <strong>3 days</strong> in Welding</td>
+                </tr>
+                <tr>
+                    <td><strong>Assembly Multiplier</strong></td>
+                    <td>All jobs</td>
+                    <td>Assembly gets a <strong>1.25×</strong> time multiplier</td>
+                </tr>
+                <tr>
+                    <td><strong>HARMONIC Painting</strong></td>
+                    <td><code>requiresPainting === true</code></td>
+                    <td>Assembly gains <strong>+8–9 days</strong> (5 days painting + 3–4 days post-paint)</td>
+                </tr>
+                <tr>
+                    <td><strong>Door Welding Sub-Pipeline</strong></td>
+                    <td><code>productType === 'DOORS'</code> in Welding</td>
+                    <td>Quantity-driven throughput replaces point-based calc (see Section 5)</td>
+                </tr>
+            </table>
+
+            <h3>Batch Size Efficiency Discount</h3>
+            <p>When multiple similar jobs are batched together (same category, gauge, material, due week), their batch
+                count is passed into the duration calculation. Currently tracked for scheduling order optimization but
+                does not directly alter duration values.</p>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 4: PRODUCT TYPES -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="products">
+            <h2>4. Product-Type Routing</h2>
+            <p>Every job is classified as one of three product types based on the <code>DIVISION</code> column from the
+                Excel import. This determines which worker pool handles the job.</p>
+
+            <table>
+                <tr>
+                    <th>Product Type</th>
+                    <th>Source</th>
+                    <th>Welding Pool</th>
+                    <th>Polishing Pool</th>
+                    <th>Special Rules</th>
+                </tr>
+                <tr>
+                    <td><span class="tag tag-fab">FAB</span></td>
+                    <td>Division = "F" or missing</td>
+                    <td>Pool 2 (7 workers)</td>
+                    <td>Pool 1 (6 workers)</td>
+                    <td>Standard fabrication, default type</td>
+                </tr>
+                <tr>
+                    <td><span class="tag tag-doors">DOORS</span></td>
+                    <td>Division = "D"</td>
+                    <td>Pool 1 (6 workers)</td>
+                    <td>Pool 2 (5 workers)</td>
+                    <td>Sub-pipeline, 2-day minimum, quantity-driven</td>
+                </tr>
+                <tr>
+                    <td><span class="tag tag-harmonic">HARMONIC</span></td>
+                    <td>Division = "H"</td>
+                    <td>Pool 2 (7 workers)</td>
+                    <td>Pool 1 (6 workers)</td>
+                    <td>Painting extension, +15 urgency bonus</td>
+                </tr>
+            </table>
+
+            <h3>HARMONIC Painting Cycle</h3>
+            <p>When a HARMONIC job is flagged as <code>requiresPainting = true</code> during import, the Assembly
+                department gains extra days:</p>
+            <div class="formula">Assembly Extension = 5 days (off-site painting) + 3-4 days (post-paint finishing)
+                → 3 days if points < 50 → 4 days if points ≥ 50</div>
+                    <div class="callout info"><strong>Urgency Boost:</strong> All painting-required jobs automatically
+                        receive a <strong>+15 point urgency bonus</strong> to ensure they start early enough to cover
+                        the painting turnaround.</div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 5: DOOR WELDING -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="door-welding">
+            <h2>5. Door Welding Sub-Pipeline</h2>
+            <p>For DOORS jobs in Welding, the system replaces the standard point-based duration with a
+                <strong>quantity-driven throughput model</strong>. Doors go through specific sub-stages depending on
+                their type.</p>
+
+            <h3>Door Classification</h3>
+            <table>
+                <tr>
+                    <th>Sub-Type</th>
+                    <th>Detection Logic</th>
+                    <th>Stages</th>
+                </tr>
+                <tr>
+                    <td><strong>Seamless (Standard)</strong></td>
+                    <td>Default — does NOT contain "Lock Seam" or "Flood"</td>
+                    <td>Press → Robot</td>
+                </tr>
+                <tr>
+                    <td><strong>Lock Seam</strong></td>
+                    <td>Description contains "Lock Seam"</td>
+                    <td>Press only (skip robot)</td>
+                </tr>
+                <tr>
+                    <td><strong>Flood</strong></td>
+                    <td>Description contains "Flood"</td>
+                    <td>Tube Frame → Press → Full Weld</td>
+                </tr>
+                <tr>
+                    <td><strong>NYCHA</strong></td>
+                    <td>Job name contains "NYCHA"</td>
+                    <td>No sub-pipeline (3-day minimum)</td>
+                </tr>
+            </table>
+
+            <h3>Throughput Rates</h3>
+            <h4>Seamless / Standard Doors (3 Main Press Workers)</h4>
+            <div class="formula">Points Per Door = Total Welding Points / Quantity
+                Low-Point Doors (≤ 5 pts/door) → 17 doors/day
+                High-Point Doors (> 5 pts/door) → 13 doors/day</div>
+            <p>After the press, seamless doors go through the <strong>Robot</strong> at <strong>14 doors/day</strong>
+                (single shared robot).</p>
+
+            <h4>Lock Seam Overflow (2 Overflow Workers)</h4>
+            <div class="callout warn"><strong>Overflow Rule:</strong> When the 3 main press workers are fully booked
+                with seamless/standard doors, <strong>2 extra workers</strong> from the Welding department can handle
+                Lock Seam doors. This means Lock Seam and Seamless can run <strong>in parallel</strong>.</div>
+            <div class="formula">Lock Seam Overflow Throughput:
+                Low-Point (≤ 5 pts/door) → 11 doors/day (2 workers)
+                High-Point (> 5 pts/door) → 9 doors/day (2 workers)</div>
+
+            <h4>Flood Doors (Tandem Pipeline)</h4>
+            <table>
+                <tr>
+                    <th>Stage</th>
+                    <th>Throughput</th>
+                    <th>Workers</th>
+                </tr>
+                <tr>
+                    <td><strong>Tube Frame</strong></td>
+                    <td>5 frames/day</td>
+                    <td>Shared</td>
+                </tr>
+                <tr>
+                    <td><strong>Press</strong></td>
+                    <td>4 doors/day</td>
+                    <td>Shared</td>
+                </tr>
+                <tr>
+                    <td><strong>Full Weld</strong></td>
+                    <td>4 doors/day</td>
+                    <td>Shared</td>
+                </tr>
+            </table>
+            <p>Tube Frame and Press run in a <strong>tandem pipeline</strong> — the press starts after the first frame
+                is ready (~0.5 day startup). The bottleneck is the press (4/day). Full Weld is sequential after the
+                press completes.</p>
+            <div class="formula">Total = max(tubeFrameDays, pressDays + 0.5 startup) + fullWeldDays</div>
+
+            <h3>Gantt Visualization</h3>
+            <p>On the Gantt chart, the Welding segment is visually split into color-coded sub-segments with letter
+                labels:</p>
+            <table>
+                <tr>
+                    <th>Label</th>
+                    <th>Stage</th>
+                    <th>Color</th>
+                </tr>
+                <tr>
+                    <td><strong>P</strong></td>
+                    <td>Press</td>
+                    <td><span class="color-dot" style="background:#ef4444"></span> Red (#ef4444)</td>
+                </tr>
+                <tr>
+                    <td><strong>R</strong></td>
+                    <td>Robot</td>
+                    <td><span class="color-dot" style="background:#b91c1c"></span> Dark Red (#b91c1c)</td>
+                </tr>
+                <tr>
+                    <td><strong>T</strong></td>
+                    <td>Tube Frame</td>
+                    <td><span class="color-dot" style="background:#f87171"></span> Light Red (#f87171)</td>
+                </tr>
+                <tr>
+                    <td><strong>W</strong></td>
+                    <td>Full Weld</td>
+                    <td><span class="color-dot" style="background:#dc2626"></span> Med-Dark Red (#dc2626)</td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 6: BATCHING -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="batching">
+            <h2>6. Batching Logic</h2>
+            <p>The scheduler groups similar jobs together to optimize shop floor setups. Batching affects
+                <strong>scheduling order</strong> (clustered jobs are scheduled adjacently) and batch sizes are tracked
+                for potential efficiency discounts.</p>
+
+            <h3>Batch Categories</h3>
+            <p>A job's description is normalized (lowercased, trimmed) and matched against pattern lists:</p>
+            <table>
+                <tr>
+                    <th>Category</th>
+                    <th>Pattern Examples</th>
+                </tr>
+                <tr>
+                    <td><code>FRAME_KD</code></td>
+                    <td>"frame kd", "knocked down frame", "kd frame"</td>
+                </tr>
+                <tr>
+                    <td><code>FRAME_CO</code></td>
+                    <td>"frame co", "cased opening", "co frame"</td>
+                </tr>
+                <tr>
+                    <td><code>DOOR_LOCK_SEAM</code></td>
+                    <td>"lock seam", "lockseam", "lock-seam", "ls"</td>
+                </tr>
+                <tr>
+                    <td><code>WALL_PANEL</code></td>
+                    <td>"wall panel", "custom wall panel"</td>
+                </tr>
+                <tr>
+                    <td><code>DISH_TABLE</code></td>
+                    <td>"dish table", "dishtable", "soiled dish"</td>
+                </tr>
+                <tr>
+                    <td><code>THREE_COMP_SINK</code></td>
+                    <td>"3 compartment sink", "3-compartment sink"</td>
+                </tr>
+                <tr>
+                    <td><code>WALL_SHELF</code></td>
+                    <td>"wall shelf", "wall shelves"</td>
+                </tr>
+                <tr>
+                    <td><code>CORNER_GUARD</code></td>
+                    <td>"corner guard", "corner guards"</td>
+                </tr>
+            </table>
+
+            <h3>Grouping Key</h3>
+            <p>Jobs are grouped by a composite key built from:</p>
+            <div class="formula">Key = category | gauge | material | dueWeekStart</div>
+            <ul>
+                <li><strong>Gauge</strong>: Extracted via regex (e.g., "16 ga", "#18" → 16, 18)</li>
+                <li><strong>Material</strong>: Pattern matched (SS304, SS316, SS316L, Galv, Alum, CRS, HRS, Steel,
+                    Stainless)</li>
+                <li><strong>Due Week Start</strong>: Monday of the job's due week (ISO week start)</li>
+                <li>If both gauge AND material are found → <strong>Strict grouping</strong> (priority 0, scheduled
+                    first)</li>
+                <li>If only category matched → <strong>Relaxed grouping</strong> (priority 1)</li>
+                <li>Non-batch jobs → <strong>Singles</strong> (priority 2, scheduled last in their due week)</li>
+            </ul>
+
+            <h3>Batch Ordering Algorithm</h3>
+            <p>Groups are sorted for scheduling order:</p>
+            <ol>
+                <li><strong>Due week</strong> (earliest first)</li>
+                <li><strong>Earliest due date</strong> within group</li>
+                <li><strong>Priority tier</strong> (strict → relaxed → singles)</li>
+                <li><strong>Highest urgency score</strong></li>
+                <li><strong>Highest welding points</strong></li>
+            </ol>
+            <p>Within each group, jobs are sorted by the base comparator (due date, then size).</p>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 7: URGENCY -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="urgency">
+            <h2>7. Urgency Scoring System</h2>
+            <p>Every job receives a dynamic <strong>urgency score</strong> (sum of weighted factors). Higher score =
+                higher priority. Scores are recalculated on every import and can be adjusted via the Scoring Config
+                Panel.</p>
+
+            <table>
+                <tr>
+                    <th>#</th>
+                    <th>Factor</th>
+                    <th>Max Points</th>
+                    <th>Logic</th>
+                </tr>
+                <tr>
+                    <td>1</td>
+                    <td><strong>Due Date Proximity</strong></td>
+                    <td>30</td>
+                    <td>≤ 5 days until due → max pts. Otherwise, linear scale: <code>min(30, 30 - daysUntilDue)</code>
+                    </td>
+                </tr>
+                <tr>
+                    <td>2</td>
+                    <td><strong>Fast Ship Bonus</strong></td>
+                    <td>25</td>
+                    <td>Flat bonus for jobs marked Fast Ship. Combined with Due Date Proximity, <strong>capped at
+                            40</strong>.</td>
+                </tr>
+                <tr>
+                    <td>3</td>
+                    <td><strong>Slippage Risk</strong></td>
+                    <td>20</td>
+                    <td>If currently behind schedule (actual dept lags scheduled dept): <code>deptLag × 5</code></td>
+                </tr>
+                <tr>
+                    <td>4</td>
+                    <td><strong>Stall Penalty</strong></td>
+                    <td>15</td>
+                    <td>If stuck in same department > 2 days: <code>(daysStuck - 2) × 5</code></td>
+                </tr>
+                <tr>
+                    <td>5</td>
+                    <td><strong>Big Rock Weight</strong></td>
+                    <td>10</td>
+                    <td>Flat bonus for jobs ≥ 50 welding points</td>
+                </tr>
+                <tr>
+                    <td>6</td>
+                    <td><strong>REF Job Bonus</strong></td>
+                    <td>10</td>
+                    <td>Flat bonus if description contains "REF"</td>
+                </tr>
+                <tr>
+                    <td>7</td>
+                    <td><strong>Harmonic Bonus</strong></td>
+                    <td>10</td>
+                    <td>Flat bonus for HARMONIC product type</td>
+                </tr>
+                <tr>
+                    <td>8</td>
+                    <td><strong>Painting Bonus</strong></td>
+                    <td>15</td>
+                    <td>Flat bonus for jobs requiring off-site painting</td>
+                </tr>
+                <tr>
+                    <td>9</td>
+                    <td><strong>PO Received Boost</strong></td>
+                    <td>35</td>
+                    <td>All special parts arrived (no open POs, has closed POs) → job jumps to top priority</td>
+                </tr>
+                <tr>
+                    <td>10</td>
+                    <td><strong>Custom Factors</strong></td>
+                    <td>Variable</td>
+                    <td>Manager-defined rules matching text in description/notes/name (e.g., "VIP", "RUSH")</td>
+                </tr>
+            </table>
+
+            <div class="callout info"><strong>All factors are toggleable.</strong> Each factor has an
+                <code>enabled</code> flag. Disabled factors contribute 0 points. Values are configurable via the Scoring
+                Config Panel without code changes.</div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 8: CAPACITY -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="capacity">
+            <h2>8. Capacity Buckets & Weekly Load</h2>
+
+            <h3>Capacity Tracking Structure</h3>
+            <p>The scheduler maintains a <code>CapacityBuckets</code> map: each date has a record of points used per
+                department, plus Big Rock tracking and pool usage:</p>
+            <div class="formula">CapacityBuckets = {
+                "2026-02-10": {
+                "Welding": 150,
+                "Laser": 200,
+                bigRockCount: { Welding: 2, ... },
+                bigRockPoints: { Welding: 120, ... },
+                poolUsage: { Welding: { 0: 60, 1: 90 }, ... }
+                },
+                ...
+                }</div>
+
+            <h3>Weekly Load Computation</h3>
+            <p>For the <strong>compression and analysis phases</strong>, the system computes weekly aggregates:</p>
+            <div class="formula">Weekly Target = 850 points per department per week</div>
+            <ul>
+                <li>Each job's welding points are distributed across its scheduled work days using a linear rate:
+                    <code>dailyRate = points / workDays</code>.</li>
+                <li>Contributions are aggregated into ISO weeks (e.g., <code>2026-W07</code>) per department.</li>
+                <li>A week-department pair exceeding 850 pts is flagged as <strong>overloaded</strong>.</li>
+            </ul>
+
+            <h3>Two-Level Capacity Check</h3>
+            <ol>
+                <li><strong>Department Total:</strong> Sum of all points for a department on a given day must not exceed
+                    the shop-wide limit.</li>
+                <li><strong>Pool Specific:</strong> Points for a specific product type (e.g., DOORS in Welding) must not
+                    exceed that pool's sub-capacity, even if the overall department has room.</li>
+            </ol>
+
+            <h3>Frozen Weeks</h3>
+            <p>The first <strong>2 weeks</strong> from today are considered "frozen" — jobs within this window receive
+                priority and are not candidates for compression/shifting.</p>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 9: OVERTIME -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="overtime">
+            <h2>9. Overtime Tier System</h2>
+            <p>When the schedule shows overloaded weeks, the analysis engine recommends overtime tiers. The system
+                models a <strong>4-tier progressive overtime</strong> structure:</p>
+
+            <div class="formula">Base Capacity: 850 pts/week ÷ 40 hrs = 21.25 pts/hr</div>
+
+            <table>
+                <tr>
+                    <th>Tier</th>
+                    <th>Label</th>
+                    <th>Weekday Hours</th>
+                    <th>Saturday</th>
+                    <th>Extra Hrs/Week</th>
+                    <th>Bonus Pts/Week</th>
+                    <th>New Weekly Capacity</th>
+                </tr>
+                <tr>
+                    <td><strong>1</strong></td>
+                    <td>9-Hour Days</td>
+                    <td>6:00am – 3:30pm</td>
+                    <td>None</td>
+                    <td>+5 hrs</td>
+                    <td>+106 pts</td>
+                    <td>956 pts</td>
+                </tr>
+                <tr>
+                    <td><strong>2</strong></td>
+                    <td>10-Hour Days</td>
+                    <td>6:00am – 4:30pm</td>
+                    <td>None</td>
+                    <td>+10 hrs</td>
+                    <td>+213 pts</td>
+                    <td>1,063 pts</td>
+                </tr>
+                <tr>
+                    <td><strong>3</strong></td>
+                    <td>9-Hour Days + Saturday</td>
+                    <td>6:00am – 3:30pm</td>
+                    <td>6:00am – 12:00pm</td>
+                    <td>+11 hrs</td>
+                    <td>+234 pts</td>
+                    <td>1,084 pts</td>
+                </tr>
+                <tr>
+                    <td><strong>4</strong></td>
+                    <td>10-Hour Days + Saturday</td>
+                    <td>6:00am – 4:30pm</td>
+                    <td>6:00am – 12:00pm</td>
+                    <td>+16 hrs</td>
+                    <td>+340 pts</td>
+                    <td>1,190 pts</td>
+                </tr>
+            </table>
+
+            <div class="callout info"><strong>The analysis engine calculates which tier is needed</strong> by comparing
+                the overloaded week's excess against each tier's bonus. It recommends the <strong>lowest tier</strong>
+                that resolves the overload.</div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 10: CALENDAR -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="calendar">
+            <h2>10. Work Calendar & Gap Rules</h2>
+
+            <h3>Work Week</h3>
+            <ul>
+                <li><strong>Standard:</strong> Monday through Friday (5-day work week)</li>
+                <li><strong>Overtime Mode:</strong> Saturdays can be included with a configurable capacity multiplier
+                    (default: 0.5 = half-day capacity)</li>
+                <li><strong>Always Skipped:</strong> Sundays and company holidays</li>
+            </ul>
+
+            <h3>Department Gaps (Between Departments)</h3>
+            <p>When scheduling backward, a gap is inserted between consecutive departments based on job size:</p>
+            <table>
+                <tr>
+                    <th>Job Size</th>
+                    <th>Welding Points</th>
+                    <th>Gap Between Departments</th>
+                </tr>
+                <tr>
+                    <td><strong>Big Rock</strong></td>
+                    <td>≥ 70 points</td>
+                    <td>1 work day</td>
+                </tr>
+                <tr>
+                    <td><strong>Medium</strong></td>
+                    <td>> 7 and < 70</td>
+                    <td>0.5 work days</td>
+                </tr>
+                <tr>
+                    <td><strong>Small</strong></td>
+                    <td>≤ 7 points</td>
+                    <td>No gap</td>
+                </tr>
+            </table>
+            <div class="callout success"><strong>No-Gaps Override:</strong> Any job can be flagged with
+                <code>noGaps = true</code> to eliminate all department gaps, allowing back-to-back department
+                transitions.</div>
+
+            <h3>Daily Department Limit</h3>
+            <p>A single job can occupy at most <strong>2 departments per day</strong>
+                (<code>MAX_DEPTS_PER_DAY_PER_JOB = 2</code>). This prevents unrealistic "stacking" of multiple
+                departments on the same day for small projects.</p>
+
+            <h3>Buffer Days</h3>
+            <p>Assembly finishes <strong>1 work day before the due date</strong> (<code>BUFFER_DAYS = 1</code>) to allow
+                for final QC and shipping prep.</p>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 11: DATA IMPORT -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="data">
+            <h2>11. Data Import & Synchronization</h2>
+
+            <h3>Excel Parsing</h3>
+            <ul>
+                <li><strong>Format:</strong> Global Shop export (.xlsx or .csv), parsed via SheetJS.</li>
+                <li><strong>Job Rollup:</strong> All line items sharing the same <code>WO_NUM</code> are consolidated
+                    into a single scheduled job.</li>
+                <li><strong>Quantity:</strong> Sum of <code>QTY_ORDER</code> across all sub-orders.</li>
+                <li><strong>Welding Points:</strong> Sum of <code>DEPT4HRS</code> within the group.</li>
+                <li><strong>Due Date Priority:</strong> <code>WO_HEAD_DATE_DUE</code> > <code>PROMISED_DATE</code> >
+                    <code>WO_DUE_DATE</code> > <code>JOB_DUE_DATE</code> > <code>DATE_DUE</code> >
+                    <code>SO_HEAD_DATE_DUE</code></li>
+            </ul>
+
+            <h3>Department Progression</h3>
+            <p>The current department is determined from <code>DEPTxDONE</code> flags — the active department is the one
+                immediately <strong>after</strong> the last completed step:</p>
+            <div class="formula">DEPT1DONE = FALSE → Engineering
+                DEPT1DONE = TRUE → Laser
+                DEPT2DONE = TRUE → Press Brake
+                DEPT3DONE = TRUE → Welding
+                DEPT4DONE = TRUE → Polishing
+                DEPT5DONE = TRUE → Assembly
+                DEPT6DONE = TRUE → Shipping / Completed</div>
+
+            <h3>Filters & Exclusions</h3>
+            <ul>
+                <li><strong>Door Min Points:</strong> DOORS jobs with < 30 welding points are excluded (reduces
+                        noise).</li>
+                <li><strong>Year 2029:</strong> Due dates in 2029 are treated as placeholder/legacy and excluded.</li>
+                <li><strong>Shipped Flag:</strong> Jobs with "S" in <code>FLAG_SHIPPED</code> are excluded.</li>
+            </ul>
+
+            <h3>Firestore Sync (Upsert & Reconcile)</h3>
+            <ol>
+                <li>All items pass through the scheduling engine.</li>
+                <li>New jobs → created in Firestore (<code>set with merge</code>).</li>
+                <li>Existing jobs → updated (preserves manual overrides like priority).</li>
+                <li>Missing from new import → automatically marked <code>COMPLETED</code>.</li>
+                <li>Operations batched in groups of 450 (under Firestore's 500-op limit).</li>
+            </ol>
+        </section>
+
+        <!-- FOOTER -->
+        <div style="text-align:center;padding:48px 0;margin-top:40px;border-top:1px solid var(--border)">
+            <p style="color:var(--text-dim);font-size:.85rem">Emjac Industries, Inc. — Production Scheduler Logic
+                Reference</p>
+            <p style="color:var(--border);font-size:.75rem">Generated February 10, 2026</p>
+        </div>
+
+    </div><!-- .container -->
+</body>
+
+</html>

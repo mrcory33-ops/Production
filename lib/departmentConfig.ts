@@ -1,4 +1,4 @@
-import { ProductType, Department } from '@/types';
+import { ProductType, Department, WeldingSubStageInfo, DoorSubType } from '@/types';
 
 export interface WorkerPool {
   count: number;
@@ -140,6 +140,159 @@ export const getPoolForJob = (dept: Department, productType: ProductType): Worke
   return matchingPool || config.pools[0];
 };
 
+// ========================================================================
+// DOOR WELDING SUB-PIPELINE — Throughput & Classification
+// ========================================================================
+
+/** Throughput rates for door welding sub-stages (doors per day) */
+export const DOOR_THROUGHPUT = {
+  press: { lowPointRate: 17, highPointRate: 13, pointThreshold: 5, workers: 3 }, // doors/day — 3 main workers
+  /** Lock seam overflow: 2 extra workers from welding dept handle lock seam when
+   *  the 3 main press workers are fully booked with seamless/standard doors.
+   *  Throughput ≈ 2/3 of standard rate (2 workers instead of 3). */
+  lockSeamOverflow: { lowPointRate: 11, highPointRate: 9, workers: 2 },
+  robot: { doorsPerDay: 14 },
+  flood: { tubeFramesPerDay: 5, pressPerDay: 4, fullWeldPerDay: 4 },
+} as const;
+
+/** Sub-stage colors for Gantt visualization */
+export const WELDING_SUBSTAGE_COLORS: Record<string, string> = {
+  press: '#ef4444', // red-500
+  robot: '#b91c1c', // red-700
+  tubeFrame: '#f87171', // red-400
+  fullWeld: '#dc2626', // red-600
+};
+
+/** Sub-stage labels for Gantt visualization */
+export const WELDING_SUBSTAGE_LABELS: Record<string, string> = {
+  press: 'P', robot: 'R', tubeFrame: 'T', fullWeld: 'W',
+};
+
+/** Classify a door description as flood or lock seam */
+export const isFloodDoor = (description: string): boolean => {
+  const d = (description || '').toLowerCase();
+  return d.includes('flood');
+};
+
+export const isLockSeam = (description: string): boolean => {
+  const d = (description || '').toLowerCase();
+  return d.includes('lock seam') || d.includes('lockseam') || d.includes('lock-seam');
+};
+
+/** Full door classification */
+export const classifyDoorSubType = (description: string, jobName: string): DoorSubType => {
+  if ((jobName || '').toUpperCase().includes('NYCHA')) return 'nycha';
+  if (isFloodDoor(description)) return 'flood';
+  if (isLockSeam(description)) return 'standard_lockseam';
+  return 'standard_seamless'; // Default: seamless (goes through robot)
+};
+
+/**
+ * Calculate welding sub-stage breakdown for door jobs.
+ *
+ * @param quantity Number of doors in the job
+ * @param pointsPerDoor Welding points per door (used for press rate selection)
+ * @param description Job description (for flood/lock seam detection)
+ * @param jobName Job name (for NYCHA detection)
+ * @returns Array of sub-stage info, or null if not a sub-pipeline job
+ */
+export const calculateDoorWeldingSubStages = (
+  quantity: number,
+  pointsPerDoor: number,
+  description: string,
+  jobName: string
+): { subType: DoorSubType; stages: WeldingSubStageInfo[]; totalDays: number } | null => {
+  const subType = classifyDoorSubType(description, jobName);
+
+  // NYCHA: no sub-pipeline, use existing 3-day minimum rule
+  if (subType === 'nycha') return null;
+
+  const qty = Math.max(1, quantity);
+  const stages: WeldingSubStageInfo[] = [];
+
+  if (subType === 'flood') {
+    // Flood doors: Tube Frame → Press → Full Weld (pipeline model)
+    const tubeFrameDays = Math.ceil(qty / DOOR_THROUGHPUT.flood.tubeFramesPerDay);
+    const pressDays = Math.ceil(qty / DOOR_THROUGHPUT.flood.pressPerDay);
+    const fullWeldDays = Math.ceil(qty / DOOR_THROUGHPUT.flood.fullWeldPerDay);
+
+    // Pipeline: Tube Frame and Press run in tandem, so the press starts after
+    // the first frame is ready (0.5 day startup). The bottleneck is the press (4/day).
+    // Full Weld is sequential after press completes.
+    // Total = max(tubeFrame, press + 0.5 startup) + fullWeld
+    const pipelineDays = Math.max(tubeFrameDays, pressDays + 0.5);
+    const totalDays = pipelineDays + fullWeldDays;
+
+    // For Gantt visualization, we show proportional segments
+    stages.push(
+      { stage: 'tubeFrame', durationDays: Math.ceil(pipelineDays * (tubeFrameDays / (tubeFrameDays + pressDays))), label: 'T', color: WELDING_SUBSTAGE_COLORS.tubeFrame },
+      { stage: 'press', durationDays: Math.ceil(pipelineDays * (pressDays / (tubeFrameDays + pressDays))), label: 'P', color: WELDING_SUBSTAGE_COLORS.press },
+      { stage: 'fullWeld', durationDays: fullWeldDays, label: 'W', color: WELDING_SUBSTAGE_COLORS.fullWeld },
+    );
+
+    // Ensure stages sum to totalDays (adjust press if rounding is off)
+    const stageSum = stages.reduce((sum, s) => sum + s.durationDays, 0);
+    const roundedTotal = Math.ceil(totalDays);
+    if (stageSum !== roundedTotal) {
+      stages[1].durationDays += roundedTotal - stageSum;
+    }
+
+    return { subType, stages, totalDays: roundedTotal };
+  }
+
+  // Standard doors (seamless or lock seam)
+  if (subType === 'standard_lockseam') {
+    // Lock seam: use overflow workers (2 workers, lower throughput)
+    // These workers DON'T compete with the main 3-worker press pool
+    const pressRate = pointsPerDoor <= DOOR_THROUGHPUT.press.pointThreshold
+      ? DOOR_THROUGHPUT.lockSeamOverflow.lowPointRate
+      : DOOR_THROUGHPUT.lockSeamOverflow.highPointRate;
+    const pressDays = Math.ceil(qty / pressRate);
+
+    stages.push({
+      stage: 'press',
+      durationDays: pressDays,
+      label: 'P',
+      color: WELDING_SUBSTAGE_COLORS.press,
+    });
+  } else {
+    // Seamless / standard: use main 3-worker press pool
+    const pressRate = pointsPerDoor <= DOOR_THROUGHPUT.press.pointThreshold
+      ? DOOR_THROUGHPUT.press.lowPointRate
+      : DOOR_THROUGHPUT.press.highPointRate;
+    const pressDays = Math.ceil(qty / pressRate);
+
+    stages.push({
+      stage: 'press',
+      durationDays: pressDays,
+      label: 'P',
+      color: WELDING_SUBSTAGE_COLORS.press,
+    });
+  }
+
+  if (subType === 'standard_seamless') {
+    // Seamless doors also go through the robot
+    const robotDays = Math.ceil(qty / DOOR_THROUGHPUT.robot.doorsPerDay);
+    stages.push({
+      stage: 'robot',
+      durationDays: robotDays,
+      label: 'R',
+      color: WELDING_SUBSTAGE_COLORS.robot,
+    });
+  }
+
+  const totalDays = stages.reduce((sum, s) => sum + s.durationDays, 0);
+
+  // Apply minimum 2-day rule for door leaf jobs
+  if (totalDays < 2) {
+    // Distribute the extra time to the press stage
+    stages[0].durationDays += 2 - totalDays;
+    return { subType, stages, totalDays: 2 };
+  }
+
+  return { subType, stages, totalDays };
+};
+
 /**
  * Calculate duration for a department based on job points and product type
  */
@@ -151,10 +304,26 @@ export const calculateDeptDuration = (
   jobName?: string,
   requiresPainting?: boolean,
   customerName?: string,
-  batchSize?: number
+  batchSize?: number,
+  quantity?: number
 ): number => {
   const config = DEPARTMENT_CONFIG[dept];
   if (!config || !points) return 0;
+
+  // =========================================================================
+  // DOOR WELDING SUB-PIPELINE — quantity-driven model for DOORS in Welding
+  // =========================================================================
+  if (dept === 'Welding' && productType === 'DOORS' && quantity && quantity > 0) {
+    const pointsPerDoor = points / quantity;
+    const subPipeline = calculateDoorWeldingSubStages(
+      quantity, pointsPerDoor, description || '', jobName || ''
+    );
+    if (subPipeline) {
+      // Sub-pipeline calculated the total days; round up to nearest half-day
+      return Math.ceil(subPipeline.totalDays * 2) / 2;
+    }
+    // Falls through for NYCHA (subPipeline returns null) → use standard logic below
+  }
 
   const pool = getPoolForJob(dept, productType);
   if (!pool) return 0;

@@ -1,5 +1,16 @@
 export type ProductType = 'FAB' | 'DOORS' | 'HARMONIC';
 
+// Door welding sub-pipeline types
+export type WeldingSubStage = 'press' | 'robot' | 'tubeFrame' | 'fullWeld';
+export type DoorSubType = 'standard_seamless' | 'standard_lockseam' | 'flood' | 'nycha';
+
+export interface WeldingSubStageInfo {
+    stage: WeldingSubStage;
+    durationDays: number;
+    label: string;   // "P", "R", "T", "W"
+    color: string;   // Hex color for Gantt sub-segment
+}
+
 export type Department =
     | 'Engineering'
     | 'Laser'
@@ -127,7 +138,10 @@ export interface Job {
     scheduledDepartmentByDate?: Record<string, Department>; // Expected dept on each date (for slippage detection)
     priorityByDept?: Partial<Record<Department, { value: number; setAt: string; listId: string }>>;
     noGaps?: boolean; // Override: Remove all department gaps for this job
+    skippedDepartments?: Department[]; // Departments this job should skip (removed from schedule)
     requiresPainting?: boolean; // HARMONIC jobs that need off-site painting (adds ~1 week to Assembly)
+    weldingSubStages?: WeldingSubStageInfo[]; // Door welding sub-pipeline breakdown (press/robot/tubeFrame/fullWeld)
+    doorSubType?: DoorSubType; // Door classification for sub-pipeline routing
     departmentProgress?: Partial<Record<Department, number>>; // Supervisor-reported % complete per department (0-100)
     assignedWorkers?: Partial<Record<Department, string[]>>; // Workers assigned to this job per department
 

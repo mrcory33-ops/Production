@@ -9,6 +9,7 @@ interface RescheduleSuggestionPopoverProps {
     suggestion: RescheduleSuggestion;
     onAccept: (suggestion: RescheduleSuggestion) => void;
     onDismiss: (jobId: string) => void;
+    onClose?: () => void;
 }
 
 const STRATEGY_CONFIG = {
@@ -53,11 +54,17 @@ export default function RescheduleSuggestionPopover({
     suggestion,
     onAccept,
     onDismiss,
+    onClose,
 }: RescheduleSuggestionPopoverProps) {
     const [isClosing, setIsClosing] = useState(false);
 
     const config = STRATEGY_CONFIG[suggestion.strategy];
     const StrategyIcon = config.icon;
+
+    const handleClose = () => {
+        setIsClosing(true);
+        setTimeout(() => onClose ? onClose() : onDismiss(suggestion.jobId), 150);
+    };
 
     const handleDismiss = () => {
         setIsClosing(true);
@@ -85,7 +92,7 @@ export default function RescheduleSuggestionPopover({
                 style={{
                     animation: isClosing ? 'fadeOut 0.15s ease-in forwards' : 'fadeIn 0.15s ease-out',
                 }}
-                onClick={handleDismiss}
+                onClick={handleClose}
             />
 
             {/* Modal */}
@@ -113,7 +120,7 @@ export default function RescheduleSuggestionPopover({
                         </div>
                     </div>
                     <button
-                        onClick={handleDismiss}
+                        onClick={handleClose}
                         className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-colors"
                     >
                         <X className="w-4 h-4" />

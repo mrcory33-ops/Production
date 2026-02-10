@@ -2,6 +2,7 @@ import { db } from './firebase';
 import { scheduleAllJobs, trackJobProgress } from './scheduler';
 import { collection, doc, writeBatch, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { Job, ScheduleInsights } from '@/types';
+import { DEPT_ORDER } from './departmentConfig';
 
 // Collection reference
 const jobsCollection = collection(db, 'jobs');
@@ -105,12 +106,32 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{
             // Preserve schedule, track progress
             const trackedJob = trackJobProgress(csvJob, previousJob);
 
+            // Build remaining schedule: strip departments the job has already completed
+            const currentDeptIndex = DEPT_ORDER.indexOf(trackedJob.currentDepartment);
+            const fullSchedule = previousJob.departmentSchedule;
+            let remainingSchedule = previousJob.remainingDepartmentSchedule;
+
+            if (fullSchedule && currentDeptIndex >= 0) {
+                const remaining: Record<string, { start: string; end: string }> = {};
+                for (const [dept, window] of Object.entries(fullSchedule)) {
+                    const deptIndex = DEPT_ORDER.indexOf(dept as any);
+                    // Keep current department and all future departments
+                    if (deptIndex >= currentDeptIndex) {
+                        remaining[dept] = window;
+                    }
+                }
+                if (Object.keys(remaining).length > 0) {
+                    remainingSchedule = remaining;
+                }
+            }
+
             const updatedJob = {
                 ...trackedJob,
                 // PRESERVE existing schedule fields
                 scheduledStartDate: previousJob.scheduledStartDate,
                 scheduledEndDate: previousJob.scheduledEndDate,
                 departmentSchedule: previousJob.departmentSchedule,
+                remainingDepartmentSchedule: remainingSchedule,
                 scheduledDepartmentByDate: previousJob.scheduledDepartmentByDate,
                 isOverdue: previousJob.isOverdue,
                 schedulingConflict: previousJob.schedulingConflict,

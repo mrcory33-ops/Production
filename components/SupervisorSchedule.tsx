@@ -673,7 +673,8 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
             </div>
 
             {/* ── WORKER COLUMNS (Right Area) ── */}
-            <div className="flex-1 overflow-x-auto flex gap-0 p-0">
+            <div className="flex-1 overflow-y-auto p-3 grid gap-3"
+                style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
                 {rosterLoading ? (
                     <div className="flex items-center justify-center w-full"><Loader2 className="w-6 h-6 text-[#555] animate-spin" /></div>
                 ) : roster.length === 0 ? (
@@ -1093,7 +1094,7 @@ function WorkerColumn({ worker, jobs, department }: { worker: WorkerProfile; job
     const totalPoints = jobs.reduce((s, j) => s + (j.weldingPoints || 0), 0);
 
     return (
-        <div className="w-56 flex-shrink-0 flex flex-col border-r border-[#333] bg-[#181818] h-full">
+        <div className="flex flex-col border border-[#333] rounded-lg bg-[#181818] min-h-[280px]">
             {/* Worker Header */}
             <div className="p-3 border-b border-[#333] bg-gradient-to-b from-[#222] to-[#1a1a1a] shrink-0">
                 <div className="flex items-center gap-2.5">

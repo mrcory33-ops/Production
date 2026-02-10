@@ -1,6 +1,6 @@
 import { Job, Department, ProductType, ScheduleInsights, LateJob, OverloadedWeek, MoveOption, OTRecommendation, SupervisorAlert } from '@/types';
 import { addDays, isSaturday, isSunday, subDays, startOfDay, isBefore, startOfWeek } from 'date-fns';
-import { DEPARTMENT_CONFIG, calculateDeptDuration } from './departmentConfig';
+import { DEPARTMENT_CONFIG, calculateDeptDuration, calculateDoorWeldingSubStages, classifyDoorSubType } from './departmentConfig';
 import { calculateUrgencyScore } from './scoring';
 import { BIG_ROCK_CONFIG } from './scoringConfig';
 
@@ -747,9 +747,10 @@ export const calculateDuration = (
     jobName?: string,
     requiresPainting?: boolean,
     customerName?: string,
-    batchSize?: number
+    batchSize?: number,
+    quantity?: number
 ): number => {
-    return calculateDeptDuration(dept, points, productType, description, jobName, requiresPainting, customerName, batchSize);
+    return calculateDeptDuration(dept, points, productType, description, jobName, requiresPainting, customerName, batchSize, quantity);
 };
 
 const normalizeWorkStart = (date: Date, allowSaturday: boolean = false): Date => {
@@ -849,12 +850,26 @@ const calculateAllDurations = (job: Job, batchSize?: number): Record<Department,
     const productType = job.productType || 'FAB';
     const hasRef = (job.description || '').toUpperCase().includes('REF');
     const custName = job.customerName;
+    const qty = job.quantity;
+
+    // For DOORS productType, also compute welding sub-stages if applicable
+    if (productType === 'DOORS' && qty && qty > 0) {
+        const pointsPerDoor = points / qty;
+        const subResult = calculateDoorWeldingSubStages(qty, pointsPerDoor, job.description || '', job.name || '');
+        if (subResult) {
+            job.weldingSubStages = subResult.stages;
+            job.doorSubType = subResult.subType;
+        } else {
+            job.weldingSubStages = undefined;
+            job.doorSubType = classifyDoorSubType(job.description || '', job.name || '');
+        }
+    }
 
     return {
         Engineering: calculateDuration(points, 'Engineering', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
         Laser: calculateDuration(points, 'Laser', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
         'Press Brake': calculateDuration(points, 'Press Brake', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
-        Welding: calculateDuration(points, 'Welding', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
+        Welding: calculateDuration(points, 'Welding', productType, job.description, job.name, job.requiresPainting, custName, batchSize, qty),
         Polishing: calculateDuration(points, 'Polishing', productType, job.description, job.name, job.requiresPainting, custName, batchSize),
         Assembly: Math.max(
             calculateDuration(points, 'Assembly', productType, job.description, job.name, job.requiresPainting, custName, batchSize),

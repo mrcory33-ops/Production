@@ -5,10 +5,11 @@ import React from 'react';
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInCalendarDays } from 'date-fns';
 import { Job, Department, SupervisorAlert } from '@/types';
-import { DEPARTMENT_CONFIG, DEPT_ORDER } from '@/lib/departmentConfig';
+import { DEPARTMENT_CONFIG, DEPT_ORDER, calculateDoorWeldingSubStages } from '@/lib/departmentConfig';
 import { normalizeBatchText, getBatchCategory } from '@/lib/scheduler';
 import SegmentEditPopover from './SegmentEditPopover';
 import JobStatusSymbols from './JobStatusSymbols';
+import JobConfigPopover from './JobConfigPopover';
 
 interface DepartmentSegment {
     department: Department;
@@ -17,6 +18,8 @@ interface DepartmentSegment {
     color: string;
     startDate: Date;
     endDate: Date;
+    subStageLabel?: string;   // "P", "R", "T", "W" for door welding sub-stages
+    subStageColor?: string;   // Override color for sub-stage
 }
 
 interface CustomGanttTableProps {
@@ -32,6 +35,7 @@ interface CustomGanttTableProps {
     onJobRangeUpdate?: (jobId: string, newStart: Date, newEnd: Date) => Promise<void>;
     onPriorityUpdate?: (jobId: string, department: Department, value: number | null) => Promise<void>;
     onNoGapsToggle?: (jobId: string, noGaps: boolean) => Promise<void>;
+    onSkipDepartments?: (jobId: string, skipped: Department[]) => Promise<void>;
     priorityDepartment?: Department;
     visibleDepartments?: Set<Department>;
     showActiveOnly?: boolean;
@@ -54,6 +58,7 @@ export default function CustomGanttTable({
     onJobRangeUpdate,
     onPriorityUpdate,
     onNoGapsToggle,
+    onSkipDepartments,
     priorityDepartment,
     visibleDepartments,
     showActiveOnly = false,
@@ -75,6 +80,8 @@ export default function CustomGanttTable({
     const [priorityDrafts, setPriorityDrafts] = useState<Record<string, string>>({});
     const [isDragging, setIsDragging] = useState(false);
     const [openJobAlertInfoId, setOpenJobAlertInfoId] = useState<string | null>(null);
+    const [openConfigJobId, setOpenConfigJobId] = useState<string | null>(null);
+    const configButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
     const addVisibleDays = (date: Date, delta: number) => {
         if (delta === 0) return startOfDay(date);
@@ -318,6 +325,57 @@ export default function CustomGanttTable({
                 });
             }
         });
+
+        // =====================================================================
+        // DOOR WELDING SUB-PIPELINE — Split Welding segment into sub-stages
+        // =====================================================================
+        // Compute sub-stages at render time from job data (not stored on job)
+        let subStages = job.weldingSubStages;
+        if (!subStages && job.productType === 'DOORS' && job.quantity && job.quantity > 0 && job.weldingPoints) {
+            const pointsPerDoor = job.weldingPoints / job.quantity;
+            const result = calculateDoorWeldingSubStages(job.quantity, pointsPerDoor, job.description || '', job.name || '');
+            if (result) {
+                subStages = result.stages;
+            }
+        }
+        if (subStages && subStages.length > 0) {
+            const weldingIdx = segments.findIndex(s => s.department === 'Welding');
+            if (weldingIdx !== -1) {
+                const weldingSeg = segments[weldingIdx];
+                const totalSubDays = subStages.reduce((sum, s) => sum + s.durationDays, 0);
+                const totalCols = weldingSeg.duration;
+
+                // Only split if there are enough columns to display
+                if (totalCols >= subStages.length) {
+                    const subSegments: DepartmentSegment[] = [];
+                    let colOffset = 0;
+
+                    subStages.forEach((subStage, i) => {
+                        const proportion = subStage.durationDays / totalSubDays;
+                        // Last sub-stage gets remaining columns to avoid rounding gaps
+                        const subCols = i === subStages!.length - 1
+                            ? totalCols - colOffset
+                            : Math.max(1, Math.round(totalCols * proportion));
+
+                        subSegments.push({
+                            department: 'Welding' as Department,
+                            startCol: weldingSeg.startCol + colOffset,
+                            duration: subCols,
+                            color: subStage.color,
+                            startDate: weldingSeg.startDate, // Approximate; stages share the welding window
+                            endDate: weldingSeg.endDate,
+                            subStageLabel: subStage.label,
+                            subStageColor: subStage.color,
+                        });
+
+                        colOffset += subCols;
+                    });
+
+                    // Replace the single Welding segment with sub-segments
+                    segments.splice(weldingIdx, 1, ...subSegments);
+                }
+            }
+        }
 
         // Sort by start date to ensure chronological order
         return segments.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
@@ -887,21 +945,36 @@ export default function CustomGanttTable({
                                                         {Math.round(job.weldingPoints || 0)} pts
                                                     </span>
                                                 </div>
-                                                {onNoGapsToggle && (
-                                                    <div className="mt-1.5">
+                                                {onNoGapsToggle && onSkipDepartments && (
+                                                    <div className="mt-1.5 relative">
                                                         <button
-                                                            onClick={async (e) => {
-                                                                e.stopPropagation();
-                                                                await onNoGapsToggle(job.id, !job.noGaps);
+                                                            ref={(el) => {
+                                                                if (el) configButtonRefs.current.set(job.id, el);
+                                                                else configButtonRefs.current.delete(job.id);
                                                             }}
-                                                            className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${job.noGaps
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setOpenConfigJobId(prev => prev === job.id ? null : job.id);
+                                                            }}
+                                                            className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${openConfigJobId === job.id
                                                                 ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold'
-                                                                : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                                                                : (job.noGaps || (job.skippedDepartments && job.skippedDepartments.length > 0))
+                                                                    ? 'bg-blue-50 border-blue-200 text-blue-600 font-semibold'
+                                                                    : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
                                                                 }`}
-                                                            title={job.noGaps ? "Gaps removed - departments run back-to-back" : "Click to remove gaps between departments"}
+                                                            title="Schedule configuration"
                                                         >
-                                                            {job.noGaps ? '⚡ No Gaps' : '+ No Gaps'}
+                                                            ⚙ Config{job.noGaps ? ' · No Gaps' : ''}{job.skippedDepartments && job.skippedDepartments.length > 0 ? ` · ${job.skippedDepartments.length} skipped` : ''}
                                                         </button>
+                                                        {openConfigJobId === job.id && (
+                                                            <JobConfigPopover
+                                                                job={job}
+                                                                anchorRef={{ current: configButtonRefs.current.get(job.id) || null }}
+                                                                onNoGapsToggle={onNoGapsToggle}
+                                                                onSkipDepartments={onSkipDepartments}
+                                                                onClose={() => setOpenConfigJobId(null)}
+                                                            />
+                                                        )}
                                                     </div>
                                                 )}
                                                 {showActiveOnly && priorityDepartment && onPriorityUpdate && (
@@ -1051,10 +1124,17 @@ export default function CustomGanttTable({
                                                                     }
                                                                 }}
                                                             >
+                                                                {/* ── Sub-stage label (P/R/T/W) ── */}
+                                                                {segment.subStageLabel && (
+                                                                    <span className="absolute inset-0 flex items-center justify-center z-[2] text-[11px] font-black text-white pointer-events-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]">
+                                                                        {segment.subStageLabel}
+                                                                    </span>
+                                                                )}
+
                                                                 {/* ── Progress Overlay (supervisor-reported) ── */}
                                                                 {(() => {
                                                                     const progress = job.departmentProgress?.[segment.department];
-                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
+                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department && !segment.subStageLabel) {
                                                                         return (
                                                                             <div
                                                                                 className="absolute inset-0 z-[1] pointer-events-none overflow-hidden rounded-[inherit]"
@@ -1069,7 +1149,7 @@ export default function CustomGanttTable({
                                                                 {/* ── Progress % label inside bar ── */}
                                                                 {(() => {
                                                                     const progress = job.departmentProgress?.[segment.department];
-                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
+                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department && !segment.subStageLabel) {
                                                                         return (
                                                                             <span className="absolute inset-0 flex items-center justify-center z-[3] text-[13px] font-black pointer-events-none"
                                                                                 style={{ color: segment.color || '#475569' }}>
@@ -1083,9 +1163,12 @@ export default function CustomGanttTable({
                                                                 {/* Bar Tooltip — department & dates */}
                                                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover/bar-tooltip:block pointer-events-none w-max">
                                                                     <div className="px-2.5 py-1.5 bg-slate-800 text-white rounded shadow-xl text-xs whitespace-nowrap">
-                                                                        <span className="font-bold">{segment.department}</span>
+                                                                        <span className="font-bold">{segment.subStageLabel ? `Welding: ${segment.subStageLabel === 'P' ? 'Press' : segment.subStageLabel === 'R' ? 'Robot' : segment.subStageLabel === 'T' ? 'Tube Frame' : 'Full Weld'}` : segment.department}</span>
                                                                         <span className="text-slate-400 ml-2">{format(segment.startDate, 'M/d')} – {format(segment.endDate, 'M/d')}</span>
-                                                                        {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && (
+                                                                        {segment.subStageLabel && job.quantity && (
+                                                                            <span className="text-amber-300 ml-2 font-semibold">{job.quantity} doors</span>
+                                                                        )}
+                                                                        {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && !segment.subStageLabel && (
                                                                             <span className="text-emerald-300 ml-2 font-bold">{job.departmentProgress[segment.department]}% done</span>
                                                                         )}
                                                                     </div>

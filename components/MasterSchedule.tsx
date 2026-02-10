@@ -522,6 +522,26 @@ export default function MasterSchedule() {
         }
     };
 
+    const handleSkipDepartments = async (jobId: string, skipped: Department[]) => {
+        try {
+            const jobRef = doc(db, 'jobs', jobId);
+            await updateDoc(jobRef, {
+                skippedDepartments: skipped.length > 0 ? skipped : deleteField(),
+                updatedAt: new Date()
+            });
+
+            setJobs(prev =>
+                prev.map(j =>
+                    j.id === jobId
+                        ? { ...j, skippedDepartments: skipped.length > 0 ? skipped : undefined }
+                        : j
+                )
+            );
+        } catch (error) {
+            console.error('Failed to update skipped departments:', error);
+        }
+    };
+
     const handleResetPriorityList = async (dept: Department) => {
         try {
             const listId = new Date().toISOString();
@@ -827,9 +847,34 @@ export default function MasterSchedule() {
         return filtered
             .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
             .map(job => {
-                if (job.remainingDepartmentSchedule) {
-                    return job;
+                // Strip completed departments: only show currentDepartment and forward
+                const baseSchedule = job.remainingDepartmentSchedule || job.departmentSchedule;
+                const currentDeptIndex = DEPT_ORDER.indexOf(job.currentDepartment);
+
+                let effectiveRemaining = baseSchedule;
+                if (baseSchedule && currentDeptIndex >= 0) {
+                    const filtered: Record<string, { start: string; end: string }> = {};
+                    for (const [dept, window] of Object.entries(baseSchedule)) {
+                        if (DEPT_ORDER.indexOf(dept as Department) >= currentDeptIndex) {
+                            if (job.skippedDepartments?.includes(dept as Department)) continue;
+                            filtered[dept] = window;
+                        }
+                    }
+                    if (Object.keys(filtered).length > 0) {
+                        effectiveRemaining = filtered;
+                    }
                 }
+
+                if (effectiveRemaining && Object.keys(effectiveRemaining).length > 0) {
+                    return {
+                        ...job,
+                        remainingDepartmentSchedule: effectiveRemaining,
+                        forecastStartDate: job.forecastStartDate || job.scheduledStartDate || job.dueDate,
+                        forecastDueDate: job.forecastDueDate || job.dueDate
+                    };
+                }
+
+                // No schedule at all — compute from scratch
                 if (job.status === 'IN_PROGRESS') {
                     return applyRemainingSchedule(job, today);
                 }
@@ -1269,6 +1314,7 @@ export default function MasterSchedule() {
                             onJobRangeUpdate={handleJobRangeUpdate}
                             onPriorityUpdate={handlePriorityUpdate}
                             onNoGapsToggle={handleNoGapsToggle}
+                            onSkipDepartments={handleSkipDepartments}
                             priorityDepartment={showActiveOnly && visibleDepartments.size === 1 ? Array.from(visibleDepartments)[0] : undefined}
                             visibleDepartments={visibleDepartments}
                             showActiveOnly={showActiveOnly}
@@ -1594,6 +1640,7 @@ export default function MasterSchedule() {
             {rescheduleSuggestion && (
                 <RescheduleSuggestionPopover
                     suggestion={rescheduleSuggestion}
+                    onClose={() => setRescheduleSuggestion(null)}
                     onAccept={async (suggestion) => {
                         try {
                             const job = jobs.find(j => j.id === suggestion.jobId);
