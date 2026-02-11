@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "predeploy:firebase": "npm run lint && npx tsc --noEmit && npm run build",
+    "deploy:firebase": "npx firebase-tools deploy --only hosting,firestore",
     "regression:harness:baseline": "node scripts/regression/harness.js baseline",
     "regression:harness:verify": "node scripts/regression/harness.js verify"
   },

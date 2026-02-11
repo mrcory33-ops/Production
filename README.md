@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Production Scheduler
 
-## Getting Started
+Next.js production scheduling app for EMJAC operations, deployed to Firebase with server API routes enabled.
 
-First, run the development server:
+## Local Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+App runs at `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Required Firebase Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Enable **Authentication -> Sign-in method -> Anonymous**.
+2. Ensure Firestore exists for project `production-scheduler-em-ops`.
+3. Deploy Firestore rules from this repo before opening public access.
 
-## Learn More
+## Environment Variables
 
-To learn more about Next.js, take a look at the following resources:
+Create `.env.local` with:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+NEXT_PUBLIC_FIREBASE_API_KEY=...
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=...
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=...
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
+NEXT_PUBLIC_FIREBASE_APP_ID=...
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# Used by server-side token verification (can be same as NEXT_PUBLIC_FIREBASE_API_KEY)
+FIREBASE_WEB_API_KEY=...
 
-## Deploy on Vercel
+# Optional email notifications for special purchase adjustments
+SMTP_HOST=...
+SMTP_PORT=587
+SMTP_USER=...
+SMTP_PASS=...
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Validation Before Deploy
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npx tsc --noEmit
+npm run build
+```
+
+## Firebase Deploy (Next.js + API Routes)
+
+This repo is configured for Firebase web framework hosting (`firebase.json` uses `frameworksBackend`).
+
+```bash
+npx firebase-tools login
+npx firebase-tools use production-scheduler-em-ops
+npx firebase-tools deploy --only hosting,firestore
+```
+
+## Notes
+
+- Deploying as static export is intentionally disabled because `/api/parse-pdf` and `/api/notify-sp-adjustment` require server runtime.
+- The app now requires authenticated Firebase sessions for Firestore and API endpoints.

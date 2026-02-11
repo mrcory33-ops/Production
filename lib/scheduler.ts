@@ -2226,6 +2226,8 @@ const computeWeeklyLoad = (jobs: Job[]): WeeklyCapacityMap => {
         const isBigRock = points >= BIG_ROCK_CONFIG.threshold;
 
         for (const [dept, schedule] of Object.entries(job.departmentSchedule)) {
+            // Skip Engineering burden for nesting-ready jobs — work is done, just waiting for Laser
+            if (dept === 'Engineering' && job.readyToNest) continue;
             const start = new Date(schedule.start);
             const end = new Date(schedule.end);
 

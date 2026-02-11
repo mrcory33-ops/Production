@@ -11,9 +11,12 @@ import {
     calculateQuotePoints,
     simulateQuoteSchedule,
     checkAdvancedFeasibility,
+    simulateRepTrade,
+    RepTradeResult,
 } from '@/lib/whatIfScheduler';
 import { BIG_ROCK_CONFIG } from '@/lib/scoringConfig';
 import type { ParsedSalesAcknowledgment } from '@/lib/parseSalesAcknowledgment';
+import { authenticatedFetch } from '@/lib/authenticatedFetch';
 import { format } from 'date-fns';
 
 interface QuoteEstimatorProps {
@@ -32,6 +35,11 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
     const [estimate, setEstimate] = useState<QuoteEstimate | null>(null);
     const [feasibility, setFeasibility] = useState<FeasibilityCheck | null>(null);
     const [loading, setLoading] = useState(false);
+
+    // Rep Trade state
+    const [repCode, setRepCode] = useState<string>('');
+    const [repTradeResult, setRepTradeResult] = useState<RepTradeResult | null>(null);
+    const [repTradeLoading, setRepTradeLoading] = useState(false);
 
     // PDF upload state
     const [parsedPdf, setParsedPdf] = useState<ParsedSalesAcknowledgment | null>(null);
@@ -53,7 +61,7 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
             const formData = new FormData();
             formData.append('file', file);
 
-            const res = await fetch('/api/parse-pdf', { method: 'POST', body: formData });
+            const res = await authenticatedFetch('/api/parse-pdf', { method: 'POST', body: formData });
             const result = await res.json();
 
             if (!res.ok) {
@@ -205,6 +213,31 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
             alert('Failed to calculate estimate');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const analyzeRepTrades = async () => {
+        if (!repCode.trim() || !estimate) return;
+
+        setRepTradeLoading(true);
+        setRepTradeResult(null);
+
+        try {
+            const input: QuoteInput = {
+                totalValue: parseFloat(totalValue),
+                totalQuantity: parseInt(totalQuantity),
+                bigRocks: hasBigRocks ? bigRocks : [],
+                isREF,
+                engineeringReadyDate: new Date(engineeringDate),
+                targetDate: mode === 'TARGET' && targetDate ? new Date(targetDate) : undefined,
+            };
+
+            const result = await simulateRepTrade(repCode.trim(), input, existingJobs);
+            setRepTradeResult(result);
+        } catch (error) {
+            console.error('Error analyzing rep trades:', error);
+        } finally {
+            setRepTradeLoading(false);
         }
     };
 
@@ -645,10 +678,41 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                     <span className="text-5xl font-black text-white">03</span>
                                                 </div>
                                                 <div className="flex items-center gap-2 mb-6">
-                                                    <div className={`w-2 h-2 rounded-full ${feasibility.withOT.achievable ? 'bg-orange-500 shadow-[0_0_8px_#f97316]' : 'bg-[#555]'}`}></div>
+                                                    <div className={`w-2 h-2 rounded-full ${feasibility.withOT.achievable ? 'bg-orange-500 shadow-[0_0_8px_#f97316]' : feasibility.withOT.overCapacityDepts.length > 0 ? 'bg-red-500 shadow-[0_0_8px_#ef4444]' : 'bg-[#555]'}`}></div>
                                                     <span className="text-xs font-black uppercase tracking-widest text-[#888]">Overtime Required</span>
                                                 </div>
-                                                {feasibility.withOT.recommendedTier ? (
+
+                                                {/* Case 1: Departments already over capacity — OT not applicable */}
+                                                {feasibility.withOT.overCapacityDepts.length > 0 ? (
+                                                    <>
+                                                        <p className="text-sm font-bold text-red-400 mb-2">⛔ Departments Already Over Capacity</p>
+                                                        <p className="text-xs text-[#aaa] mb-3">
+                                                            OT cannot be offered because the shop is already overloaded. Departments need to clear existing work first.
+                                                        </p>
+                                                        <div className="space-y-1.5">
+                                                            {/* Deduplicate by department, show worst week */}
+                                                            {Array.from(
+                                                                feasibility.withOT.overCapacityDepts.reduce((map, d) => {
+                                                                    const existing = map.get(d.department);
+                                                                    if (!existing || d.load > existing.load) map.set(d.department, d);
+                                                                    return map;
+                                                                }, new Map<string, typeof feasibility.withOT.overCapacityDepts[0]>()).values()
+                                                            ).map((d, i) => (
+                                                                <div key={i} className="flex items-center justify-between bg-[#1e1e1e] px-3 py-2 rounded-lg border border-red-500/20">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                                                        <span className="text-xs font-bold text-[#ccc]">{d.department}</span>
+                                                                    </div>
+                                                                    <span className="text-[10px] font-bold text-red-400">
+                                                                        {d.load}pts / {d.capacity}pts cap
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </>
+
+                                                    /* Case 2: OT has a recommendation */
+                                                ) : feasibility.withOT.recommendedTier ? (
                                                     <>
                                                         <p className="text-sm font-bold text-[#ccc] mb-1">Recommended: Tier {feasibility.withOT.recommendedTier}</p>
                                                         <p className="text-sm text-[#bbb]">
@@ -674,6 +738,8 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                             <p className="text-xs text-red-400 font-bold mt-2">✕ Best possible: {format(feasibility.withOT.completionDate, 'MMM dd')}</p>
                                                         )}
                                                     </>
+
+                                                    /* Case 3: No OT needed */
                                                 ) : (
                                                     <p className="text-sm text-emerald-400 font-bold">No OT needed</p>
                                                 )}
@@ -687,10 +753,13 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                     <h3 className="text-xl font-black text-white uppercase tracking-tight mb-8">Execution Roadmap</h3>
                                     <div className="grid gap-4">
                                         {estimate.timeline.map((dept, idx) => (
-                                            <div key={dept.department} className="flex flex-col sm:flex-row sm:items-center gap-4 bg-[#2a2a2a] p-4 rounded-xl border border-[#383838] group hover:border-[#555] transition-all">
+                                            <div key={dept.department} className="flex flex-col sm:flex-row sm:items-start gap-4 bg-[#2a2a2a] p-4 rounded-xl border border-[#383838] group hover:border-[#555] transition-all">
                                                 <div className="sm:w-36 shrink-0">
                                                     <span className="text-xs font-black text-[#777] uppercase tracking-widest block mb-1">Process {idx + 1}</span>
                                                     <span className="font-bold text-[#ccc] text-sm">{dept.department}</span>
+                                                    {dept.weeklyCapacity && (
+                                                        <span className="text-[10px] text-[#555] block mt-0.5">{dept.weeklyCapacity} pts/wk</span>
+                                                    )}
                                                 </div>
                                                 <div className="flex-1">
                                                     <div className="flex justify-between text-[10px] font-black uppercase text-[#888] mb-2">
@@ -700,10 +769,24 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                     </div>
                                                     <div className="h-3 bg-[#333] rounded-full overflow-hidden relative">
                                                         <div
-                                                            className="absolute inset-y-0 left-0 bg-gradient-to-r from-[#666] to-[#999] rounded-full group-hover:from-[#888] group-hover:to-[#bbb] transition-colors duration-500"
+                                                            className={`absolute inset-y-0 left-0 rounded-full transition-colors duration-500 ${dept.capacityDelayDays && dept.capacityDelayDays > 0
+                                                                ? 'bg-gradient-to-r from-amber-600/80 to-amber-500/80 group-hover:from-amber-500 group-hover:to-amber-400'
+                                                                : 'bg-gradient-to-r from-[#666] to-[#999] group-hover:from-[#888] group-hover:to-[#bbb]'
+                                                                }`}
                                                             style={{ width: `${Math.min(100, (dept.duration / 14) * 100)}%` }}
                                                         ></div>
                                                     </div>
+                                                    {dept.capacityDelayDays != null && dept.capacityDelayDays > 0 && dept.earliestDate && (
+                                                        <div className="mt-2 flex items-center gap-2 text-[10px]">
+                                                            <span className="text-amber-500 font-black uppercase tracking-wider">⚠ Capacity Queue</span>
+                                                            <span className="text-[#666]">·</span>
+                                                            <span className="text-[#888]">
+                                                                Ready {format(dept.earliestDate, 'MMM d')} → Slot opens {format(dept.startDate, 'MMM d')}
+                                                            </span>
+                                                            <span className="text-[#666]">·</span>
+                                                            <span className="text-amber-500/80 font-bold">+{dept.capacityDelayDays}d wait</span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
@@ -713,6 +796,191 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                         )}
                     </div>
                 </div>
+
+                {/* ═══════════════════════════════════════════════════════ */}
+                {/* Rep Capacity Trade */}
+                {/* ═══════════════════════════════════════════════════════ */}
+                {estimate && (
+                    <div className="bg-[#1a1a2e] rounded-2xl p-8 border border-indigo-500/20 shadow-lg">
+                        <h3 className="text-xl font-black text-white uppercase tracking-tight mb-2">
+                            🤝 Rep Capacity Trade
+                        </h3>
+                        <p className="text-[#888] text-sm mb-6">
+                            Enter your rep code to find your Engineering jobs that could be delayed to speed up this quote.
+                        </p>
+
+                        {/* Input row */}
+                        <div className="flex gap-3 items-end mb-6">
+                            <div className="flex-1 max-w-[200px]">
+                                <label className="text-[10px] font-black text-[#666] uppercase tracking-widest block mb-2">
+                                    Rep Code
+                                </label>
+                                <input
+                                    type="text"
+                                    value={repCode}
+                                    onChange={(e) => setRepCode(e.target.value.toUpperCase())}
+                                    placeholder="e.g. AD, EN, OB"
+                                    maxLength={4}
+                                    className="w-full bg-[#222] border border-[#444] rounded-lg px-4 py-2.5 text-white text-sm font-mono tracking-widest focus:outline-none focus:border-indigo-500 transition-colors uppercase"
+                                />
+                            </div>
+                            <button
+                                onClick={analyzeRepTrades}
+                                disabled={!repCode.trim() || repTradeLoading}
+                                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-[#333] disabled:text-[#666] text-white text-sm font-bold rounded-lg transition-colors"
+                            >
+                                {repTradeLoading ? 'Analyzing…' : 'Analyze Trades'}
+                            </button>
+                        </div>
+
+                        {/* Results */}
+                        {repTradeResult && (
+                            <div className="space-y-6">
+                                {/* No candidates */}
+                                {repTradeResult.candidates.length === 0 && (
+                                    <div className="text-center py-8 text-[#666]">
+                                        <p className="text-lg font-bold">No movable jobs found</p>
+                                        <p className="text-sm mt-1">Rep &quot;{repTradeResult.repCode}&quot; has no jobs still in Engineering</p>
+                                    </div>
+                                )}
+
+                                {/* Candidate SO table */}
+                                {repTradeResult.candidates.length > 0 && (
+                                    <>
+                                        <div>
+                                            <h4 className="text-xs font-black text-[#777] uppercase tracking-widest mb-3">
+                                                {repTradeResult.repCode}&apos;s Jobs Still in Engineering
+                                            </h4>
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-sm">
+                                                    <thead>
+                                                        <tr className="text-[10px] font-black text-[#555] uppercase tracking-widest border-b border-[#333]">
+                                                            <th className="text-left py-2 pr-3">Sales Order</th>
+                                                            <th className="text-left py-2 pr-3">Work Orders</th>
+                                                            <th className="text-right py-2 pr-3">Points</th>
+                                                            <th className="text-right py-2">Current Due</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {repTradeResult.candidates.map((c) => (
+                                                            <tr key={c.salesOrder} className="border-b border-[#2a2a2a] hover:bg-[#222] transition-colors">
+                                                                <td className="py-2.5 pr-3 font-mono text-indigo-400 font-bold">{c.salesOrder}</td>
+                                                                <td className="py-2.5 pr-3 text-[#aaa]">
+                                                                    {c.jobs.map((j) => j.id).join(', ')}
+                                                                </td>
+                                                                <td className="py-2.5 pr-3 text-right font-mono text-white">{c.totalPoints}</td>
+                                                                <td className="py-2.5 text-right text-[#aaa]">{format(c.currentDueDate, 'MMM d')}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+
+                                        {/* Trade Scenarios — grouped by SO with 1w/2w tiers */}
+                                        {repTradeResult.scenarios.length > 0 ? (
+                                            <div>
+                                                <h4 className="text-xs font-black text-[#777] uppercase tracking-widest mb-3">
+                                                    Trade Scenarios — What If You Push Due Dates?
+                                                </h4>
+                                                <div className="grid gap-4">
+                                                    {/* Group scenarios by SO */}
+                                                    {Array.from(new Set(repTradeResult.scenarios.map((s) => s.candidate.salesOrder))).map((so) => {
+                                                        const soScenarios = repTradeResult.scenarios.filter((s) => s.candidate.salesOrder === so);
+                                                        const candidate = soScenarios[0].candidate;
+                                                        return (
+                                                            <div key={so} className="bg-[#222] rounded-xl p-4 border border-[#333]">
+                                                                <div className="flex items-center gap-2 mb-3">
+                                                                    <span className="text-indigo-400 font-mono font-bold text-sm">SO {candidate.salesOrder}</span>
+                                                                    <span className="text-[#555]">·</span>
+                                                                    <span className="text-[#888] text-xs">{candidate.totalPoints} pts</span>
+                                                                    <span className="text-[#555]">·</span>
+                                                                    <span className="text-[#888] text-xs">{candidate.jobs.length} WO{candidate.jobs.length !== 1 ? 's' : ''}</span>
+                                                                    <span className="text-[#555]">·</span>
+                                                                    <span className="text-[#888] text-xs">Due {format(candidate.currentDueDate, 'MMM d')}</span>
+                                                                </div>
+                                                                <div className="grid sm:grid-cols-2 gap-3">
+                                                                    {soScenarios.map((s) => (
+                                                                        <div
+                                                                            key={s.pushWeeks}
+                                                                            className={`rounded-lg p-3 border transition-colors ${s.improvementDays > 0
+                                                                                ? 'bg-[#1a1a2e] border-indigo-500/30 hover:border-indigo-500/50'
+                                                                                : 'bg-[#1a1a1a] border-[#2a2a2a] opacity-60'
+                                                                                }`}
+                                                                        >
+                                                                            <div className="flex items-center justify-between gap-3">
+                                                                                <div>
+                                                                                    <div className="text-[10px] font-black text-[#666] uppercase tracking-widest mb-1">
+                                                                                        Push {s.pushWeeks} week{s.pushWeeks > 1 ? 's' : ''}
+                                                                                    </div>
+                                                                                    <p className="text-[#aaa] text-xs">
+                                                                                        <span className="text-[#888] line-through">{format(s.candidate.currentDueDate, 'MMM d')}</span>
+                                                                                        {' → '}
+                                                                                        <span className="text-amber-400 font-bold">{format(s.newDueDate, 'MMM d')}</span>
+                                                                                    </p>
+                                                                                    <p className="text-[#aaa] text-xs mt-0.5">
+                                                                                        Quote finishes <span className="text-white font-bold">{format(s.newCompletion, 'MMM d')}</span>
+                                                                                    </p>
+                                                                                </div>
+                                                                                <div className="text-right shrink-0">
+                                                                                    <div className={`text-xl font-black ${s.improvementDays > 0 ? 'text-green-400' : 'text-[#555]'}`}>
+                                                                                        {s.improvementDays > 0 ? `-${s.improvementDays}d` : '0d'}
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className={`mt-2 text-[10px] font-bold uppercase tracking-wider ${s.safeToMove ? 'text-green-500' : 'text-amber-500'}`}>
+                                                                                {s.safeToMove ? '✅ Safe — finishes before new due date' : '⚠️ Tight — may miss new due date'}
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-center py-4 text-[#666]">
+                                                <p className="text-sm">No trade scenarios available.</p>
+                                            </div>
+                                        )}
+
+                                        {/* Push All scenarios */}
+                                        {repTradeResult.pushAllScenarios.length > 0 && repTradeResult.candidates.length > 1 && (
+                                            <div className="bg-gradient-to-r from-indigo-900/30 to-purple-900/30 rounded-xl p-5 border border-indigo-500/30">
+                                                <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-3">
+                                                    🚀 Best Case — Push All {repTradeResult.candidates.length} SOs
+                                                </h4>
+                                                <div className="grid sm:grid-cols-2 gap-3">
+                                                    {repTradeResult.pushAllScenarios.map((pa) => (
+                                                        <div key={pa.pushWeeks} className="bg-[#111]/50 rounded-lg p-3">
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <div>
+                                                                    <div className="text-[10px] font-black text-[#666] uppercase tracking-widest mb-1">
+                                                                        Push all {pa.pushWeeks}w
+                                                                    </div>
+                                                                    <p className="text-[#aaa] text-xs">
+                                                                        Quote finishes <span className="text-white font-bold">{format(pa.newCompletion, 'MMM d')}</span>
+                                                                    </p>
+                                                                </div>
+                                                                <div className={`text-2xl font-black ${pa.improvementDays > 0 ? 'text-green-400' : 'text-[#555]'}`}>
+                                                                    {pa.improvementDays > 0 ? `-${pa.improvementDays}d` : '0d'}
+                                                                </div>
+                                                            </div>
+                                                            <div className={`mt-2 text-[10px] font-bold uppercase tracking-wider ${pa.allSafe ? 'text-green-500' : 'text-amber-500'}`}>
+                                                                {pa.allSafe ? '✅ All safe' : '⚠️ Some may be tight'}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <p className="text-center text-[#777] text-xs mt-8 font-medium">
                     &copy; {new Date().getFullYear()} EMJAC Manufacturing Systems &bull; V7.3.0 Engine &bull; All Rights Reserved

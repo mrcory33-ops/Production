@@ -1360,7 +1360,7 @@ function FutureWorkView({ jobs, department, onPullToQueue }: { jobs: Job[]; depa
                 <div className="flex flex-col items-center justify-center h-48 text-[#555]">
                     <Eye className="w-12 h-12 mb-4 opacity-30" />
                     {searchTerm ? (
-                        <p className="text-sm font-mono uppercase tracking-wider">No jobs matching "{searchTerm}"</p>
+                        <p className="text-sm font-mono uppercase tracking-wider">No jobs matching &quot;{searchTerm}&quot;</p>
                     ) : (
                         <>
                             <p className="text-sm font-mono uppercase tracking-wider">No upcoming jobs for {department}</p>

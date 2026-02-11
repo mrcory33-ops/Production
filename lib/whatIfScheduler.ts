@@ -1,6 +1,6 @@
 import { Department, ProductType, Job } from '@/types';
 import { addDays, isWeekend, startOfWeek, format, differenceInDays, startOfDay } from 'date-fns';
-import { calculateDeptDuration } from './departmentConfig';
+import { calculateDeptDuration, DEPARTMENT_CONFIG } from './departmentConfig';
 
 // ─────────────────────────────────────────────────────────────
 // Constants — aligned with scheduler.ts and SCHEDULING_ENGINE.md
@@ -9,8 +9,21 @@ import { calculateDeptDuration } from './departmentConfig';
 /** $650 in quoted fabrication value ≈ 1 welding point */
 const DOLLAR_TO_POINT_RATIO = 650;
 
-/** Standard weekly capacity per department */
+/** Standard weekly capacity per department (fallback) */
 const BASE_WEEKLY_CAPACITY = 850;
+
+/** Department-specific weekly capacities derived from DEPARTMENT_CONFIG */
+const DEPT_WEEKLY_CAPACITY: Record<Department, number> = Object.fromEntries(
+    Object.entries(DEPARTMENT_CONFIG).map(([dept, config]) => [
+        dept,
+        config.dailyCapacity * 5  // 5-day work week
+    ])
+) as Record<Department, number>;
+
+/** Get the weekly capacity for a department, with optional OT bonus */
+function getDeptWeeklyCapacity(dept: Department, otBonus = 0): number {
+    return (DEPT_WEEKLY_CAPACITY[dept] || BASE_WEEKLY_CAPACITY) + otBonus;
+}
 
 /**
  * OT Tiers — derived from real shop hours (21.25 pts/hr)
@@ -69,6 +82,12 @@ export interface DepartmentTimeline {
     duration: number;
     /** Actual capacity used in each week by this dept */
     weeklyLoad?: Record<string, number>;
+    /** Pipelined earliest start before capacity check */
+    earliestDate?: Date;
+    /** Days delayed due to capacity constraints */
+    capacityDelayDays?: number;
+    /** Weekly capacity used for this department */
+    weeklyCapacity?: number;
 }
 
 export interface JobMovement {
@@ -123,6 +142,7 @@ export interface FeasibilityCheck {
         completionDate: Date | null;
         otWeeks: OTWeekDetail[];
         recommendedTier: 1 | 2 | 3 | 4 | null;
+        overCapacityDepts: { department: string; weekKey: string; load: number; capacity: number }[];
     };
 
     recommendation: 'ACCEPT' | 'ACCEPT_WITH_MOVES' | 'ACCEPT_WITH_OT' | 'DECLINE';
@@ -216,6 +236,28 @@ function getDepartmentGap(points: number): number {
     if (points >= BIG_ROCK_THRESHOLD) return 1;    // Big Rock: 1 day gap
     if (points >= 8) return 0.5;                    // Medium: half-day gap
     return 0;                                       // Small: no gap
+}
+
+/**
+ * Pipeline overlap fraction — the next department can start after this
+ * percentage of the previous department's duration is complete.
+ * 0.3 = 30% → if Engineering takes 10 days, Laser can start on day 4.
+ */
+const PIPELINE_OVERLAP = 0.30;
+
+/**
+ * Calculate when the next department can start, accounting for pipelining.
+ * Instead of waiting for 100% completion, the next dept starts after
+ * PIPELINE_OVERLAP of the previous dept's duration + the inter-dept gap.
+ */
+function getPipelinedNextStart(
+    prevStart: Date,
+    prevDuration: number,
+    gap: number
+): Date {
+    const overlapDays = Math.max(1, Math.ceil(prevDuration * PIPELINE_OVERLAP));
+    const pipelinedDate = addWorkDays(prevStart, overlapDays + Math.ceil(gap) - 1);
+    return pipelinedDate;
 }
 
 /**
@@ -408,10 +450,10 @@ function applyMovesToCapacityMap(
 /**
  * Simulate scheduling a new quote through the 6-dept pipeline.
  *
- * IMPORTANT: Uses SEQUENTIAL scheduling (each dept completes before
- * the next starts, plus department gap). This matches the actual
- * scheduler behavior. The old overlapping (25%) timeline was
- * misleadingly optimistic.
+ * Uses PIPELINED scheduling — each dept starts after 30% of the
+ * previous dept's duration is complete, plus department gap.
+ * This models real shop-floor handoffs where partial batches
+ * move to the next station before the full order is done.
  */
 export async function simulateQuoteSchedule(
     input: QuoteInput,
@@ -441,14 +483,21 @@ export async function simulateQuoteSchedule(
 
         // Find earliest slot where this dept has capacity
         const slotStart = findAvailableSlot(
-            dept, currentDate, totalPoints, duration, capacityMap, BASE_WEEKLY_CAPACITY
+            dept, currentDate, totalPoints, duration, capacityMap, getDeptWeeklyCapacity(dept)
         );
         const endDate = getEndDateForDuration(slotStart, duration);
+
+        // 🔧 DEBUG: trace pipelining
+        console.log(`🔧 [PIPELINE] ${dept}: duration=${duration}d, cap=${getDeptWeeklyCapacity(dept)}/wk, earliest=${format(currentDate, 'MMM d')}, slotStart=${format(slotStart, 'MMM d')}, endDate=${format(endDate, 'MMM d')}${slotStart > currentDate ? ' ⚠️ CAPACITY PUSHED' : ''}`);
 
         // Record weekly load for this dept leg
         const weeklyLoad: Record<string, number> = {};
         const dist = distributeLoadByWorkday(slotStart, endDate, totalPoints);
         for (const [wk, pts] of dist.entries()) weeklyLoad[wk] = Math.round(pts);
+
+        const capacityDelayDays = slotStart > currentDate
+            ? differenceInDays(slotStart, currentDate)
+            : 0;
 
         timeline.push({
             department: dept,
@@ -456,6 +505,9 @@ export async function simulateQuoteSchedule(
             endDate,
             duration,
             weeklyLoad,
+            earliestDate: new Date(currentDate),
+            capacityDelayDays,
+            weeklyCapacity: getDeptWeeklyCapacity(dept),
         });
 
         // "Reserve" this job's load in the capacity map for subsequent depts
@@ -465,8 +517,11 @@ export async function simulateQuoteSchedule(
             weekMap.set(dept, (weekMap.get(dept) || 0) + pts);
         }
 
-        // Next dept starts after this dept ends + gap (sequential, not overlapping)
-        currentDate = addWorkDays(endDate, Math.ceil(gap));
+        // Next dept starts after 30% of this dept's duration + gap (pipelined)
+        currentDate = getPipelinedNextStart(slotStart, duration, gap);
+        if (i < DEPARTMENTS.length - 1) {
+            console.log(`🔧 [PIPELINE] → next dept (${DEPARTMENTS[i + 1]}) earliest: ${format(currentDate, 'MMM d')} (30% of ${duration}d = ${Math.ceil(duration * PIPELINE_OVERLAP)}d from ${format(slotStart, 'MMM d')})`);
+        }
     }
 
     const estimatedCompletion = timeline[timeline.length - 1]?.endDate || addDays(input.engineeringReadyDate, 30);
@@ -512,7 +567,7 @@ export async function checkAdvancedFeasibility(
 
     for (const dept of DEPARTMENTS) {
         const duration = calculateDeptDuration(dept, totalPoints, productType);
-        const slotStart = findAvailableSlot(dept, asIsDate, totalPoints, duration, baseCapacityMap, BASE_WEEKLY_CAPACITY);
+        const slotStart = findAvailableSlot(dept, asIsDate, totalPoints, duration, baseCapacityMap, getDeptWeeklyCapacity(dept));
 
         if (slotStart > asIsDate) {
             const delayDays = differenceInDays(slotStart, asIsDate);
@@ -520,7 +575,7 @@ export async function checkAdvancedFeasibility(
         }
 
         const endDate = getEndDateForDuration(slotStart, duration);
-        asIsDate = addWorkDays(endDate, Math.ceil(gap));
+        asIsDate = getPipelinedNextStart(slotStart, duration, gap);
     }
 
     // asIsDate is now the projected completion under Tier 1
@@ -583,9 +638,9 @@ export async function checkAdvancedFeasibility(
         let moveDate = new Date(input.engineeringReadyDate);
         for (const dept of DEPARTMENTS) {
             const duration = calculateDeptDuration(dept, totalPoints, productType);
-            const slotStart = findAvailableSlot(dept, moveDate, totalPoints, duration, capacityMapAfterMoves, BASE_WEEKLY_CAPACITY);
+            const slotStart = findAvailableSlot(dept, moveDate, totalPoints, duration, capacityMapAfterMoves, getDeptWeeklyCapacity(dept));
             const endDate = getEndDateForDuration(slotStart, duration);
-            moveDate = addWorkDays(endDate, Math.ceil(gap));
+            moveDate = getPipelinedNextStart(slotStart, duration, gap);
         }
 
         withMovesCompletion = moveDate;
@@ -594,6 +649,9 @@ export async function checkAdvancedFeasibility(
 
     // ═══════════════════════════════════════════════════════════
     // TIER 3: WITH OT — use increased weekly capacity
+    // Only offer OT if no department is already OVER capacity.
+    // If departments are overloaded, OT won't help — the problem
+    // is structural (too many jobs), not a lack of extra hours.
     // ═══════════════════════════════════════════════════════════
 
     let withOTAchievable = false;
@@ -602,7 +660,32 @@ export async function checkAdvancedFeasibility(
     let bestOTTier: 1 | 2 | 3 | 4 | null = null;
     const otBaseCapacityMap = jobsToMove.length > 0 ? capacityMapAfterMoves : baseCapacityMap;
 
-    if (!asIsAchievable && !withMovesAchievable) {
+    // Pre-check: are any departments already OVER their base capacity
+    // in weeks between today and the target date?
+    const overCapacityDepts: { department: string; weekKey: string; load: number; capacity: number }[] = [];
+    const todayStr = format(startOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    const targetStr = format(startOfWeek(targetDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+
+    for (const [wk, deptMap] of otBaseCapacityMap.entries()) {
+        // Only check weeks in the relevant window (today → target)
+        if (wk < todayStr || wk > targetStr) continue;
+
+        for (const [dept, load] of deptMap.entries()) {
+            const cap = getDeptWeeklyCapacity(dept as Department);
+            if (load > cap) {
+                overCapacityDepts.push({
+                    department: dept,
+                    weekKey: wk,
+                    load: Math.round(load),
+                    capacity: cap,
+                });
+            }
+        }
+    }
+
+    const deptsAlreadyOverloaded = overCapacityDepts.length > 0;
+
+    if (!asIsAchievable && !withMovesAchievable && !deptsAlreadyOverloaded) {
         // Try each OT tier from lowest to highest until one works
         for (const otTier of OT_TIERS) {
             let otDate = new Date(input.engineeringReadyDate);
@@ -612,7 +695,7 @@ export async function checkAdvancedFeasibility(
             for (const dept of DEPARTMENTS) {
                 const duration = calculateDeptDuration(dept, totalPoints, productType);
                 const slotStart = findAvailableSlot(
-                    dept, otDate, totalPoints, duration, otCapacityMap, otTier.weeklyCapacity
+                    dept, otDate, totalPoints, duration, otCapacityMap, getDeptWeeklyCapacity(dept, otTier.bonusPoints)
                 );
                 const endDate = getEndDateForDuration(slotStart, duration);
 
@@ -624,7 +707,7 @@ export async function checkAdvancedFeasibility(
                     weekMap.set(dept, (weekMap.get(dept) || 0) + pts);
                 }
 
-                otDate = addWorkDays(endDate, Math.ceil(gap));
+                otDate = getPipelinedNextStart(slotStart, duration, gap);
             }
 
             if (otDate <= targetDate) {
@@ -633,16 +716,17 @@ export async function checkAdvancedFeasibility(
                 bestOTTier = otTier.tier;
 
                 // Build OT week breakdown for this tier
-                // Identify which weeks actually needed OT (exceeded base 850)
+                // Identify which weeks actually needed OT (exceeded dept-specific capacity)
                 for (const [wk, deptMap] of otCapacityMap.entries()) {
                     for (const [dept, load] of deptMap.entries()) {
-                        if (load > BASE_WEEKLY_CAPACITY) {
-                            const excess = Math.round(load - BASE_WEEKLY_CAPACITY);
+                        const deptBase = getDeptWeeklyCapacity(dept as Department);
+                        if (load > deptBase) {
+                            const excess = Math.round(load - deptBase);
                             otWeekDetails.push({
                                 weekKey: wk,
                                 department: dept as Department,
                                 currentLoad: Math.round(load),
-                                baseCapacity: BASE_WEEKLY_CAPACITY,
+                                baseCapacity: deptBase,
                                 excess,
                                 recommendedTier: otTier.tier,
                                 tierLabel: otTier.label,
@@ -665,10 +749,10 @@ export async function checkAdvancedFeasibility(
             for (const dept of DEPARTMENTS) {
                 const duration = calculateDeptDuration(dept, totalPoints, productType);
                 const slotStart = findAvailableSlot(
-                    dept, otDate, totalPoints, duration, otCapacityMap, maxTier.weeklyCapacity
+                    dept, otDate, totalPoints, duration, otCapacityMap, getDeptWeeklyCapacity(dept, maxTier.bonusPoints)
                 );
                 const endDate = getEndDateForDuration(slotStart, duration);
-                otDate = addWorkDays(endDate, Math.ceil(gap));
+                otDate = getPipelinedNextStart(slotStart, duration, gap);
             }
 
             otCompletion = otDate;
@@ -695,8 +779,13 @@ export async function checkAdvancedFeasibility(
         explanation = `Can complete by ${format(otCompletion, 'MMM d, yyyy')} with ${tierInfo.label} overtime (${tierInfo.weekdayHours}${tierInfo.saturdayHours !== 'N/A' ? ` + Sat ${tierInfo.saturdayHours}` : ''}). adds +${tierInfo.bonusPoints}pts/week capacity.`;
     } else {
         recommendation = 'DECLINE';
-        const bestDate = otCompletion ? format(otCompletion, 'MMM d, yyyy') : 'unknown';
-        explanation = `Cannot meet target date of ${format(targetDate, 'MMM d, yyyy')} even with job moves and max overtime (Tier 4). Earliest possible: ${bestDate}.`;
+        if (deptsAlreadyOverloaded) {
+            const uniqueDepts = [...new Set(overCapacityDepts.map(d => d.department))];
+            explanation = `Cannot meet target date of ${format(targetDate, 'MMM d, yyyy')}. Overtime was not considered because ${uniqueDepts.join(', ')} ${uniqueDepts.length === 1 ? 'is' : 'are'} already over capacity in the existing schedule. The shop needs to reduce its current workload before taking on more work.`;
+        } else {
+            const bestDate = otCompletion ? format(otCompletion, 'MMM d, yyyy') : 'unknown';
+            explanation = `Cannot meet target date of ${format(targetDate, 'MMM d, yyyy')} even with job moves and max overtime (Tier 4). Earliest possible: ${bestDate}.`;
+        }
     }
 
     return {
@@ -717,6 +806,7 @@ export async function checkAdvancedFeasibility(
             completionDate: otCompletion,
             otWeeks: otWeekDetails,
             recommendedTier: bestOTTier,
+            overCapacityDepts,
         },
         recommendation,
         explanation,
@@ -765,5 +855,225 @@ export function checkTargetFeasibility(
         gapDays,
         earliestCompletion: estimate.estimatedCompletion,
         bottleneck,
+    };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Sales Rep Capacity Trade
+/** A group of jobs under one sales order that could be pushed back */
+export interface RepTradeCandidate {
+    salesOrder: string;
+    jobs: {
+        id: string;
+        name: string;
+        weldingPoints: number;
+        dueDate: Date;
+    }[];
+    totalPoints: number;
+    currentDueDate: Date; // Earliest due date across jobs in the SO
+}
+
+/** Result of pushing one SO group's due date back */
+export interface RepTradeScenario {
+    candidate: RepTradeCandidate;
+    pushWeeks: number;               // How many weeks pushed (1 or 2)
+    newDueDate: Date;                // The pushed-back due date (what to tell the customer)
+    newCompletion: Date;             // New quote completion after this trade
+    improvementDays: number;         // Days saved on the new quote vs baseline
+    safeToMove: boolean;             // True if pushed job's schedule ends before new due date
+}
+
+/** Full rep trade analysis result */
+export interface RepTradeResult {
+    repCode: string;
+    candidates: RepTradeCandidate[];
+    baselineCompletion: Date;
+    scenarios: RepTradeScenario[];          // Individual SO trades per tier, ranked by improvement
+    pushAllScenarios: {                     // Push everything at each tier
+        pushWeeks: number;
+        newCompletion: Date;
+        improvementDays: number;
+        allSafe: boolean;
+    }[];
+}
+
+const PUSH_TIERS = [1, 2]; // Push due dates by 1 week and 2 weeks
+
+/**
+ * Simulate the impact of a sales rep pushing back their own jobs' DUE DATES
+ * to free capacity for the new quote. The rep would call their customer and
+ * negotiate a later delivery — the scheduler then deprioritizes those jobs.
+ *
+ * The system:
+ *  1. Finds the rep's jobs still in Engineering
+ *  2. Groups them by sales order
+ *  3. For each SO, simulates pushing the due date (+ entire schedule) back 1 and 2 weeks
+ *  4. Rebuilds the capacity map to see how the new quote benefits
+ *  5. Checks that each pushed job's schedule still ends before the new due date
+ */
+export async function simulateRepTrade(
+    repCode: string,
+    quoteInput: QuoteInput,
+    existingJobs: Job[]
+): Promise<RepTradeResult> {
+    // 1. Get baseline completion (no trades)
+    const baselineEstimate = await simulateQuoteSchedule(quoteInput, existingJobs);
+    const baselineCompletion = baselineEstimate.estimatedCompletion;
+
+    // 2. Find rep's jobs still in Engineering
+    const repEngJobs = existingJobs.filter(
+        (j) =>
+            j.salesRepCode?.toUpperCase() === repCode.toUpperCase() &&
+            j.currentDepartment === 'Engineering'
+    );
+
+    // 3. Group by sales order
+    const soGroups = new Map<string, Job[]>();
+    for (const job of repEngJobs) {
+        const so = job.salesOrder || job.id;
+        if (!soGroups.has(so)) soGroups.set(so, []);
+        soGroups.get(so)!.push(job);
+    }
+
+    // 4. Build candidates
+    const candidates: RepTradeCandidate[] = [];
+    for (const [so, jobs] of soGroups.entries()) {
+        const totalPoints = jobs.reduce((sum, j) => sum + (Number(j.weldingPoints) || 0), 0);
+        const dueDates = jobs
+            .filter((j) => j.dueDate)
+            .map((j) => new Date(j.dueDate));
+        const currentDueDate = dueDates.length > 0
+            ? new Date(Math.min(...dueDates.map((d) => d.getTime())))
+            : new Date();
+
+        candidates.push({
+            salesOrder: so,
+            jobs: jobs.map((j) => ({
+                id: j.id,
+                name: j.name,
+                weldingPoints: Number(j.weldingPoints) || 0,
+                dueDate: new Date(j.dueDate),
+            })),
+            totalPoints,
+            currentDueDate,
+        });
+    }
+
+    // Sort candidates by total points (biggest capacity impact first)
+    candidates.sort((a, b) => b.totalPoints - a.totalPoints);
+
+    /**
+     * Shift a job forward by N work days: push dueDate AND every department
+     * in its schedule forward. This frees capacity in earlier weeks.
+     */
+    const pushJobForward = (j: Job, days: number): Job => {
+        const shifted: Job = {
+            ...j,
+            dueDate: addWorkDays(new Date(j.dueDate), days),
+        };
+        if (j.departmentSchedule) {
+            const newSchedule: Record<string, { start: string; end: string }> = {};
+            for (const [dept, sched] of Object.entries(j.departmentSchedule as Record<string, { start: string; end: string }>)) {
+                newSchedule[dept] = {
+                    start: addWorkDays(new Date(sched.start), days).toISOString(),
+                    end: addWorkDays(new Date(sched.end), days).toISOString(),
+                };
+            }
+            shifted.departmentSchedule = newSchedule;
+        }
+        return shifted;
+    };
+
+    /**
+     * Check if ALL pushed jobs finish before their new due date.
+     * Looks at the latest department end date vs the new due date.
+     */
+    const checkSafety = (jobIds: Set<string>, pushDays: number): boolean => {
+        for (const jid of jobIds) {
+            const orig = existingJobs.find((j) => j.id === jid);
+            if (!orig?.departmentSchedule || !orig.dueDate) continue;
+
+            const newDue = addWorkDays(new Date(orig.dueDate), pushDays);
+
+            // Find latest end across all departments in the PUSHED schedule
+            let latestEnd: Date | null = null;
+            for (const sched of Object.values(orig.departmentSchedule as Record<string, { start: string; end: string }>)) {
+                const end = addWorkDays(new Date(sched.end), pushDays);
+                if (!latestEnd || end > latestEnd) latestEnd = end;
+            }
+
+            if (latestEnd && latestEnd > newDue) return false;
+        }
+        return true;
+    };
+
+    // 5. Simulate individual SO trades at each push tier
+    const scenarios: RepTradeScenario[] = [];
+    for (const candidate of candidates) {
+        const candidateJobIds = new Set(candidate.jobs.map((j) => j.id));
+
+        for (const weeks of PUSH_TIERS) {
+            const pushDays = weeks * 5;
+
+            const modifiedJobs = existingJobs.map((j) => {
+                if (!candidateJobIds.has(j.id)) return j;
+                return pushJobForward(j, pushDays);
+            });
+
+            const tradeEstimate = await simulateQuoteSchedule(quoteInput, modifiedJobs);
+            const newCompletion = tradeEstimate.estimatedCompletion;
+            const improvementDays = differenceInDays(baselineCompletion, newCompletion);
+
+            scenarios.push({
+                candidate,
+                pushWeeks: weeks,
+                newDueDate: addWorkDays(candidate.currentDueDate, pushDays),
+                newCompletion,
+                improvementDays: Math.max(0, improvementDays),
+                safeToMove: checkSafety(candidateJobIds, pushDays),
+            });
+        }
+    }
+
+    // Sort: 1-week scenarios first within each SO, then by improvement
+    scenarios.sort((a, b) => {
+        if (a.candidate.salesOrder !== b.candidate.salesOrder) {
+            return b.improvementDays - a.improvementDays;
+        }
+        return a.pushWeeks - b.pushWeeks;
+    });
+
+    // 6. "Push all" scenarios at each tier
+    const pushAllScenarios: RepTradeResult['pushAllScenarios'] = [];
+    if (candidates.length > 0) {
+        const allCandidateJobIds = new Set(candidates.flatMap((c) => c.jobs.map((j) => j.id)));
+
+        for (const weeks of PUSH_TIERS) {
+            const pushDays = weeks * 5;
+
+            const modifiedJobs = existingJobs.map((j) => {
+                if (!allCandidateJobIds.has(j.id)) return j;
+                return pushJobForward(j, pushDays);
+            });
+
+            const allTradeEstimate = await simulateQuoteSchedule(quoteInput, modifiedJobs);
+            const allNewCompletion = allTradeEstimate.estimatedCompletion;
+            const allImprovementDays = differenceInDays(baselineCompletion, allNewCompletion);
+
+            pushAllScenarios.push({
+                pushWeeks: weeks,
+                newCompletion: allNewCompletion,
+                improvementDays: Math.max(0, allImprovementDays),
+                allSafe: checkSafety(allCandidateJobIds, pushDays),
+            });
+        }
+    }
+
+    return {
+        repCode,
+        candidates,
+        baselineCompletion,
+        scenarios,
+        pushAllScenarios,
     };
 }

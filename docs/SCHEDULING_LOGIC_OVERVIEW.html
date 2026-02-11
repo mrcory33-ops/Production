@@ -358,7 +358,7 @@
     <div class="hero">
         <h1>Emjac Production Scheduler</h1>
         <p>Complete Reference Guide — Every Algorithm, Rule, and Decision That Drives the Scheduling Engine</p>
-        <div class="badge">February 2026 · v2.0</div>
+        <div class="badge">February 2026 · v2.1</div>
     </div>
 
     <div class="container">
@@ -372,6 +372,7 @@
                 <li><a href="#duration">Duration Calculation Engine</a></li>
                 <li><a href="#products">Product-Type Routing (FAB / DOORS / HARMONIC)</a></li>
                 <li><a href="#door-welding">Door Welding Sub-Pipeline</a></li>
+                <li><a href="#nesting">Ready-to-Nest Indicator & Engineering Exclusion</a></li>
                 <li><a href="#batching">Batching Logic</a></li>
                 <li><a href="#urgency">Urgency Scoring System</a></li>
                 <li><a href="#capacity">Capacity Buckets & Weekly Load</a></li>
@@ -387,7 +388,8 @@
         <section id="pipeline">
             <h2>1. The 5-Phase Scheduling Pipeline</h2>
             <p>Every time jobs are imported or recalculated, they pass through a <strong>5-Phase Pipeline</strong> in
-                <code>schedulePipeline()</code>. Each phase transforms the schedule incrementally.</p>
+                <code>schedulePipeline()</code>. Each phase transforms the schedule incrementally.
+            </p>
 
             <div class="flow">
                 <div class="step">Phase 1: Ideal Placement</div><span class="arrow">→</span>
@@ -517,48 +519,48 @@
                 <tr>
                     <td><span class="color-dot" style="background:#3b82f6"></span><strong>Engineering</strong></td>
                     <td>9</td>
-                    <td>22 pts/day</td>
-                    <td>198 pts</td>
+                    <td>19 pts/day</td>
+                    <td>171 pts</td>
                     <td>1</td>
-                    <td>Parallelism disabled</td>
+                    <td>Parallelism disabled; Ready-to-Nest jobs excluded from capacity (see Section 6)</td>
                 </tr>
                 <tr>
                     <td><span class="color-dot" style="background:#f97316"></span><strong>Laser</strong></td>
                     <td>3</td>
-                    <td>67.5 pts/day</td>
-                    <td>202.5 pts</td>
+                    <td>57 pts/day</td>
+                    <td>171 pts</td>
                     <td>2</td>
                     <td>Requires "Ready to Nest" flag</td>
                 </tr>
                 <tr>
                     <td><span class="color-dot" style="background:#eab308"></span><strong>Press Brake</strong></td>
                     <td>6</td>
-                    <td>33 pts/day</td>
-                    <td>198 pts</td>
+                    <td>28.5 pts/day</td>
+                    <td>171 pts</td>
                     <td>4</td>
                     <td>—</td>
                 </tr>
                 <tr>
                     <td><span class="color-dot" style="background:#ef4444"></span><strong>Welding</strong></td>
                     <td>13 total</td>
-                    <td>15 pts/day</td>
-                    <td>195 pts</td>
+                    <td>14 pts/day</td>
+                    <td>182 pts</td>
                     <td>—</td>
                     <td>Split pools (see below)</td>
                 </tr>
                 <tr>
                     <td><span class="color-dot" style="background:#14b8a6"></span><strong>Polishing</strong></td>
                     <td>11 total</td>
-                    <td>18 pts/day</td>
-                    <td>198 pts</td>
+                    <td>16 pts/day</td>
+                    <td>176 pts</td>
                     <td>—</td>
                     <td>Split pools (see below)</td>
                 </tr>
                 <tr>
                     <td><span class="color-dot" style="background:#8b5cf6"></span><strong>Assembly</strong></td>
                     <td>12</td>
-                    <td>16 pts/day</td>
-                    <td>192 pts</td>
+                    <td>14 pts/day</td>
+                    <td>168 pts</td>
                     <td>3</td>
                     <td>1.25× time multiplier</td>
                 </tr>
@@ -566,7 +568,8 @@
 
             <h3>Split Worker Pools (Welding & Polishing)</h3>
             <p>Welding and Polishing have separate pools for different product lines. A DOORS job
-                <strong>cannot</strong> use FAB capacity and vice versa.</p>
+                <strong>cannot</strong> use FAB capacity and vice versa.
+            </p>
 
             <table>
                 <tr>
@@ -578,23 +581,23 @@
                 <tr>
                     <td rowspan="2"><strong>Welding</strong></td>
                     <td>Pool 1 (DOORS)</td>
-                    <td>6 workers @ 15 pts/day</td>
+                    <td>6 workers @ 14 pts/day</td>
                     <td><span class="tag tag-doors">DOORS</span></td>
                 </tr>
                 <tr>
                     <td>Pool 2 (FAB/HARMONIC)</td>
-                    <td>7 workers @ 15 pts/day</td>
+                    <td>7 workers @ 14 pts/day</td>
                     <td><span class="tag tag-fab">FAB</span> <span class="tag tag-harmonic">HARMONIC</span></td>
                 </tr>
                 <tr>
                     <td rowspan="2"><strong>Polishing</strong></td>
                     <td>Pool 1 (FAB/HARMONIC)</td>
-                    <td>6 workers @ 18 pts/day</td>
+                    <td>6 workers @ 16 pts/day</td>
                     <td><span class="tag tag-fab">FAB</span> <span class="tag tag-harmonic">HARMONIC</span></td>
                 </tr>
                 <tr>
                     <td>Pool 2 (DOORS)</td>
-                    <td>5 workers @ 18 pts/day</td>
+                    <td>5 workers @ 16 pts/day</td>
                     <td><span class="tag tag-doors">DOORS</span></td>
                 </tr>
             </table>
@@ -715,7 +718,8 @@
             <h2>5. Door Welding Sub-Pipeline</h2>
             <p>For DOORS jobs in Welding, the system replaces the standard point-based duration with a
                 <strong>quantity-driven throughput model</strong>. Doors go through specific sub-stages depending on
-                their type.</p>
+                their type.
+            </p>
 
             <h3>Door Classification</h3>
             <table>
@@ -823,13 +827,58 @@
         </section>
 
         <!-- ═══════════════════════════════════════════════════ -->
-        <!-- SECTION 6: BATCHING -->
+        <!-- SECTION 6: READY-TO-NEST -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <section id="nesting">
+            <h2>6. Ready-to-Nest Indicator & Engineering Exclusion</h2>
+            <p>The <strong>Ready-to-Nest</strong> flag indicates that a job's engineering drawings are complete and
+                ready to be nested for laser cutting. This is a critical handoff signal between Engineering and Laser
+                departments.</p>
+
+            <h3>Data Source</h3>
+            <ul>
+                <li><strong>Column:</strong> <code>ReadyToNest</code> (column AX) in the Global Shop XLSX export.</li>
+                <li><strong>Value:</strong> Boolean — <code>true</code> when drawings are released for nesting.</li>
+                <li><strong>Independence:</strong> The flag is set regardless of which department the job is currently
+                    in.
+                    A job can be in Laser or later and still have <code>readyToNest: true</code>, because its drawings
+                    were completed while it was in Engineering.</li>
+            </ul>
+
+            <h3>Engineering Capacity Exclusion</h3>
+            <p>When a job is flagged <code>readyToNest: true</code>, its Engineering department segment is
+                <strong>excluded from capacity calculations</strong>. This is applied in three places:
+            </p>
+            <ol>
+                <li><strong>Weekly Load (<code>computeWeeklyLoad</code>):</strong> The Engineering contribution for
+                    nesting-ready jobs is skipped, freeing up Engineering capacity for other jobs.</li>
+                <li><strong>Department Analytics:</strong> Engineering utilization and load-per-week charts exclude
+                    these jobs.</li>
+                <li><strong>Capacity heatmaps:</strong> The department analytics panel reflects accurate Engineering
+                    headroom.</li>
+            </ol>
+            <div class="formula">if (dept === 'Engineering' && job.readyToNest) → skip capacity contribution</div>
+
+            <h3>Gantt Chart Visualization</h3>
+            <p>On the Gantt chart, nesting-ready jobs display an <strong>"N" badge</strong> on their Engineering
+                segment. This provides an at-a-glance visual indicator that the drawings are ready for laser nesting.
+            </p>
+            <div class="callout success"><strong>Why this matters:</strong> Without the exclusion, Engineering capacity
+                would appear overloaded because jobs that have completed their engineering work would still count
+                against
+                Engineering's weekly load. The "N" badge lets supervisors quickly identify which jobs are ready
+                to move to nesting.</div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 7: BATCHING -->
         <!-- ═══════════════════════════════════════════════════ -->
         <section id="batching">
-            <h2>6. Batching Logic</h2>
+            <h2>7. Batching Logic</h2>
             <p>The scheduler groups similar jobs together to optimize shop floor setups. Batching affects
                 <strong>scheduling order</strong> (clustered jobs are scheduled adjacently) and batch sizes are tracked
-                for potential efficiency discounts.</p>
+                for potential efficiency discounts.
+            </p>
 
             <h3>Batch Categories</h3>
             <p>A job's description is normalized (lowercased, trimmed) and matched against pattern lists:</p>
@@ -899,10 +948,10 @@
         </section>
 
         <!-- ═══════════════════════════════════════════════════ -->
-        <!-- SECTION 7: URGENCY -->
+        <!-- SECTION 8: URGENCY -->
         <!-- ═══════════════════════════════════════════════════ -->
         <section id="urgency">
-            <h2>7. Urgency Scoring System</h2>
+            <h2>8. Urgency Scoring System</h2>
             <p>Every job receives a dynamic <strong>urgency score</strong> (sum of weighted factors). Higher score =
                 higher priority. Scores are recalculated on every import and can be adjusted via the Scoring Config
                 Panel.</p>
@@ -980,14 +1029,15 @@
 
             <div class="callout info"><strong>All factors are toggleable.</strong> Each factor has an
                 <code>enabled</code> flag. Disabled factors contribute 0 points. Values are configurable via the Scoring
-                Config Panel without code changes.</div>
+                Config Panel without code changes.
+            </div>
         </section>
 
         <!-- ═══════════════════════════════════════════════════ -->
-        <!-- SECTION 8: CAPACITY -->
+        <!-- SECTION 9: CAPACITY -->
         <!-- ═══════════════════════════════════════════════════ -->
         <section id="capacity">
-            <h2>8. Capacity Buckets & Weekly Load</h2>
+            <h2>9. Capacity Buckets & Weekly Load</h2>
 
             <h3>Capacity Tracking Structure</h3>
             <p>The scheduler maintains a <code>CapacityBuckets</code> map: each date has a record of points used per
@@ -1008,7 +1058,8 @@
             <div class="formula">Weekly Target = 850 points per department per week</div>
             <ul>
                 <li>Each job's welding points are distributed across its scheduled work days using a linear rate:
-                    <code>dailyRate = points / workDays</code>.</li>
+                    <code>dailyRate = points / workDays</code>.
+                </li>
                 <li>Contributions are aggregated into ISO weeks (e.g., <code>2026-W07</code>) per department.</li>
                 <li>A week-department pair exceeding 850 pts is flagged as <strong>overloaded</strong>.</li>
             </ul>
@@ -1027,10 +1078,10 @@
         </section>
 
         <!-- ═══════════════════════════════════════════════════ -->
-        <!-- SECTION 9: OVERTIME -->
+        <!-- SECTION 10: OVERTIME -->
         <!-- ═══════════════════════════════════════════════════ -->
         <section id="overtime">
-            <h2>9. Overtime Tier System</h2>
+            <h2>10. Overtime Tier System</h2>
             <p>When the schedule shows overloaded weeks, the analysis engine recommends overtime tiers. The system
                 models a <strong>4-tier progressive overtime</strong> structure:</p>
 
@@ -1090,10 +1141,10 @@
         </section>
 
         <!-- ═══════════════════════════════════════════════════ -->
-        <!-- SECTION 10: CALENDAR -->
+        <!-- SECTION 11: CALENDAR -->
         <!-- ═══════════════════════════════════════════════════ -->
         <section id="calendar">
-            <h2>10. Work Calendar & Gap Rules</h2>
+            <h2>11. Work Calendar & Gap Rules</h2>
 
             <h3>Work Week</h3>
             <ul>
@@ -1129,7 +1180,8 @@
             </table>
             <div class="callout success"><strong>No-Gaps Override:</strong> Any job can be flagged with
                 <code>noGaps = true</code> to eliminate all department gaps, allowing back-to-back department
-                transitions.</div>
+                transitions.
+            </div>
 
             <h3>Daily Department Limit</h3>
             <p>A single job can occupy at most <strong>2 departments per day</strong>
@@ -1142,10 +1194,10 @@
         </section>
 
         <!-- ═══════════════════════════════════════════════════ -->
-        <!-- SECTION 11: DATA IMPORT -->
+        <!-- SECTION 12: DATA IMPORT -->
         <!-- ═══════════════════════════════════════════════════ -->
         <section id="data">
-            <h2>11. Data Import & Synchronization</h2>
+            <h2>12. Data Import & Synchronization</h2>
 
             <h3>Excel Parsing</h3>
             <ul>
@@ -1156,7 +1208,21 @@
                 <li><strong>Welding Points:</strong> Sum of <code>DEPT4HRS</code> within the group.</li>
                 <li><strong>Due Date Priority:</strong> <code>WO_HEAD_DATE_DUE</code> > <code>PROMISED_DATE</code> >
                     <code>WO_DUE_DATE</code> > <code>JOB_DUE_DATE</code> > <code>DATE_DUE</code> >
-                    <code>SO_HEAD_DATE_DUE</code></li>
+                    <code>SO_HEAD_DATE_DUE</code>
+                </li>
+            </ul>
+
+            <h3>Ready-to-Nest Flag</h3>
+            <ul>
+                <li><strong>Column:</strong> <code>ReadyToNest</code> (column AX) — boolean
+                    <code>true</code>/<code>false</code>.
+                </li>
+                <li><strong>Effect:</strong> When <code>true</code>, the job is flagged as having completed engineering
+                    drawings and being ready for laser nesting. This triggers the Engineering capacity exclusion
+                    described
+                    in Section 6.</li>
+                <li><strong>Department-Independent:</strong> The flag is parsed directly from the XLSX column, with no
+                    dependency on which department the job is currently in.</li>
             </ul>
 
             <h3>Department Progression</h3>
@@ -1172,8 +1238,7 @@
 
             <h3>Filters & Exclusions</h3>
             <ul>
-                <li><strong>Door Min Points:</strong> DOORS jobs with < 30 welding points are excluded (reduces
-                        noise).</li>
+                <li><strong>Zero Welding Points:</strong> Jobs with less than 1 welding point are excluded.</li>
                 <li><strong>Year 2029:</strong> Due dates in 2029 are treated as placeholder/legacy and excluded.</li>
                 <li><strong>Shipped Flag:</strong> Jobs with "S" in <code>FLAG_SHIPPED</code> are excluded.</li>
             </ul>
@@ -1192,7 +1257,7 @@
         <div style="text-align:center;padding:48px 0;margin-top:40px;border-top:1px solid var(--border)">
             <p style="color:var(--text-dim);font-size:.85rem">Emjac Industries, Inc. — Production Scheduler Logic
                 Reference</p>
-            <p style="color:var(--border);font-size:.75rem">Generated February 10, 2026</p>
+            <p style="color:var(--border);font-size:.75rem">Generated February 10, 2026 · Updated February 11, 2026</p>
         </div>
 
     </div><!-- .container -->

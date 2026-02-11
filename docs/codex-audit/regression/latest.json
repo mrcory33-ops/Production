@@ -6,7 +6,7 @@
   "quoteEstimator": {
     "estimate": {
       "bigRockPoints": 192.29999999999998,
-      "estimatedCompletion": "2026-04-03T04:00:00.000Z",
+      "estimatedCompletion": "2026-04-08T04:00:00.000Z",
       "isBigRock": true,
       "remainingPoints": 92.3,
       "remainingQuantity": 23,
@@ -14,63 +14,63 @@
       "timeline": [
         {
           "department": "Engineering",
-          "duration": 13,
-          "endDate": "2026-02-25T05:00:00.000Z",
+          "duration": 15,
+          "endDate": "2026-02-27T05:00:00.000Z",
           "startDate": "2026-02-09T05:00:00.000Z",
           "weeklyLoad": {
-            "2026-02-09": 109,
-            "2026-02-16": 109,
-            "2026-02-23": 66
+            "2026-02-09": 95,
+            "2026-02-16": 95,
+            "2026-02-23": 95
           }
         },
         {
           "department": "Laser",
           "duration": 2.5,
-          "endDate": "2026-03-02T05:00:00.000Z",
-          "startDate": "2026-02-26T05:00:00.000Z",
-          "weeklyLoad": {
-            "2026-02-23": 190,
-            "2026-03-02": 95
-          }
-        },
-        {
-          "department": "Press Brake",
-          "duration": 2.5,
-          "endDate": "2026-03-05T05:00:00.000Z",
-          "startDate": "2026-03-03T05:00:00.000Z",
+          "endDate": "2026-03-04T05:00:00.000Z",
+          "startDate": "2026-03-02T05:00:00.000Z",
           "weeklyLoad": {
             "2026-03-02": 285
           }
         },
         {
-          "department": "Welding",
-          "duration": 6.5,
-          "endDate": "2026-03-16T04:00:00.000Z",
-          "startDate": "2026-03-06T05:00:00.000Z",
+          "department": "Press Brake",
+          "duration": 2.5,
+          "endDate": "2026-03-09T04:00:00.000Z",
+          "startDate": "2026-03-05T05:00:00.000Z",
           "weeklyLoad": {
-            "2026-03-02": 41,
-            "2026-03-09": 203,
-            "2026-03-16": 41
+            "2026-03-02": 190,
+            "2026-03-09": 95
+          }
+        },
+        {
+          "department": "Welding",
+          "duration": 7,
+          "endDate": "2026-03-18T04:00:00.000Z",
+          "startDate": "2026-03-10T04:00:00.000Z",
+          "weeklyLoad": {
+            "2026-03-09": 163,
+            "2026-03-16": 122
           }
         },
         {
           "department": "Polishing",
-          "duration": 5.5,
-          "endDate": "2026-03-24T04:00:00.000Z",
-          "startDate": "2026-03-17T04:00:00.000Z",
+          "duration": 6,
+          "endDate": "2026-03-26T04:00:00.000Z",
+          "startDate": "2026-03-19T04:00:00.000Z",
           "weeklyLoad": {
-            "2026-03-16": 190,
-            "2026-03-23": 95
+            "2026-03-16": 95,
+            "2026-03-23": 190
           }
         },
         {
           "department": "Assembly",
-          "duration": 7.5,
-          "endDate": "2026-04-03T04:00:00.000Z",
-          "startDate": "2026-03-25T04:00:00.000Z",
+          "duration": 8.5,
+          "endDate": "2026-04-08T04:00:00.000Z",
+          "startDate": "2026-03-27T04:00:00.000Z",
           "weeklyLoad": {
-            "2026-03-23": 107,
-            "2026-03-30": 178
+            "2026-03-23": 32,
+            "2026-03-30": 158,
+            "2026-04-06": 95
           }
         }
       ],
@@ -81,20 +81,20 @@
       "asIs": {
         "achievable": false,
         "bottlenecks": [],
-        "completionDate": "2026-04-06T04:00:00.000Z"
+        "completionDate": "2026-04-09T04:00:00.000Z"
       },
-      "explanation": "Cannot meet target date of Mar 5, 2026 even with job moves and max overtime (Tier 4). Earliest possible: Apr 6, 2026.",
+      "explanation": "Cannot meet target date of Mar 5, 2026 even with job moves and max overtime (Tier 4). Earliest possible: Apr 9, 2026.",
       "recommendation": "DECLINE",
       "withMoves": {
         "achievable": false,
         "capacityFreed": 0,
-        "completionDate": "2026-04-06T04:00:00.000Z",
+        "completionDate": "2026-04-09T04:00:00.000Z",
         "jobsToMove": [],
         "totalJobsAffected": 0
       },
       "withOT": {
         "achievable": false,
-        "completionDate": "2026-04-06T04:00:00.000Z",
+        "completionDate": "2026-04-09T04:00:00.000Z",
         "otWeeks": [],
         "recommendedTier": 4
       }
@@ -106,9 +106,9 @@
       "lateJobs": [
         {
           "bottleneckDept": "Unknown",
-          "daysLate": 9,
+          "daysLate": 14,
           "dueDate": "2026-02-19",
-          "estimatedCompletion": "2026-03-04",
+          "estimatedCompletion": "2026-03-11",
           "jobId": "WO-1001",
           "jobName": "Airlock Frame Set",
           "points": 122,
@@ -116,23 +116,53 @@
         },
         {
           "bottleneckDept": "Unknown",
-          "daysLate": 1,
-          "dueDate": "2026-02-24",
-          "estimatedCompletion": "2026-02-25",
-          "jobId": "WO-1002",
-          "jobName": "Door Leaf Package",
-          "points": 78,
-          "salesOrder": "SO-7002"
-        },
-        {
-          "bottleneckDept": "Unknown",
-          "daysLate": 1,
+          "daysLate": 12,
           "dueDate": "2026-03-05",
-          "estimatedCompletion": "2026-03-06",
+          "estimatedCompletion": "2026-03-23",
           "jobId": "WO-1005",
           "jobName": "Harmonic Painted Skid",
           "points": 61,
           "salesOrder": "SO-7005"
+        },
+        {
+          "bottleneckDept": "Unknown",
+          "daysLate": 7,
+          "dueDate": "2026-03-09",
+          "estimatedCompletion": "2026-03-18",
+          "jobId": "WO-1007",
+          "jobName": "NYCHA Door Package",
+          "points": 96,
+          "salesOrder": "SO-7002"
+        },
+        {
+          "bottleneckDept": "Unknown",
+          "daysLate": 5,
+          "dueDate": "2026-03-02",
+          "estimatedCompletion": "2026-03-09",
+          "jobId": "WO-1004",
+          "jobName": "Dish Table Build",
+          "points": 88,
+          "salesOrder": "SO-7004"
+        },
+        {
+          "bottleneckDept": "Unknown",
+          "daysLate": 2,
+          "dueDate": "2026-03-11",
+          "estimatedCompletion": "2026-03-13",
+          "jobId": "WO-1008",
+          "jobName": "Germfree Lab Casework",
+          "points": 74,
+          "salesOrder": "SO-7007"
+        },
+        {
+          "bottleneckDept": "Unknown",
+          "daysLate": 0,
+          "dueDate": "2026-03-06",
+          "estimatedCompletion": "2026-03-06",
+          "jobId": "WO-1006",
+          "jobName": "Corner Guard Batch",
+          "points": 39,
+          "salesOrder": "SO-7006"
         }
       ],
       "moveOptions": [],
@@ -142,9 +172,9 @@
         "lateJobs": [
           {
             "bottleneckDept": "Unknown",
-            "daysLate": 9,
+            "daysLate": 14,
             "dueDate": "2026-02-19",
-            "estimatedCompletion": "2026-03-04",
+            "estimatedCompletion": "2026-03-11",
             "jobId": "WO-1001",
             "jobName": "Airlock Frame Set",
             "points": 122,
@@ -152,23 +182,53 @@
           },
           {
             "bottleneckDept": "Unknown",
-            "daysLate": 1,
-            "dueDate": "2026-02-24",
-            "estimatedCompletion": "2026-02-25",
-            "jobId": "WO-1002",
-            "jobName": "Door Leaf Package",
-            "points": 78,
-            "salesOrder": "SO-7002"
-          },
-          {
-            "bottleneckDept": "Unknown",
-            "daysLate": 1,
+            "daysLate": 12,
             "dueDate": "2026-03-05",
-            "estimatedCompletion": "2026-03-06",
+            "estimatedCompletion": "2026-03-23",
             "jobId": "WO-1005",
             "jobName": "Harmonic Painted Skid",
             "points": 61,
             "salesOrder": "SO-7005"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 7,
+            "dueDate": "2026-03-09",
+            "estimatedCompletion": "2026-03-18",
+            "jobId": "WO-1007",
+            "jobName": "NYCHA Door Package",
+            "points": 96,
+            "salesOrder": "SO-7002"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 5,
+            "dueDate": "2026-03-02",
+            "estimatedCompletion": "2026-03-09",
+            "jobId": "WO-1004",
+            "jobName": "Dish Table Build",
+            "points": 88,
+            "salesOrder": "SO-7004"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 2,
+            "dueDate": "2026-03-11",
+            "estimatedCompletion": "2026-03-13",
+            "jobId": "WO-1008",
+            "jobName": "Germfree Lab Casework",
+            "points": 74,
+            "salesOrder": "SO-7007"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 0,
+            "dueDate": "2026-03-06",
+            "estimatedCompletion": "2026-03-06",
+            "jobId": "WO-1006",
+            "jobName": "Corner Guard Batch",
+            "points": 39,
+            "salesOrder": "SO-7006"
           }
         ],
         "overloadedWeeks": []
@@ -177,9 +237,9 @@
         "lateJobs": [
           {
             "bottleneckDept": "Unknown",
-            "daysLate": 9,
+            "daysLate": 14,
             "dueDate": "2026-02-19",
-            "estimatedCompletion": "2026-03-04",
+            "estimatedCompletion": "2026-03-11",
             "jobId": "WO-1001",
             "jobName": "Airlock Frame Set",
             "points": 122,
@@ -187,32 +247,62 @@
           },
           {
             "bottleneckDept": "Unknown",
-            "daysLate": 1,
-            "dueDate": "2026-02-24",
-            "estimatedCompletion": "2026-02-25",
-            "jobId": "WO-1002",
-            "jobName": "Door Leaf Package",
-            "points": 78,
-            "salesOrder": "SO-7002"
-          },
-          {
-            "bottleneckDept": "Unknown",
-            "daysLate": 1,
+            "daysLate": 12,
             "dueDate": "2026-03-05",
-            "estimatedCompletion": "2026-03-06",
+            "estimatedCompletion": "2026-03-23",
             "jobId": "WO-1005",
             "jobName": "Harmonic Painted Skid",
             "points": 61,
             "salesOrder": "SO-7005"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 7,
+            "dueDate": "2026-03-09",
+            "estimatedCompletion": "2026-03-18",
+            "jobId": "WO-1007",
+            "jobName": "NYCHA Door Package",
+            "points": 96,
+            "salesOrder": "SO-7002"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 5,
+            "dueDate": "2026-03-02",
+            "estimatedCompletion": "2026-03-09",
+            "jobId": "WO-1004",
+            "jobName": "Dish Table Build",
+            "points": 88,
+            "salesOrder": "SO-7004"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 2,
+            "dueDate": "2026-03-11",
+            "estimatedCompletion": "2026-03-13",
+            "jobId": "WO-1008",
+            "jobName": "Germfree Lab Casework",
+            "points": 74,
+            "salesOrder": "SO-7007"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 0,
+            "dueDate": "2026-03-06",
+            "estimatedCompletion": "2026-03-06",
+            "jobId": "WO-1006",
+            "jobName": "Corner Guard Batch",
+            "points": 39,
+            "salesOrder": "SO-7006"
           }
         ],
         "overloadedWeeks": []
       },
       "summary": {
-        "lateJobCount": 3,
-        "onTimeJobs": 5,
-        "projectedLateAfterMoves": 3,
-        "projectedLateAfterOT": 3,
+        "lateJobCount": 6,
+        "onTimeJobs": 2,
+        "projectedLateAfterMoves": 6,
+        "projectedLateAfterOT": 6,
         "totalExcessPoints": 0,
         "totalJobs": 8,
         "weeksRequiringOT": 0
@@ -222,9 +312,9 @@
       "lateJobs": [
         {
           "bottleneckDept": "Unknown",
-          "daysLate": 9,
+          "daysLate": 14,
           "dueDate": "2026-02-19",
-          "estimatedCompletion": "2026-03-04",
+          "estimatedCompletion": "2026-03-11",
           "jobId": "WO-1001",
           "jobName": "Airlock Frame Set",
           "points": 122,
@@ -232,23 +322,53 @@
         },
         {
           "bottleneckDept": "Unknown",
-          "daysLate": 1,
-          "dueDate": "2026-02-24",
-          "estimatedCompletion": "2026-02-25",
-          "jobId": "WO-1002",
-          "jobName": "Door Leaf Package",
-          "points": 78,
-          "salesOrder": "SO-7002"
-        },
-        {
-          "bottleneckDept": "Unknown",
-          "daysLate": 1,
+          "daysLate": 12,
           "dueDate": "2026-03-05",
-          "estimatedCompletion": "2026-03-06",
+          "estimatedCompletion": "2026-03-23",
           "jobId": "WO-1005",
           "jobName": "Harmonic Painted Skid",
           "points": 61,
           "salesOrder": "SO-7005"
+        },
+        {
+          "bottleneckDept": "Unknown",
+          "daysLate": 7,
+          "dueDate": "2026-03-09",
+          "estimatedCompletion": "2026-03-18",
+          "jobId": "WO-1007",
+          "jobName": "NYCHA Door Package",
+          "points": 96,
+          "salesOrder": "SO-7002"
+        },
+        {
+          "bottleneckDept": "Unknown",
+          "daysLate": 5,
+          "dueDate": "2026-03-02",
+          "estimatedCompletion": "2026-03-09",
+          "jobId": "WO-1004",
+          "jobName": "Dish Table Build",
+          "points": 88,
+          "salesOrder": "SO-7004"
+        },
+        {
+          "bottleneckDept": "Unknown",
+          "daysLate": 2,
+          "dueDate": "2026-03-11",
+          "estimatedCompletion": "2026-03-13",
+          "jobId": "WO-1008",
+          "jobName": "Germfree Lab Casework",
+          "points": 74,
+          "salesOrder": "SO-7007"
+        },
+        {
+          "bottleneckDept": "Unknown",
+          "daysLate": 0,
+          "dueDate": "2026-03-06",
+          "estimatedCompletion": "2026-03-06",
+          "jobId": "WO-1006",
+          "jobName": "Corner Guard Batch",
+          "points": 39,
+          "salesOrder": "SO-7006"
         }
       ],
       "moveOptions": [],
@@ -258,9 +378,9 @@
         "lateJobs": [
           {
             "bottleneckDept": "Unknown",
-            "daysLate": 9,
+            "daysLate": 14,
             "dueDate": "2026-02-19",
-            "estimatedCompletion": "2026-03-04",
+            "estimatedCompletion": "2026-03-11",
             "jobId": "WO-1001",
             "jobName": "Airlock Frame Set",
             "points": 122,
@@ -268,23 +388,53 @@
           },
           {
             "bottleneckDept": "Unknown",
-            "daysLate": 1,
-            "dueDate": "2026-02-24",
-            "estimatedCompletion": "2026-02-25",
-            "jobId": "WO-1002",
-            "jobName": "Door Leaf Package",
-            "points": 78,
-            "salesOrder": "SO-7002"
-          },
-          {
-            "bottleneckDept": "Unknown",
-            "daysLate": 1,
+            "daysLate": 12,
             "dueDate": "2026-03-05",
-            "estimatedCompletion": "2026-03-06",
+            "estimatedCompletion": "2026-03-23",
             "jobId": "WO-1005",
             "jobName": "Harmonic Painted Skid",
             "points": 61,
             "salesOrder": "SO-7005"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 7,
+            "dueDate": "2026-03-09",
+            "estimatedCompletion": "2026-03-18",
+            "jobId": "WO-1007",
+            "jobName": "NYCHA Door Package",
+            "points": 96,
+            "salesOrder": "SO-7002"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 5,
+            "dueDate": "2026-03-02",
+            "estimatedCompletion": "2026-03-09",
+            "jobId": "WO-1004",
+            "jobName": "Dish Table Build",
+            "points": 88,
+            "salesOrder": "SO-7004"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 2,
+            "dueDate": "2026-03-11",
+            "estimatedCompletion": "2026-03-13",
+            "jobId": "WO-1008",
+            "jobName": "Germfree Lab Casework",
+            "points": 74,
+            "salesOrder": "SO-7007"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 0,
+            "dueDate": "2026-03-06",
+            "estimatedCompletion": "2026-03-06",
+            "jobId": "WO-1006",
+            "jobName": "Corner Guard Batch",
+            "points": 39,
+            "salesOrder": "SO-7006"
           }
         ],
         "overloadedWeeks": []
@@ -293,9 +443,9 @@
         "lateJobs": [
           {
             "bottleneckDept": "Unknown",
-            "daysLate": 9,
+            "daysLate": 14,
             "dueDate": "2026-02-19",
-            "estimatedCompletion": "2026-03-04",
+            "estimatedCompletion": "2026-03-11",
             "jobId": "WO-1001",
             "jobName": "Airlock Frame Set",
             "points": 122,
@@ -303,32 +453,62 @@
           },
           {
             "bottleneckDept": "Unknown",
-            "daysLate": 1,
-            "dueDate": "2026-02-24",
-            "estimatedCompletion": "2026-02-25",
-            "jobId": "WO-1002",
-            "jobName": "Door Leaf Package",
-            "points": 78,
-            "salesOrder": "SO-7002"
-          },
-          {
-            "bottleneckDept": "Unknown",
-            "daysLate": 1,
+            "daysLate": 12,
             "dueDate": "2026-03-05",
-            "estimatedCompletion": "2026-03-06",
+            "estimatedCompletion": "2026-03-23",
             "jobId": "WO-1005",
             "jobName": "Harmonic Painted Skid",
             "points": 61,
             "salesOrder": "SO-7005"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 7,
+            "dueDate": "2026-03-09",
+            "estimatedCompletion": "2026-03-18",
+            "jobId": "WO-1007",
+            "jobName": "NYCHA Door Package",
+            "points": 96,
+            "salesOrder": "SO-7002"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 5,
+            "dueDate": "2026-03-02",
+            "estimatedCompletion": "2026-03-09",
+            "jobId": "WO-1004",
+            "jobName": "Dish Table Build",
+            "points": 88,
+            "salesOrder": "SO-7004"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 2,
+            "dueDate": "2026-03-11",
+            "estimatedCompletion": "2026-03-13",
+            "jobId": "WO-1008",
+            "jobName": "Germfree Lab Casework",
+            "points": 74,
+            "salesOrder": "SO-7007"
+          },
+          {
+            "bottleneckDept": "Unknown",
+            "daysLate": 0,
+            "dueDate": "2026-03-06",
+            "estimatedCompletion": "2026-03-06",
+            "jobId": "WO-1006",
+            "jobName": "Corner Guard Batch",
+            "points": 39,
+            "salesOrder": "SO-7006"
           }
         ],
         "overloadedWeeks": []
       },
       "summary": {
-        "lateJobCount": 3,
-        "onTimeJobs": 5,
-        "projectedLateAfterMoves": 3,
-        "projectedLateAfterOT": 3,
+        "lateJobCount": 6,
+        "onTimeJobs": 2,
+        "projectedLateAfterMoves": 6,
+        "projectedLateAfterOT": 6,
         "totalExcessPoints": 0,
         "totalJobs": 8,
         "weeksRequiringOT": 0
@@ -344,28 +524,28 @@
         ],
         "departmentSchedule": {
           "Assembly": {
-            "end": "2026-03-04T05:00:00.000Z",
-            "start": "2026-02-27T05:00:00.000Z"
+            "end": "2026-03-11T04:00:00.000Z",
+            "start": "2026-03-06T05:00:00.000Z"
           },
           "Engineering": {
             "end": "2026-02-16T05:00:00.000Z",
             "start": "2026-02-09T05:00:00.000Z"
           },
           "Laser": {
-            "end": "2026-02-17T05:00:00.000Z",
-            "start": "2026-02-17T05:00:00.000Z"
-          },
-          "Polishing": {
-            "end": "2026-02-26T05:00:00.000Z",
-            "start": "2026-02-24T05:00:00.000Z"
-          },
-          "Press Brake": {
             "end": "2026-02-18T05:00:00.000Z",
             "start": "2026-02-18T05:00:00.000Z"
           },
+          "Polishing": {
+            "end": "2026-03-04T05:00:00.000Z",
+            "start": "2026-03-02T05:00:00.000Z"
+          },
+          "Press Brake": {
+            "end": "2026-02-20T05:00:00.000Z",
+            "start": "2026-02-20T05:00:00.000Z"
+          },
           "Welding": {
-            "end": "2026-02-23T05:00:00.000Z",
-            "start": "2026-02-19T05:00:00.000Z"
+            "end": "2026-02-26T05:00:00.000Z",
+            "start": "2026-02-24T05:00:00.000Z"
           }
         },
         "description": "frame knock down 14 ga stainless",
@@ -382,8 +562,33 @@
         "progressStatus": "SLIPPING",
         "quantity": 8,
         "readyToNest": true,
+        "requiresOT": true,
         "salesOrder": "SO-7001",
         "salesperson": "Sales Team",
+        "scheduledDepartmentByDate": {
+          "2026-02-09": "Engineering",
+          "2026-02-10": "Engineering",
+          "2026-02-11": "Engineering",
+          "2026-02-12": "Engineering",
+          "2026-02-13": "Engineering",
+          "2026-02-14": "Engineering",
+          "2026-02-15": "Engineering",
+          "2026-02-16": "Engineering",
+          "2026-02-18": "Laser",
+          "2026-02-20": "Press Brake",
+          "2026-02-24": "Welding",
+          "2026-02-25": "Welding",
+          "2026-02-26": "Welding",
+          "2026-03-02": "Polishing",
+          "2026-03-03": "Polishing",
+          "2026-03-04": "Polishing",
+          "2026-03-06": "Assembly",
+          "2026-03-07": "Assembly",
+          "2026-03-08": "Assembly",
+          "2026-03-09": "Assembly",
+          "2026-03-10": "Assembly",
+          "2026-03-11": "Assembly"
+        },
         "scheduledStartDate": "2026-02-09T05:00:00.000Z",
         "schedulingConflict": true,
         "sizeClass": "SMALL",
@@ -412,48 +617,68 @@
         ],
         "departmentSchedule": {
           "Assembly": {
-            "end": "2026-02-25T05:00:00.000Z",
-            "start": "2026-02-23T05:00:00.000Z"
-          },
-          "Engineering": {
-            "end": "2026-02-12T05:00:00.000Z",
-            "start": "2026-02-09T05:00:00.000Z"
-          },
-          "Laser": {
-            "end": "2026-02-13T05:00:00.000Z",
-            "start": "2026-02-13T05:00:00.000Z"
-          },
-          "Polishing": {
-            "end": "2026-02-20T05:00:00.000Z",
+            "end": "2026-02-23T05:00:00.000Z",
             "start": "2026-02-19T05:00:00.000Z"
           },
-          "Press Brake": {
-            "end": "2026-02-16T05:00:00.000Z",
-            "start": "2026-02-16T05:00:00.000Z"
+          "Engineering": {
+            "end": "2026-02-06T05:00:00.000Z",
+            "start": "2026-02-03T05:00:00.000Z"
           },
-          "Welding": {
+          "Laser": {
+            "end": "2026-02-09T05:00:00.000Z",
+            "start": "2026-02-09T05:00:00.000Z"
+          },
+          "Polishing": {
             "end": "2026-02-18T05:00:00.000Z",
             "start": "2026-02-17T05:00:00.000Z"
+          },
+          "Press Brake": {
+            "end": "2026-02-11T05:00:00.000Z",
+            "start": "2026-02-11T05:00:00.000Z"
+          },
+          "Welding": {
+            "end": "2026-02-16T05:00:00.000Z",
+            "start": "2026-02-13T05:00:00.000Z"
           }
         },
         "description": "door leaf lock seam 16 ga stainless",
+        "doorSubType": "standard_lockseam",
         "dueDate": "2026-02-24T00:00:00.000Z",
         "fastShip": false,
         "id": "WO-1002",
-        "isOverdue": false,
+        "isOverdue": true,
         "isPriority": false,
         "name": "Door Leaf Package",
         "notes": "",
         "openPOs": false,
         "partNumber": "PN-DEFAULT",
         "productType": "DOORS",
-        "progressStatus": "SLIPPING",
+        "progressStatus": "ON_TRACK",
         "quantity": 6,
         "readyToNest": true,
         "salesOrder": "SO-7002",
         "salesperson": "Sales Team",
-        "scheduledStartDate": "2026-02-09T05:00:00.000Z",
-        "schedulingConflict": true,
+        "scheduledDepartmentByDate": {
+          "2026-02-03": "Engineering",
+          "2026-02-04": "Engineering",
+          "2026-02-05": "Engineering",
+          "2026-02-06": "Engineering",
+          "2026-02-09": "Laser",
+          "2026-02-11": "Press Brake",
+          "2026-02-13": "Welding",
+          "2026-02-14": "Welding",
+          "2026-02-15": "Welding",
+          "2026-02-16": "Welding",
+          "2026-02-17": "Polishing",
+          "2026-02-18": "Polishing",
+          "2026-02-19": "Assembly",
+          "2026-02-20": "Assembly",
+          "2026-02-21": "Assembly",
+          "2026-02-22": "Assembly",
+          "2026-02-23": "Assembly"
+        },
+        "scheduledStartDate": "2026-02-03T05:00:00.000Z",
+        "schedulingConflict": false,
         "sizeClass": "SMALL",
         "status": "PENDING",
         "updatedAt": "2026-02-07T00:00:00.000Z",
@@ -469,7 +694,15 @@
           "stallPenalty": 0
         },
         "urgencyScore": 24,
-        "weldingPoints": 78
+        "weldingPoints": 78,
+        "weldingSubStages": [
+          {
+            "color": "#ef4444",
+            "durationDays": 2,
+            "label": "P",
+            "stage": "press"
+          }
+        ]
       },
       {
         "closedPOs": false,
@@ -480,28 +713,28 @@
         ],
         "departmentSchedule": {
           "Assembly": {
-            "end": "2026-02-25T05:00:00.000Z",
-            "start": "2026-02-24T05:00:00.000Z"
+            "end": "2026-02-26T05:00:00.000Z",
+            "start": "2026-02-25T05:00:00.000Z"
           },
           "Engineering": {
-            "end": "2026-02-13T05:00:00.000Z",
-            "start": "2026-02-11T05:00:00.000Z"
-          },
-          "Laser": {
-            "end": "2026-02-16T05:00:00.000Z",
+            "end": "2026-02-18T05:00:00.000Z",
             "start": "2026-02-16T05:00:00.000Z"
           },
+          "Laser": {
+            "end": "2026-02-18T05:00:00.000Z",
+            "start": "2026-02-18T05:00:00.000Z"
+          },
           "Polishing": {
-            "end": "2026-02-23T05:00:00.000Z",
-            "start": "2026-02-20T05:00:00.000Z"
+            "end": "2026-02-24T05:00:00.000Z",
+            "start": "2026-02-23T05:00:00.000Z"
           },
           "Press Brake": {
-            "end": "2026-02-17T05:00:00.000Z",
-            "start": "2026-02-17T05:00:00.000Z"
+            "end": "2026-02-18T05:00:00.000Z",
+            "start": "2026-02-18T05:00:00.000Z"
           },
           "Welding": {
-            "end": "2026-02-19T05:00:00.000Z",
-            "start": "2026-02-18T05:00:00.000Z"
+            "end": "2026-02-20T05:00:00.000Z",
+            "start": "2026-02-19T05:00:00.000Z"
           }
         },
         "description": "wall panels 18 ga galvanized",
@@ -518,15 +751,52 @@
         "progressStatus": "ON_TRACK",
         "quantity": 14,
         "readyToNest": true,
+        "remainingDepartmentSchedule": {
+          "Assembly": {
+            "end": "2026-02-26T05:00:00.000Z",
+            "start": "2026-02-25T05:00:00.000Z"
+          },
+          "Engineering": {
+            "end": "2026-02-18T05:00:00.000Z",
+            "start": "2026-02-16T05:00:00.000Z"
+          },
+          "Laser": {
+            "end": "2026-02-18T05:00:00.000Z",
+            "start": "2026-02-18T05:00:00.000Z"
+          },
+          "Polishing": {
+            "end": "2026-02-24T05:00:00.000Z",
+            "start": "2026-02-23T05:00:00.000Z"
+          },
+          "Press Brake": {
+            "end": "2026-02-18T05:00:00.000Z",
+            "start": "2026-02-18T05:00:00.000Z"
+          },
+          "Welding": {
+            "end": "2026-02-20T05:00:00.000Z",
+            "start": "2026-02-19T05:00:00.000Z"
+          }
+        },
         "salesOrder": "SO-7003",
         "salesperson": "Sales Team",
-        "scheduledStartDate": "2026-02-11T05:00:00.000Z",
+        "scheduledDepartmentByDate": {
+          "2026-02-16": "Engineering",
+          "2026-02-17": "Engineering",
+          "2026-02-18": "Press Brake",
+          "2026-02-19": "Welding",
+          "2026-02-20": "Welding",
+          "2026-02-23": "Polishing",
+          "2026-02-24": "Polishing",
+          "2026-02-25": "Assembly",
+          "2026-02-26": "Assembly"
+        },
+        "scheduledStartDate": "2026-02-16T05:00:00.000Z",
         "schedulingConflict": false,
         "sizeClass": "SMALL",
         "status": "PENDING",
         "updatedAt": "2026-02-07T00:00:00.000Z",
         "urgencyFactors": {
-          "bigRockWeight": 10,
+          "bigRockWeight": 0,
           "dueDateProximity": 11,
           "fastShipBonus": 0,
           "harmonicBonus": 0,
@@ -536,7 +806,7 @@
           "slippageRisk": 0,
           "stallPenalty": 0
         },
-        "urgencyScore": 21,
+        "urgencyScore": 11,
         "weldingPoints": 55
       },
       {
@@ -548,28 +818,28 @@
         ],
         "departmentSchedule": {
           "Assembly": {
-            "end": "2026-02-26T05:00:00.000Z",
-            "start": "2026-02-24T05:00:00.000Z"
+            "end": "2026-03-09T04:00:00.000Z",
+            "start": "2026-03-05T05:00:00.000Z"
           },
           "Engineering": {
-            "end": "2026-02-13T05:00:00.000Z",
-            "start": "2026-02-10T05:00:00.000Z"
+            "end": "2026-02-17T05:00:00.000Z",
+            "start": "2026-02-11T05:00:00.000Z"
           },
           "Laser": {
-            "end": "2026-02-16T05:00:00.000Z",
-            "start": "2026-02-16T05:00:00.000Z"
+            "end": "2026-02-19T05:00:00.000Z",
+            "start": "2026-02-19T05:00:00.000Z"
           },
           "Polishing": {
-            "end": "2026-02-23T05:00:00.000Z",
-            "start": "2026-02-20T05:00:00.000Z"
+            "end": "2026-03-03T05:00:00.000Z",
+            "start": "2026-03-02T05:00:00.000Z"
           },
           "Press Brake": {
-            "end": "2026-02-17T05:00:00.000Z",
-            "start": "2026-02-17T05:00:00.000Z"
+            "end": "2026-02-23T05:00:00.000Z",
+            "start": "2026-02-23T05:00:00.000Z"
           },
           "Welding": {
-            "end": "2026-02-19T05:00:00.000Z",
-            "start": "2026-02-18T05:00:00.000Z"
+            "end": "2026-02-26T05:00:00.000Z",
+            "start": "2026-02-25T05:00:00.000Z"
           }
         },
         "description": "dish table 14 ga ss304",
@@ -583,13 +853,34 @@
         "openPOs": false,
         "partNumber": "PN-DEFAULT",
         "productType": "FAB",
-        "progressStatus": "ON_TRACK",
+        "progressStatus": "SLIPPING",
         "quantity": 4,
         "readyToNest": true,
+        "requiresOT": true,
         "salesOrder": "SO-7004",
         "salesperson": "Sales Team",
-        "scheduledStartDate": "2026-02-10T05:00:00.000Z",
-        "schedulingConflict": false,
+        "scheduledDepartmentByDate": {
+          "2026-02-11": "Engineering",
+          "2026-02-12": "Engineering",
+          "2026-02-13": "Engineering",
+          "2026-02-14": "Engineering",
+          "2026-02-15": "Engineering",
+          "2026-02-16": "Engineering",
+          "2026-02-17": "Engineering",
+          "2026-02-19": "Laser",
+          "2026-02-23": "Press Brake",
+          "2026-02-25": "Welding",
+          "2026-02-26": "Welding",
+          "2026-03-02": "Polishing",
+          "2026-03-03": "Polishing",
+          "2026-03-05": "Assembly",
+          "2026-03-06": "Assembly",
+          "2026-03-07": "Assembly",
+          "2026-03-08": "Assembly",
+          "2026-03-09": "Assembly"
+        },
+        "scheduledStartDate": "2026-02-11T05:00:00.000Z",
+        "schedulingConflict": true,
         "sizeClass": "SMALL",
         "status": "PENDING",
         "updatedAt": "2026-02-07T00:00:00.000Z",
@@ -616,28 +907,28 @@
         ],
         "departmentSchedule": {
           "Assembly": {
-            "end": "2026-03-06T05:00:00.000Z",
-            "start": "2026-02-20T05:00:00.000Z"
+            "end": "2026-03-23T04:00:00.000Z",
+            "start": "2026-03-09T04:00:00.000Z"
           },
           "Engineering": {
-            "end": "2026-02-11T05:00:00.000Z",
-            "start": "2026-02-09T05:00:00.000Z"
+            "end": "2026-02-16T05:00:00.000Z",
+            "start": "2026-02-11T05:00:00.000Z"
           },
           "Laser": {
-            "end": "2026-02-12T05:00:00.000Z",
-            "start": "2026-02-12T05:00:00.000Z"
+            "end": "2026-02-20T05:00:00.000Z",
+            "start": "2026-02-20T05:00:00.000Z"
           },
           "Polishing": {
-            "end": "2026-02-19T05:00:00.000Z",
-            "start": "2026-02-18T05:00:00.000Z"
+            "end": "2026-03-05T05:00:00.000Z",
+            "start": "2026-03-04T05:00:00.000Z"
           },
           "Press Brake": {
-            "end": "2026-02-13T05:00:00.000Z",
-            "start": "2026-02-13T05:00:00.000Z"
+            "end": "2026-02-24T05:00:00.000Z",
+            "start": "2026-02-24T05:00:00.000Z"
           },
           "Welding": {
-            "end": "2026-02-17T05:00:00.000Z",
-            "start": "2026-02-16T05:00:00.000Z"
+            "end": "2026-03-02T05:00:00.000Z",
+            "start": "2026-02-27T05:00:00.000Z"
           }
         },
         "description": "harmonic module base",
@@ -654,10 +945,42 @@
         "progressStatus": "SLIPPING",
         "quantity": 2,
         "readyToNest": true,
+        "requiresOT": true,
         "requiresPainting": true,
         "salesOrder": "SO-7005",
         "salesperson": "Sales Team",
-        "scheduledStartDate": "2026-02-09T05:00:00.000Z",
+        "scheduledDepartmentByDate": {
+          "2026-02-11": "Engineering",
+          "2026-02-12": "Engineering",
+          "2026-02-13": "Engineering",
+          "2026-02-14": "Engineering",
+          "2026-02-15": "Engineering",
+          "2026-02-16": "Engineering",
+          "2026-02-20": "Laser",
+          "2026-02-24": "Press Brake",
+          "2026-02-27": "Welding",
+          "2026-02-28": "Welding",
+          "2026-03-01": "Welding",
+          "2026-03-02": "Welding",
+          "2026-03-04": "Polishing",
+          "2026-03-05": "Polishing",
+          "2026-03-09": "Assembly",
+          "2026-03-10": "Assembly",
+          "2026-03-11": "Assembly",
+          "2026-03-12": "Assembly",
+          "2026-03-13": "Assembly",
+          "2026-03-14": "Assembly",
+          "2026-03-15": "Assembly",
+          "2026-03-16": "Assembly",
+          "2026-03-17": "Assembly",
+          "2026-03-18": "Assembly",
+          "2026-03-19": "Assembly",
+          "2026-03-20": "Assembly",
+          "2026-03-21": "Assembly",
+          "2026-03-22": "Assembly",
+          "2026-03-23": "Assembly"
+        },
+        "scheduledStartDate": "2026-02-11T05:00:00.000Z",
         "schedulingConflict": true,
         "sizeClass": "SMALL",
         "status": "PENDING",
@@ -685,28 +1008,28 @@
         ],
         "departmentSchedule": {
           "Assembly": {
-            "end": "2026-03-04T05:00:00.000Z",
-            "start": "2026-03-03T05:00:00.000Z"
+            "end": "2026-03-06T05:00:00.000Z",
+            "start": "2026-03-05T05:00:00.000Z"
           },
           "Engineering": {
-            "end": "2026-02-24T05:00:00.000Z",
-            "start": "2026-02-23T05:00:00.000Z"
+            "end": "2026-02-23T05:00:00.000Z",
+            "start": "2026-02-20T05:00:00.000Z"
           },
           "Laser": {
-            "end": "2026-02-25T05:00:00.000Z",
-            "start": "2026-02-25T05:00:00.000Z"
+            "end": "2026-02-23T05:00:00.000Z",
+            "start": "2026-02-23T05:00:00.000Z"
           },
           "Polishing": {
             "end": "2026-03-02T05:00:00.000Z",
             "start": "2026-03-02T05:00:00.000Z"
           },
           "Press Brake": {
-            "end": "2026-02-26T05:00:00.000Z",
-            "start": "2026-02-26T05:00:00.000Z"
+            "end": "2026-02-23T05:00:00.000Z",
+            "start": "2026-02-23T05:00:00.000Z"
           },
           "Welding": {
-            "end": "2026-02-27T05:00:00.000Z",
-            "start": "2026-02-27T05:00:00.000Z"
+            "end": "2026-02-24T05:00:00.000Z",
+            "start": "2026-02-24T05:00:00.000Z"
           }
         },
         "description": "corner guards 18 ga stainless",
@@ -720,13 +1043,47 @@
         "openPOs": false,
         "partNumber": "PN-DEFAULT",
         "productType": "FAB",
-        "progressStatus": "ON_TRACK",
+        "progressStatus": "SLIPPING",
         "quantity": 20,
         "readyToNest": true,
+        "remainingDepartmentSchedule": {
+          "Assembly": {
+            "end": "2026-03-06T05:00:00.000Z",
+            "start": "2026-03-05T05:00:00.000Z"
+          },
+          "Engineering": {
+            "end": "2026-02-23T05:00:00.000Z",
+            "start": "2026-02-20T05:00:00.000Z"
+          },
+          "Laser": {
+            "end": "2026-02-23T05:00:00.000Z",
+            "start": "2026-02-23T05:00:00.000Z"
+          },
+          "Polishing": {
+            "end": "2026-03-02T05:00:00.000Z",
+            "start": "2026-03-02T05:00:00.000Z"
+          },
+          "Press Brake": {
+            "end": "2026-02-23T05:00:00.000Z",
+            "start": "2026-02-23T05:00:00.000Z"
+          },
+          "Welding": {
+            "end": "2026-02-24T05:00:00.000Z",
+            "start": "2026-02-24T05:00:00.000Z"
+          }
+        },
         "salesOrder": "SO-7006",
         "salesperson": "Sales Team",
-        "scheduledStartDate": "2026-02-23T05:00:00.000Z",
-        "schedulingConflict": false,
+        "scheduledDepartmentByDate": {
+          "2026-02-20": "Engineering",
+          "2026-02-23": "Press Brake",
+          "2026-02-24": "Welding",
+          "2026-03-02": "Polishing",
+          "2026-03-05": "Assembly",
+          "2026-03-06": "Assembly"
+        },
+        "scheduledStartDate": "2026-02-20T05:00:00.000Z",
+        "schedulingConflict": true,
         "sizeClass": "SMALL",
         "status": "PENDING",
         "updatedAt": "2026-02-07T00:00:00.000Z",
@@ -753,31 +1110,32 @@
         ],
         "departmentSchedule": {
           "Assembly": {
-            "end": "2026-03-05T05:00:00.000Z",
-            "start": "2026-03-03T05:00:00.000Z"
+            "end": "2026-03-18T04:00:00.000Z",
+            "start": "2026-03-16T04:00:00.000Z"
           },
           "Engineering": {
-            "end": "2026-02-19T05:00:00.000Z",
-            "start": "2026-02-13T05:00:00.000Z"
+            "end": "2026-02-25T05:00:00.000Z",
+            "start": "2026-02-18T05:00:00.000Z"
           },
           "Laser": {
-            "end": "2026-02-20T05:00:00.000Z",
-            "start": "2026-02-20T05:00:00.000Z"
-          },
-          "Polishing": {
-            "end": "2026-03-02T05:00:00.000Z",
+            "end": "2026-02-27T05:00:00.000Z",
             "start": "2026-02-27T05:00:00.000Z"
           },
+          "Polishing": {
+            "end": "2026-03-12T04:00:00.000Z",
+            "start": "2026-03-11T04:00:00.000Z"
+          },
           "Press Brake": {
-            "end": "2026-02-23T05:00:00.000Z",
-            "start": "2026-02-23T05:00:00.000Z"
+            "end": "2026-03-03T05:00:00.000Z",
+            "start": "2026-03-03T05:00:00.000Z"
           },
           "Welding": {
-            "end": "2026-02-26T05:00:00.000Z",
-            "start": "2026-02-24T05:00:00.000Z"
+            "end": "2026-03-09T04:00:00.000Z",
+            "start": "2026-03-05T05:00:00.000Z"
           }
         },
         "description": "nycha door frame package",
+        "doorSubType": "nycha",
         "dueDate": "2026-03-09T00:00:00.000Z",
         "fastShip": false,
         "id": "WO-1007",
@@ -788,13 +1146,36 @@
         "openPOs": false,
         "partNumber": "PN-DEFAULT",
         "productType": "DOORS",
-        "progressStatus": "ON_TRACK",
+        "progressStatus": "SLIPPING",
         "quantity": 5,
         "readyToNest": true,
+        "requiresOT": true,
         "salesOrder": "SO-7002",
         "salesperson": "Sales Team",
-        "scheduledStartDate": "2026-02-13T05:00:00.000Z",
-        "schedulingConflict": false,
+        "scheduledDepartmentByDate": {
+          "2026-02-18": "Engineering",
+          "2026-02-19": "Engineering",
+          "2026-02-20": "Engineering",
+          "2026-02-21": "Engineering",
+          "2026-02-22": "Engineering",
+          "2026-02-23": "Engineering",
+          "2026-02-24": "Engineering",
+          "2026-02-25": "Engineering",
+          "2026-02-27": "Laser",
+          "2026-03-03": "Press Brake",
+          "2026-03-05": "Welding",
+          "2026-03-06": "Welding",
+          "2026-03-07": "Welding",
+          "2026-03-08": "Welding",
+          "2026-03-09": "Welding",
+          "2026-03-11": "Polishing",
+          "2026-03-12": "Polishing",
+          "2026-03-16": "Assembly",
+          "2026-03-17": "Assembly",
+          "2026-03-18": "Assembly"
+        },
+        "scheduledStartDate": "2026-02-18T05:00:00.000Z",
+        "schedulingConflict": true,
         "sizeClass": "SMALL",
         "status": "PENDING",
         "updatedAt": "2026-02-07T00:00:00.000Z",
@@ -821,28 +1202,28 @@
         ],
         "departmentSchedule": {
           "Assembly": {
-            "end": "2026-03-09T04:00:00.000Z",
-            "start": "2026-03-05T05:00:00.000Z"
+            "end": "2026-03-13T04:00:00.000Z",
+            "start": "2026-03-11T04:00:00.000Z"
           },
           "Engineering": {
-            "end": "2026-02-23T05:00:00.000Z",
-            "start": "2026-02-23T05:00:00.000Z"
+            "end": "2026-02-27T05:00:00.000Z",
+            "start": "2026-02-27T05:00:00.000Z"
           },
           "Laser": {
-            "end": "2026-02-24T05:00:00.000Z",
-            "start": "2026-02-24T05:00:00.000Z"
+            "end": "2026-02-27T05:00:00.000Z",
+            "start": "2026-02-27T05:00:00.000Z"
           },
           "Polishing": {
-            "end": "2026-03-04T05:00:00.000Z",
-            "start": "2026-03-03T05:00:00.000Z"
+            "end": "2026-03-09T04:00:00.000Z",
+            "start": "2026-03-06T05:00:00.000Z"
           },
           "Press Brake": {
-            "end": "2026-02-25T05:00:00.000Z",
-            "start": "2026-02-25T05:00:00.000Z"
+            "end": "2026-02-27T05:00:00.000Z",
+            "start": "2026-02-27T05:00:00.000Z"
           },
           "Welding": {
-            "end": "2026-03-02T05:00:00.000Z",
-            "start": "2026-02-26T05:00:00.000Z"
+            "end": "2026-03-04T05:00:00.000Z",
+            "start": "2026-03-03T05:00:00.000Z"
           }
         },
         "description": "frame case opening 16 ga ss316",
@@ -856,13 +1237,50 @@
         "openPOs": false,
         "partNumber": "PN-DEFAULT",
         "productType": "FAB",
-        "progressStatus": "ON_TRACK",
+        "progressStatus": "SLIPPING",
         "quantity": 3,
         "readyToNest": true,
+        "remainingDepartmentSchedule": {
+          "Assembly": {
+            "end": "2026-03-13T04:00:00.000Z",
+            "start": "2026-03-11T04:00:00.000Z"
+          },
+          "Engineering": {
+            "end": "2026-02-27T05:00:00.000Z",
+            "start": "2026-02-27T05:00:00.000Z"
+          },
+          "Laser": {
+            "end": "2026-02-27T05:00:00.000Z",
+            "start": "2026-02-27T05:00:00.000Z"
+          },
+          "Polishing": {
+            "end": "2026-03-09T04:00:00.000Z",
+            "start": "2026-03-06T05:00:00.000Z"
+          },
+          "Press Brake": {
+            "end": "2026-02-27T05:00:00.000Z",
+            "start": "2026-02-27T05:00:00.000Z"
+          },
+          "Welding": {
+            "end": "2026-03-04T05:00:00.000Z",
+            "start": "2026-03-03T05:00:00.000Z"
+          }
+        },
+        "requiresOT": true,
         "salesOrder": "SO-7007",
         "salesperson": "Sales Team",
-        "scheduledStartDate": "2026-02-23T05:00:00.000Z",
-        "schedulingConflict": false,
+        "scheduledDepartmentByDate": {
+          "2026-02-27": "Press Brake",
+          "2026-03-03": "Welding",
+          "2026-03-04": "Welding",
+          "2026-03-06": "Polishing",
+          "2026-03-09": "Polishing",
+          "2026-03-11": "Assembly",
+          "2026-03-12": "Assembly",
+          "2026-03-13": "Assembly"
+        },
+        "scheduledStartDate": "2026-02-27T05:00:00.000Z",
+        "schedulingConflict": true,
         "sizeClass": "SMALL",
         "status": "PENDING",
         "updatedAt": "2026-02-07T00:00:00.000Z",

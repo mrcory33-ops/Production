@@ -1130,6 +1130,12 @@ export default function CustomGanttTable({
                                                                         {segment.subStageLabel}
                                                                     </span>
                                                                 )}
+                                                                {/* ── Nesting-ready indicator (N) ── */}
+                                                                {!segment.subStageLabel && job.readyToNest && segment.department === 'Engineering' && (
+                                                                    <span className="absolute inset-0 flex items-center justify-center z-[2] text-[11px] font-black text-white pointer-events-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]">
+                                                                        N
+                                                                    </span>
+                                                                )}
 
                                                                 {/* ── Progress Overlay (supervisor-reported) ── */}
                                                                 {(() => {
@@ -1170,6 +1176,9 @@ export default function CustomGanttTable({
                                                                         )}
                                                                         {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && !segment.subStageLabel && (
                                                                             <span className="text-emerald-300 ml-2 font-bold">{job.departmentProgress[segment.department]}% done</span>
+                                                                        )}
+                                                                        {job.readyToNest && segment.department === 'Engineering' && (
+                                                                            <span className="text-lime-300 ml-2 font-bold">Nesting Ready</span>
                                                                         )}
                                                                     </div>
                                                                 </div>

@@ -1,24 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseSalesAcknowledgmentText } from '@/lib/parseSalesAcknowledgment';
+import { requireFirebaseAuth } from '@/lib/server/requireFirebaseAuth';
+
 
 export const runtime = 'nodejs';
 
-// Workaround: pdf-parse uses CommonJS and its top-level code
-// reads a test PDF file, which can break Next.js bundlers.
-// Using eval('require') hides the call from static analysis.
-let pdfParse: ((buffer: Buffer) => Promise<{ text: string; numpages: number }>) | null = null;
-
-function getPdfParse() {
-    if (!pdfParse) {
-        // eslint-disable-next-line no-eval
-        const _require = eval('require');
-        pdfParse = _require('pdf-parse');
-    }
-    return pdfParse!;
+// Import pdf-parse/lib/pdf-parse directly to avoid the top-level test
+// code in pdf-parse/index.js that reads a test PDF file and breaks bundlers.
+async function getPdfParse() {
+    const mod = await import('pdf-parse/lib/pdf-parse.js');
+    return mod.default || mod;
 }
 
 export async function POST(request: NextRequest) {
     try {
+        const authResult = await requireFirebaseAuth(request);
+        if (!authResult.ok) {
+            return authResult.response;
+        }
+
         const formData = await request.formData();
         const file = formData.get('file') as File | null;
 
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
         const buffer = Buffer.from(arrayBuffer);
 
         // Extract text from PDF
-        const pdf = getPdfParse();
+        const pdf = await getPdfParse();
         const pdfData = await pdf(buffer);
         const rawText = pdfData.text;
 

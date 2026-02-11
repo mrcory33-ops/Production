@@ -184,7 +184,7 @@ export const parseGlobalShopExport = async (fileBuffer: ArrayBuffer): Promise<Jo
             // For now, assume headers match or are close.
             openPOs: masterRow['OpenPOs'] === 'TRUE' || masterRow['OpenPOs'] === true,
             closedPOs: masterRow['ClosedPOs'] === 'TRUE' || masterRow['ClosedPOs'] === true,
-            readyToNest: (masterRow['USER_6'] || '').toString().toUpperCase() === 'X' && determineDepartment(masterRow) === 'Engineering',
+            readyToNest: masterRow['ReadyToNest'] === true || masterRow['ReadyToNest'] === 'TRUE',
 
             partNumber: masterRow['PART'] || '',
             customerPartAndName: Array.from(customerParts),

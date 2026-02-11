@@ -11,3 +11,8 @@ declare module 'pdf-parse' {
     function pdf(dataBuffer: Buffer, options?: Record<string, unknown>): Promise<PdfData>;
     export = pdf;
 }
+
+declare module 'pdf-parse/lib/pdf-parse.js' {
+    import pdf = require('pdf-parse');
+    export default pdf;
+}

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Outfit, JetBrains_Mono } from "next/font/google";
+import FirebaseAuthGate from "@/components/FirebaseAuthGate";
 import "./globals.css";
 import "./frappe-gantt.css";
 import "./chart-overrides.css";
@@ -33,7 +34,7 @@ export default function RootLayout({
       <body
         className={`${outfit.variable} ${jetbrainsMono.variable} antialiased`}
       >
-        {children}
+        <FirebaseAuthGate>{children}</FirebaseAuthGate>
       </body>
     </html>
   );

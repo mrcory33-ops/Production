@@ -82,6 +82,8 @@ export const calculateDailyLoads = (jobs: Job[], rangeStart: Date, rangeEnd: Dat
         const schedule = job.remainingDepartmentSchedule || job.departmentSchedule;
         if (!schedule || !job.weldingPoints) return;
         Object.entries(schedule).forEach(([dept, interval]) => {
+            // Skip Engineering burden for nesting-ready jobs
+            if (dept === 'Engineering' && job.readyToNest) return;
             if (!interval.start || !interval.end) return;
 
             const start = new Date(interval.start);
@@ -247,6 +249,8 @@ export const calculateDepartmentTotals = (jobs: Job[], selectedDates: Date[]): R
         Object.entries(schedule).forEach(([dept, interval]) => {
             const deptName = dept as Department;
             if (!totals[deptName]) return;
+            // Skip Engineering burden for nesting-ready jobs
+            if (dept === 'Engineering' && job.readyToNest) return;
 
             const start = new Date(interval.start);
             const end = new Date(interval.end);

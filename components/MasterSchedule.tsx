@@ -29,6 +29,7 @@ import CompletedJobsPanel from './CompletedJobsPanel';
 import { calculateUrgencyScore } from '@/lib/scoring';
 import { deleteAlert, extendAlert, recordAlertAdjustment, resolveAlert, subscribeToAlerts, updateAlert } from '@/lib/supervisorAlerts';
 import { formatWeekKeyForDisplay } from '@/lib/weekFormatting';
+import { authenticatedFetch } from '@/lib/authenticatedFetch';
 
 
 
@@ -1315,7 +1316,7 @@ export default function MasterSchedule() {
                                 <span className="font-semibold">{a.pullFromDepartment}</span>
                                 {' → '}
                                 <span className="font-semibold">{a.pullToDepartment}</span>
-                                {a.pullReason && <span className="text-slate-500 italic"> — "{a.pullReason}"</span>}
+                                {a.pullReason && <span className="text-slate-500 italic"> - &quot;{a.pullReason}&quot;</span>}
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono">
                                 {new Date(a.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
@@ -1637,7 +1638,7 @@ export default function MasterSchedule() {
                                     || primaryJob?.forecastDueDate
                                     || primaryJob?.dueDate;
 
-                                fetch('/api/notify-sp-adjustment', {
+                                void authenticatedFetch('/api/notify-sp-adjustment', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
