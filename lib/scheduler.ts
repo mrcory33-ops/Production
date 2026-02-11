@@ -25,7 +25,7 @@ const BATCH_LOCKSTEP_DEPARTMENTS: Department[] = ['Engineering', 'Laser', 'Press
 const DEPT_GAP_DAYS = {
     small: 0,      // ≤ SMALL_JOB_THRESHOLD pts
     medium: 0.5,   // SMALL_JOB_THRESHOLD < pts < BIG_ROCK threshold
-    bigRock: 1     // ≥ BIG_ROCK threshold (50 pts)
+    bigRock: 1     // ≥ BIG_ROCK threshold (60 pts)
 } as const;
 
 const getDeptGap = (points: number, noGaps?: boolean): number => {

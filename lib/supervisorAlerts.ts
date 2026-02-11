@@ -117,6 +117,12 @@ const normalizeAlertDoc = (docSnap: QueryDocumentSnapshot<DocumentData>): Superv
     const isCsiNotReceived = data.isCsiNotReceived === true;
     const isOutOfStock = data.isOutOfStock === true;
 
+    // Supervisor Pull fields
+    const isSupervisorPull = data.isSupervisorPull === true;
+    const pullFromDepartment = isSupervisorPull && data.pullFromDepartment ? data.pullFromDepartment as Department : undefined;
+    const pullToDepartment = isSupervisorPull && data.pullToDepartment ? data.pullToDepartment as Department : undefined;
+    const pullReason = isSupervisorPull && typeof data.pullReason === 'string' ? data.pullReason : undefined;
+
     return {
         id: docSnap.id,
         jobId: String(data.jobId || ''),
@@ -145,7 +151,11 @@ const normalizeAlertDoc = (docSnap: QueryDocumentSnapshot<DocumentData>): Superv
         spAdjustedDueDate: spAdjustedDueDate || undefined,
         poReceivedEarly: poReceivedEarly || undefined,
         isCsiNotReceived: isCsiNotReceived || undefined,
-        isOutOfStock: isOutOfStock || undefined
+        isOutOfStock: isOutOfStock || undefined,
+        isSupervisorPull: isSupervisorPull || undefined,
+        pullFromDepartment,
+        pullToDepartment,
+        pullReason
     };
 };
 
@@ -206,6 +216,46 @@ export const createAlert = async (data: CreateAlertInput): Promise<SupervisorAle
     };
 
     // Firestore does not accept `undefined` values — strip them before writing
+    const cleanAlert = Object.fromEntries(
+        Object.entries(alert).filter(([, v]) => v !== undefined)
+    );
+
+    await setDoc(ref, cleanAlert);
+    return alert;
+};
+
+// ── Supervisor Pull Notice ──────────────────────────────────────────
+
+export interface CreatePullNoticeInput {
+    jobId: string;
+    jobName: string;
+    fromDepartment: Department;
+    toDepartment: Department;
+    pullReason: string;
+}
+
+export const createPullNotice = async (data: CreatePullNoticeInput): Promise<SupervisorAlert> => {
+    const ref = doc(supervisorAlertsCollection);
+    const nowIso = new Date().toISOString();
+
+    const alert: SupervisorAlert = {
+        id: ref.id,
+        jobId: data.jobId,
+        department: data.toDepartment,
+        reason: `Supervisor pulled job from ${data.fromDepartment} → ${data.toDepartment}: ${data.pullReason}`,
+        estimatedResolutionDate: nowIso, // resolved immediately — this is informational
+        jobName: data.jobName,
+        status: 'active',
+        reportedBy: 'Supervisor',
+        daysBlocked: 0,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        isSupervisorPull: true,
+        pullFromDepartment: data.fromDepartment,
+        pullToDepartment: data.toDepartment,
+        pullReason: data.pullReason
+    };
+
     const cleanAlert = Object.fromEntries(
         Object.entries(alert).filter(([, v]) => v !== undefined)
     );

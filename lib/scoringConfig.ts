@@ -55,7 +55,7 @@ const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
     },
     bigRock: {
         bonusPoints: 10,
-        pointsThreshold: 50,
+        pointsThreshold: 60,
         enabled: true,
         label: 'Big Rock'
     },
@@ -175,13 +175,13 @@ export const SCORING_WEIGHTS = new Proxy(DEFAULT_SCORING_WEIGHTS, {
 });
 
 export interface BigRockConfig {
-    threshold: number; // Points >= 50
+    threshold: number; // Points >= 60
     maxConcurrent: Record<string, number>; // Max big jobs per department
     capacityRatio: number; // Max shared capacity when multiple big rocks overlap (0.7 = 70%)
 }
 
 export const BIG_ROCK_CONFIG: BigRockConfig = {
-    threshold: 50,
+    threshold: 60,
     maxConcurrent: {
         Engineering: 3,
         Laser: 2,

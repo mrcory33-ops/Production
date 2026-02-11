@@ -16,7 +16,7 @@ import {
 } from '@/lib/scheduler';
 import { DEPARTMENT_CONFIG, PRODUCT_TYPE_ICONS, DEPT_ORDER } from '@/lib/departmentConfig';
 import { addDays, differenceInCalendarDays, format, startOfDay, differenceInDays } from 'date-fns';
-import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator, MessageSquareWarning, Bell, ShieldAlert, CheckSquare } from 'lucide-react';
+import { AlertTriangle, Calendar, Filter, Maximize, Minimize, Activity, Upload, Trash2, FileDown, SlidersHorizontal, Calculator, MessageSquareWarning, Bell, ShieldAlert, CheckSquare, ArrowDownToLine } from 'lucide-react';
 import Link from 'next/link';
 import CustomGanttTable from './CustomGanttTable';
 import DepartmentAnalyticsPanel from './DepartmentAnalyticsPanel';
@@ -28,6 +28,7 @@ import RescheduleSuggestionPopover from './RescheduleSuggestionPopover';
 import CompletedJobsPanel from './CompletedJobsPanel';
 import { calculateUrgencyScore } from '@/lib/scoring';
 import { deleteAlert, extendAlert, recordAlertAdjustment, resolveAlert, subscribeToAlerts, updateAlert } from '@/lib/supervisorAlerts';
+import { formatWeekKeyForDisplay } from '@/lib/weekFormatting';
 
 
 
@@ -764,6 +765,12 @@ export default function MasterSchedule() {
         return map;
     }, [activeSupervisorAlerts]);
 
+    // Supervisor-pull notices (for plant manager banner)
+    const pullAlerts = useMemo(
+        () => activeSupervisorAlerts.filter(a => a.isSupervisorPull),
+        [activeSupervisorAlerts]
+    );
+
     const displayJobs = useMemo(() => {
         let filtered = showSmallRocks
             ? [...jobs]
@@ -1292,6 +1299,38 @@ export default function MasterSchedule() {
                     </div>
                 </div>
             </div>
+
+            {/* Supervisor Pull Notifications */}
+            {pullAlerts.length > 0 && (
+                <div className="w-full bg-amber-50 border-b border-amber-200 px-4 py-1.5 space-y-1 z-10 shrink-0">
+                    {pullAlerts.map(a => (
+                        <div key={a.id} className="flex items-center gap-3 text-sm">
+                            <div className="flex items-center gap-1.5 text-amber-600">
+                                <ArrowDownToLine className="w-3.5 h-3.5" />
+                                <span className="font-bold text-[11px] uppercase tracking-wider">Supervisor Override</span>
+                            </div>
+                            <span className="text-slate-700 text-xs">
+                                <span className="font-mono font-bold">{a.jobId}</span>
+                                {' pulled from '}
+                                <span className="font-semibold">{a.pullFromDepartment}</span>
+                                {' → '}
+                                <span className="font-semibold">{a.pullToDepartment}</span>
+                                {a.pullReason && <span className="text-slate-500 italic"> — "{a.pullReason}"</span>}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                                {new Date(a.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                            </span>
+                            <button
+                                onClick={() => resolveAlert(a.id)}
+                                className="ml-auto px-2 py-0.5 text-[10px] font-bold uppercase text-amber-600 hover:text-amber-800 border border-amber-300 hover:border-amber-400 rounded transition-all hover:bg-amber-100"
+                            >
+                                Dismiss
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             {/* Main Content */}
             <div className="flex-1 overflow-hidden relative">
 
@@ -1577,7 +1616,7 @@ export default function MasterSchedule() {
 
                             const otSummary = decision.otRequirements && decision.otRequirements.length > 0
                                 ? decision.otRequirements
-                                    .map(requirement => `${requirement.department} ${requirement.weekKey}: Tier ${requirement.requiredTier}`)
+                                    .map(requirement => `${requirement.department} ${formatWeekKeyForDisplay(requirement.weekKey)}: Tier ${requirement.requiredTier}`)
                                     .join(', ')
                                 : undefined;
 

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Bell, CheckCircle2, ChevronDown, Clock3, FileX2, Package, PackageX, Pencil, Trash2, X } from 'lucide-react';
 import { Department, Job, SupervisorAlert } from '@/types';
 import type { AlertAdjustmentDecision } from '@/lib/scheduler';
+import { formatWeekKeyForDisplay } from '@/lib/weekFormatting';
 
 interface AlertManagementPanelProps {
     alerts: SupervisorAlert[];
@@ -522,7 +523,7 @@ export default function AlertManagementPanel({
                                         )}
                                         {preview.strategy === 'ot' && preview.otRequirements && preview.otRequirements.length > 0 && (
                                             <div className="mt-0.5">
-                                                OT: {preview.otRequirements.map(req => `${req.department} ${req.weekKey} Tier ${req.requiredTier}`).join(', ')}
+                                                OT: {preview.otRequirements.map(req => `${req.department} ${formatWeekKeyForDisplay(req.weekKey)} Tier ${req.requiredTier}`).join(', ')}
                                             </div>
                                         )}
                                         <div className="mt-0.5 text-indigo-200/90">{preview.reason}</div>

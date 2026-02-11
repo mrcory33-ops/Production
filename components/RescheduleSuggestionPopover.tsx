@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Check, ArrowRight, Clock, AlertTriangle, Zap } from 'lucide-react';
 import { RescheduleSuggestion } from '@/lib/scheduler';
+import { formatWeekKeyForDisplay } from '@/lib/weekFormatting';
 
 interface RescheduleSuggestionPopoverProps {
     suggestion: RescheduleSuggestion;
@@ -43,11 +44,6 @@ function formatDate(iso: string): string {
     } catch {
         return iso;
     }
-}
-
-function formatWeekKey(weekKey: string): string {
-    // weekKey is like "2026-W07"
-    return weekKey;
 }
 
 export default function RescheduleSuggestionPopover({
@@ -251,7 +247,7 @@ export default function RescheduleSuggestionPopover({
                                         <div className="flex items-center gap-2">
                                             <Zap className="w-3 h-3 text-orange-400" />
                                             <span className="text-[11px] text-orange-300 font-medium">
-                                                {ot.department} — {formatWeekKey(ot.weekKey)}
+                                                {ot.department} — {formatWeekKeyForDisplay(ot.weekKey)}
                                             </span>
                                         </div>
                                         <span className="text-[10px] text-orange-400/80">

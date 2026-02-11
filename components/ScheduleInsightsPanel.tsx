@@ -7,6 +7,7 @@ import {
     Package, Truck, Shield, AlertCircle, CheckCircle2
 } from 'lucide-react';
 import { useState } from 'react';
+import { formatWeekKeyForDisplay } from '@/lib/weekFormatting';
 
 interface Props {
     insights: ScheduleInsights;
@@ -236,7 +237,7 @@ export default function ScheduleInsightsPanel({ insights, onClose }: Props) {
                                         <div key={weekKey} className="bg-amber-950/15 border border-amber-500/20 rounded-lg p-3">
                                             <div className="flex items-center gap-2 mb-2.5">
                                                 <CalendarClock className="w-3.5 h-3.5 text-amber-300" />
-                                                <span className="text-sm font-bold text-amber-300">{weekKey}</span>
+                                                <span className="text-sm font-bold text-amber-300">{formatWeekKeyForDisplay(weekKey)}</span>
                                                 <span className="text-xs text-amber-400/60">{recs.length} dept{recs.length > 1 ? 's' : ''}</span>
                                             </div>
                                             <div className="space-y-2">
@@ -534,7 +535,7 @@ function MoveOptionCard({ move, isSO }: { move: MoveOption; isSO?: boolean }) {
                         </div>
                     )}
                     <div className="text-[10px] text-slate-500">
-                        Affects: {move.affectedDepartments.join(', ')} • Weeks: {move.affectedWeeks.join(', ')}
+                        Affects: {move.affectedDepartments.join(', ')} • Weeks: {move.affectedWeeks.map(formatWeekKeyForDisplay).join(', ')}
                     </div>
                     {isSO && move.jobIds.length > 1 && (
                         <div className="text-[10px] text-slate-500">

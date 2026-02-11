@@ -29,7 +29,7 @@ const DEPARTMENTS: Department[] = [
 ];
 
 /** Big Rock threshold — consistent with BIG_ROCK_CONFIG */
-const BIG_ROCK_THRESHOLD = 70;
+const BIG_ROCK_THRESHOLD = 60;
 
 // ─────────────────────────────────────────────────────────────
 // Public Types
@@ -94,12 +94,18 @@ export interface OTWeekDetail {
     covered: boolean;
 }
 
+export interface BottleneckDetail {
+    department: Department;
+    delayDays: number;
+    firstAvailableDate: Date;
+}
+
 export interface FeasibilityCheck {
     // Tier 1: As-Is
     asIs: {
         achievable: boolean;
         completionDate: Date | null;
-        bottlenecks: string[];
+        bottlenecks: BottleneckDetail[];
     };
 
     // Tier 2: With Moves
@@ -502,7 +508,7 @@ export async function checkAdvancedFeasibility(
     const existingJobsById = new Map<string, Job>();
     for (const job of existingJobs) existingJobsById.set(job.id, job);
     let asIsDate = new Date(input.engineeringReadyDate);
-    const asIsBottlenecks: string[] = [];
+    const asIsBottlenecks: BottleneckDetail[] = [];
 
     for (const dept of DEPARTMENTS) {
         const duration = calculateDeptDuration(dept, totalPoints, productType);
@@ -510,7 +516,7 @@ export async function checkAdvancedFeasibility(
 
         if (slotStart > asIsDate) {
             const delayDays = differenceInDays(slotStart, asIsDate);
-            asIsBottlenecks.push(`${dept} delayed by ${delayDays} days (capacity full)`);
+            asIsBottlenecks.push({ department: dept, delayDays, firstAvailableDate: slotStart });
         }
 
         const endDate = getEndDateForDuration(slotStart, duration);

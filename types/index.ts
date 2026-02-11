@@ -66,6 +66,12 @@ export interface SupervisorAlert {
     // Additional issue flags
     isCsiNotReceived?: boolean;      // CSI has not been received
     isOutOfStock?: boolean;          // Part is out of stock
+
+    // Supervisor Pull tracking
+    isSupervisorPull?: boolean;      // Alert represents a supervisor pulling a job forward
+    pullFromDepartment?: Department; // Original department the job was in
+    pullToDepartment?: Department;   // Department the supervisor pulled it into
+    pullReason?: string;             // Why the supervisor pulled the job
 }
 
 export interface DepartmentLiveStatus {
@@ -145,6 +151,11 @@ export interface Job {
     doorSubType?: DoorSubType; // Door classification for sub-pipeline routing
     departmentProgress?: Partial<Record<Department, number>>; // Supervisor-reported % complete per department (0-100)
     assignedWorkers?: Partial<Record<Department, string[]>>; // Workers assigned to this job per department
+
+    // Supervisor Pull Tracking
+    supervisorPulledAt?: Date;         // When the supervisor pulled this job forward
+    supervisorPulledFrom?: Department; // Which department the job was originally in
+    supervisorPullReason?: string;     // Why the supervisor pulled the job
 
     // Due Date Change Tracking
     dueDateChanged?: boolean; // Flag: due date differs from previous upload

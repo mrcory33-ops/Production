@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Job } from '@/types';
 import {
     QuoteInput,
@@ -12,6 +12,8 @@ import {
     simulateQuoteSchedule,
     checkAdvancedFeasibility,
 } from '@/lib/whatIfScheduler';
+import { BIG_ROCK_CONFIG } from '@/lib/scoringConfig';
+import type { ParsedSalesAcknowledgment } from '@/lib/parseSalesAcknowledgment';
 import { format } from 'date-fns';
 
 interface QuoteEstimatorProps {
@@ -30,6 +32,98 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
     const [estimate, setEstimate] = useState<QuoteEstimate | null>(null);
     const [feasibility, setFeasibility] = useState<FeasibilityCheck | null>(null);
     const [loading, setLoading] = useState(false);
+
+    // PDF upload state
+    const [parsedPdf, setParsedPdf] = useState<ParsedSalesAcknowledgment | null>(null);
+    const [pdfUploading, setPdfUploading] = useState(false);
+    const [pdfError, setPdfError] = useState<string | null>(null);
+    const [isDragging, setIsDragging] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const dragCounterRef = useRef(0);
+
+    const handlePdfUpload = useCallback(async (file: File) => {
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            setPdfError('Please upload a PDF file');
+            return;
+        }
+        setPdfUploading(true);
+        setPdfError(null);
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await fetch('/api/parse-pdf', { method: 'POST', body: formData });
+            const result = await res.json();
+
+            if (!res.ok) {
+                setPdfError(result.error || 'Failed to parse PDF');
+                return;
+            }
+
+            const data: ParsedSalesAcknowledgment = result.data;
+            setParsedPdf(data);
+
+            // Auto-fill form fields
+            setTotalValue(data.orderSubTotal.toString());
+            setTotalQuantity(data.totalQuantity.toString());
+
+            // Auto-detect Big Rocks (items whose individual welding points ≥ BIG_ROCK_CONFIG.threshold)
+            const bigRockThresholdDollars = BIG_ROCK_CONFIG.threshold * 650; // reverse the $/point ratio
+            const detectedBigRocks = data.lineItems
+                .filter(item => item.extension >= bigRockThresholdDollars)
+                .map(item => ({
+                    value: item.extension,
+                    points: convertDollarToPoints(item.extension),
+                }));
+
+            if (detectedBigRocks.length > 0) {
+                setHasBigRocks(true);
+                setBigRocks(detectedBigRocks);
+            }
+
+            // Auto-set target date from ship date
+            if (data.scheduledDate) {
+                const parsed = new Date(data.scheduledDate);
+                if (!isNaN(parsed.getTime())) {
+                    setMode('TARGET');
+                    setTargetDate(format(parsed, 'yyyy-MM-dd'));
+                }
+            }
+
+            // Clear any previous results
+            setEstimate(null);
+            setFeasibility(null);
+        } catch (err) {
+            console.error('PDF upload error:', err);
+            setPdfError('Failed to upload and parse PDF');
+        } finally {
+            setPdfUploading(false);
+        }
+    }, []);
+
+    const handleDragEnter = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current++;
+        if (e.dataTransfer.items?.[0]?.type === 'application/pdf') setIsDragging(true);
+    }, []);
+
+    const handleDragLeave = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current--;
+        if (dragCounterRef.current <= 0) { setIsDragging(false); dragCounterRef.current = 0; }
+    }, []);
+
+    const handleDrop = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        dragCounterRef.current = 0;
+        const file = e.dataTransfer.files?.[0];
+        if (file) handlePdfUpload(file);
+    }, [handlePdfUpload]);
 
     // Auto-calculate points for Big Rocks
     useEffect(() => {
@@ -140,6 +234,99 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                     <div className="p-8 lg:p-12">
                         {/* Input Form */}
                         <div className="space-y-10">
+                            {/* Sales Acknowledgment PDF Upload */}
+                            <section>
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="w-1 h-6 bg-amber-500 rounded-full"></div>
+                                    <h2 className="text-sm font-bold text-[#ccc] uppercase tracking-wider">Quick Import</h2>
+                                </div>
+
+                                <div
+                                    onDragEnter={handleDragEnter}
+                                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={handleDrop}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className={`relative cursor-pointer border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-200 ${isDragging
+                                        ? 'border-amber-500 bg-amber-500/10 scale-[1.01]'
+                                        : parsedPdf
+                                            ? 'border-emerald-600/50 bg-emerald-950/20 hover:border-emerald-500/70'
+                                            : 'border-[#444] hover:border-[#666] bg-[#242424] hover:bg-[#2a2a2a]'
+                                        }`}
+                                >
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept=".pdf"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handlePdfUpload(file);
+                                            e.target.value = '';
+                                        }}
+                                    />
+
+                                    {pdfUploading ? (
+                                        <div className="flex flex-col items-center gap-3">
+                                            <svg className="animate-spin h-8 w-8 text-amber-500" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                            </svg>
+                                            <p className="text-sm text-amber-400 font-bold">Parsing sales acknowledgment…</p>
+                                        </div>
+                                    ) : parsedPdf ? (
+                                        <div className="flex flex-col items-center gap-2">
+                                            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                                                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                            </div>
+                                            <p className="text-sm font-bold text-emerald-400">Imported: WO#{parsedPdf.workOrder}</p>
+                                            <p className="text-xs text-[#888]">{parsedPdf.jobName} • {parsedPdf.lineItems.length} items • ${parsedPdf.orderSubTotal.toLocaleString()}</p>
+                                            <p className="text-[10px] text-[#666] mt-1">Click or drop another PDF to replace</p>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col items-center gap-2">
+                                            <div className="w-10 h-10 rounded-xl bg-[#333] flex items-center justify-center">
+                                                <svg className="w-5 h-5 text-[#888]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                                            </div>
+                                            <p className="text-sm font-semibold text-[#bbb]">Drop a Sales Acknowledgment PDF here</p>
+                                            <p className="text-xs text-[#666]">or click to browse • Auto-fills all fields below</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {pdfError && (
+                                    <div className="mt-3 px-4 py-2.5 bg-red-950/30 border border-red-800/40 rounded-xl text-red-400 text-xs font-medium">
+                                        {pdfError}
+                                    </div>
+                                )}
+
+                                {/* Parsed Line Items Preview */}
+                                {parsedPdf && parsedPdf.lineItems.length > 0 && (
+                                    <div className="mt-4 bg-[#1e1e1e] border border-[#333] rounded-xl overflow-hidden">
+                                        <div className="px-4 py-2.5 border-b border-[#333] flex items-center justify-between">
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-[#888]">Line Items ({parsedPdf.lineItems.length})</span>
+                                            <span className="text-[10px] font-bold text-[#666]">Ship: {parsedPdf.scheduledDate}</span>
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto">
+                                            {parsedPdf.lineItems.map((item, idx) => {
+                                                const pts = convertDollarToPoints(item.extension);
+                                                const isBigRock = pts >= BIG_ROCK_CONFIG.threshold;
+                                                return (
+                                                    <div key={idx} className={`flex items-center gap-3 px-4 py-2 text-xs border-b border-[#2a2a2a] last:border-0 ${isBigRock ? 'bg-amber-950/20' : ''}`}>
+                                                        <span className="font-mono text-[#666] w-7 shrink-0">{item.itemNumber.replace('S', '')}</span>
+                                                        <span className="text-[#bbb] flex-1 truncate">{item.description}</span>
+                                                        <span className="text-[#888] shrink-0">×{item.quantity}</span>
+                                                        <span className="text-[#aaa] font-mono shrink-0 w-20 text-right">${item.extension.toLocaleString()}</span>
+                                                        <span className={`font-mono shrink-0 w-14 text-right ${isBigRock ? 'text-amber-400 font-bold' : 'text-[#666]'}`}>{pts.toFixed(1)}pt</span>
+                                                        {isBigRock && <span className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded border border-amber-500/30">BR</span>}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </section>
+
                             {/* Section: Job Fundamentals */}
                             <section>
                                 <div className="flex items-center gap-3 mb-6">
@@ -413,9 +600,20 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                     }
                                                 </p>
                                                 {feasibility.asIs.bottlenecks.length > 0 && (
-                                                    <div className="mt-4 pt-4 border-t border-[#383838]">
-                                                        <span className="text-[10px] font-black uppercase text-[#888]">Primary Bottleneck</span>
-                                                        <p className="text-xs font-bold text-red-400 mt-1">{feasibility.asIs.bottlenecks[0]}</p>
+                                                    <div className="mt-4 pt-4 border-t border-[#383838] space-y-2">
+                                                        <span className="text-[10px] font-black uppercase text-[#888]">Capacity Bottlenecks</span>
+                                                        {feasibility.asIs.bottlenecks.map((b, i) => (
+                                                            <div key={i} className="flex items-center justify-between bg-[#1e1e1e] px-3 py-2 rounded-lg border border-[#333]">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                                                    <span className="text-xs font-bold text-[#ccc]">{b.department}</span>
+                                                                    <span className="text-[10px] text-[#888]">+{b.delayDays}d delay</span>
+                                                                </div>
+                                                                <span className="text-[10px] font-bold text-amber-400">
+                                                                    Available {format(b.firstAvailableDate, 'MMM dd')}
+                                                                </span>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 )}
                                             </div>
@@ -455,9 +653,20 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                         <p className="text-sm font-bold text-[#ccc] mb-1">Recommended: Tier {feasibility.withOT.recommendedTier}</p>
                                                         <p className="text-sm text-[#bbb]">
                                                             {feasibility.withOT.otWeeks.length > 0
-                                                                ? `${feasibility.withOT.otWeeks[0]?.tierLabel} · ${feasibility.withOT.otWeeks.length} week(s)`
+                                                                ? `${feasibility.withOT.otWeeks[0]?.tierLabel}`
                                                                 : 'No additional OT weeks needed'}
                                                         </p>
+                                                        {feasibility.withOT.otWeeks.length > 0 && (
+                                                            <div className="mt-3 pt-3 border-t border-[#383838] space-y-1.5">
+                                                                <span className="text-[9px] font-black uppercase text-[#666] tracking-wider">OT needed only during:</span>
+                                                                {feasibility.withOT.otWeeks.map((ot, i) => (
+                                                                    <div key={i} className="flex items-center justify-between text-[10px]">
+                                                                        <span className="text-orange-300 font-medium">{ot.department} — wk of {format(new Date(ot.weekKey), 'MMM dd')}</span>
+                                                                        <span className="text-[#888]">+{ot.excess}pts over base</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                         {feasibility.withOT.achievable && feasibility.withOT.completionDate && (
                                                             <p className="text-xs text-emerald-400 font-bold mt-2">✓ Complete by {format(feasibility.withOT.completionDate, 'MMM dd')}</p>
                                                         )}
