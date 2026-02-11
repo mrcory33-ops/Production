@@ -12,8 +12,28 @@ const BUFFER_DAYS = 1; // Days before due date to finish Assembly
 const MAX_DEPTS_PER_DAY_PER_JOB = 2;
 const SMALL_JOB_THRESHOLD = 7; // Jobs < 7 points can have same-day dept transitions
 const BATCH_WEEK_STARTS_ON = 1; // Monday
+export const BATCH_COHORT_WINDOW_BUSINESS_DAYS = 12;
 export const QUEUE_BUFFER_DAYS = 2; // Each department should maintain a 2-day work buffer
 const WEEKLY_CAPACITY = 850; // Weekly capacity pool per department (pts/week)
+const OT_WEEKLY_CAPACITY = 950; // OT ceiling — max capacity with overtime
+const BATCH_LOCKSTEP_DEPARTMENTS: Department[] = ['Engineering', 'Laser', 'Press Brake'];
+
+// ── Unified Inter-Department Gap Table ──────────────────────────────────────
+// Single source of truth for transition gaps between departments.
+// Small jobs can transition same-day; medium jobs get a half-day buffer;
+// Big Rocks get a full day for material staging and QC handoff.
+const DEPT_GAP_DAYS = {
+    small: 0,      // ≤ SMALL_JOB_THRESHOLD pts
+    medium: 0.5,   // SMALL_JOB_THRESHOLD < pts < BIG_ROCK threshold
+    bigRock: 1     // ≥ BIG_ROCK threshold (50 pts)
+} as const;
+
+const getDeptGap = (points: number, noGaps?: boolean): number => {
+    if (noGaps) return 0;
+    if (points >= BIG_ROCK_CONFIG.threshold) return DEPT_GAP_DAYS.bigRock;
+    if (points > SMALL_JOB_THRESHOLD) return DEPT_GAP_DAYS.medium;
+    return DEPT_GAP_DAYS.small;
+};
 
 const FRAME_KD_PATTERNS = [
     'frame knock down',
@@ -120,7 +140,12 @@ export const getBatchCategory = (
 ): 'FRAME_KD' | 'FRAME_CO' | 'DOOR_LOCK_SEAM' | 'WALL_PANEL' | 'DISH_TABLE' | 'THREE_COMP_SINK' | 'WALL_SHELF' | 'CORNER_GUARD' | null => {
     if (matchesAny(text, FRAME_KD_PATTERNS)) return 'FRAME_KD';
     if (matchesAny(text, FRAME_CO_PATTERNS)) return 'FRAME_CO';
-    if (matchesAny(text, DOOR_LOCK_SEAM_PATTERNS) || hasToken(text, 'ls')) return 'DOOR_LOCK_SEAM';
+    const hasDoorLockSeamWords =
+        (hasToken(text, 'door') || hasToken(text, 'doors')) &&
+        (text.includes('lock seam') || text.includes('lockseam'));
+    if (matchesAny(text, DOOR_LOCK_SEAM_PATTERNS) || hasDoorLockSeamWords || hasToken(text, 'ls')) {
+        return 'DOOR_LOCK_SEAM';
+    }
     if (matchesAny(text, WALL_PANEL_PATTERNS)) return 'WALL_PANEL';
     if (matchesAny(text, DISH_TABLE_PATTERNS)) return 'DISH_TABLE';
     if (matchesAny(text, THREE_COMP_SINK_PATTERNS)) return 'THREE_COMP_SINK';
@@ -155,6 +180,17 @@ export const extractMaterial = (text: string): string | null => {
 export const getDueWeekStart = (dueDate: Date): Date =>
     startOfWeek(startOfDay(dueDate), { weekStartsOn: BATCH_WEEK_STARTS_ON });
 
+export const getBatchKeyFromText = (text: string): string | null => {
+    const category = getBatchCategory(text);
+    if (!category) return null;
+    const gauge = extractGauge(text) || 'none';
+    const material = extractMaterial(text) || 'none';
+    return `${category}|${gauge}|${material}`;
+};
+
+export const getBatchKeyForJob = (job: Pick<Job, 'description'>): string | null =>
+    getBatchKeyFromText(normalizeBatchText(job.description || ''));
+
 const compareByDueDateAndSize = (a: Job, b: Job): number => {
     const aDue = new Date(a.dueDate).getTime();
     const bDue = new Date(b.dueDate).getTime();
@@ -168,75 +204,385 @@ const compareByUrgencyDueSize = (a: Job, b: Job): number => {
     return compareByDueDateAndSize(a, b);
 };
 
+interface BatchCohort {
+    key: string;
+    jobs: Job[];
+}
+
+const countBusinessDaysBetweenInclusive = (from: Date, to: Date): number => {
+    const start = startOfDay(from);
+    const end = startOfDay(to);
+    if (end < start) return 0;
+
+    let count = 0;
+    let cursor = new Date(start);
+    while (cursor <= end) {
+        if (!isSaturday(cursor) && !isSunday(cursor)) count++;
+        cursor = addDays(cursor, 1);
+    }
+    return count;
+};
+
+const businessDayDistance = (from: Date, to: Date): number => {
+    const start = startOfDay(from);
+    const end = startOfDay(to);
+    if (end.getTime() === start.getTime()) return 0;
+
+    const forward = end > start;
+    let count = 0;
+    let cursor = new Date(start);
+    while (forward ? cursor < end : cursor > end) {
+        cursor = addDays(cursor, forward ? 1 : -1);
+        if (!isSaturday(cursor) && !isSunday(cursor)) {
+            count += forward ? 1 : -1;
+        }
+    }
+    return count;
+};
+
+const shiftDateByBusinessDays = (date: Date, deltaBusinessDays: number): Date => {
+    if (deltaBusinessDays === 0) return startOfDay(date);
+    return deltaBusinessDays > 0
+        ? addWorkDays(startOfDay(date), deltaBusinessDays)
+        : subtractWorkDays(startOfDay(date), Math.abs(deltaBusinessDays));
+};
+
+const splitJobsIntoBatchCohorts = (
+    jobs: Job[],
+    windowBusinessDays: number = BATCH_COHORT_WINDOW_BUSINESS_DAYS
+): BatchCohort[] => {
+    const keyedGroups = new Map<string, Job[]>();
+    const cohorts: BatchCohort[] = [];
+
+    for (const job of jobs) {
+        const batchKey = getBatchKeyForJob(job);
+        if (!batchKey) continue;
+        const dept = job.currentDepartment || 'UNKNOWN';
+        const cohortKey = `${batchKey}|DEPT:${dept}`;
+        if (!keyedGroups.has(cohortKey)) keyedGroups.set(cohortKey, []);
+        keyedGroups.get(cohortKey)!.push(job);
+    }
+
+    keyedGroups.forEach((groupJobs, key) => {
+        const sorted = [...groupJobs].sort(compareByDueDateAndSize);
+        let currentCohort: Job[] = [];
+        let cohortAnchorDue: Date | null = null;
+
+        for (const job of sorted) {
+            const due = startOfDay(new Date(job.dueDate));
+            if (!cohortAnchorDue) {
+                cohortAnchorDue = due;
+                currentCohort.push(job);
+                continue;
+            }
+
+            const dueDistance = businessDayDistance(cohortAnchorDue, due);
+            if (dueDistance > windowBusinessDays) {
+                cohorts.push({ key, jobs: currentCohort });
+                currentCohort = [job];
+                cohortAnchorDue = due;
+                continue;
+            }
+
+            currentCohort.push(job);
+        }
+
+        if (currentCohort.length > 0) {
+            cohorts.push({ key, jobs: currentCohort });
+        }
+    });
+
+    return cohorts;
+};
+
+const buildBatchSizeMap = (jobs: Job[]): Map<string, number> => {
+    const batchSizeMap = new Map<string, number>();
+    for (const job of jobs) batchSizeMap.set(job.id, 1);
+
+    const cohorts = splitJobsIntoBatchCohorts(jobs);
+    for (const cohort of cohorts) {
+        const size = cohort.jobs.length;
+        for (const job of cohort.jobs) {
+            batchSizeMap.set(job.id, size);
+        }
+    }
+
+    return batchSizeMap;
+};
+
+const buildScheduledDepartmentByDate = (
+    schedule: Record<string, { start: string; end: string }>
+): Record<string, Department> => {
+    const byDate: Record<string, Department> = {};
+    const orderedDepts = DEPARTMENTS.filter(dept => !!schedule[dept]);
+
+    for (const dept of orderedDepts) {
+        const window = schedule[dept];
+        if (!window) continue;
+        let cursor = startOfDay(new Date(window.start));
+        const end = startOfDay(new Date(window.end));
+        while (cursor <= end) {
+            if (!isSaturday(cursor) && !isSunday(cursor)) {
+                byDate[cursor.toISOString().split('T')[0]] = dept;
+            }
+            cursor = addDays(cursor, 1);
+        }
+    }
+
+    return byDate;
+};
+
+const buildRemainingScheduleFromCurrentDept = (
+    schedule: Record<string, { start: string; end: string }>,
+    currentDepartment?: Department
+): Record<string, { start: string; end: string }> | undefined => {
+    if (!currentDepartment) return schedule;
+    const currentIndex = DEPARTMENTS.indexOf(currentDepartment);
+    if (currentIndex < 0) return schedule;
+
+    const remaining: Record<string, { start: string; end: string }> = {};
+    for (const dept of DEPARTMENTS.slice(currentIndex)) {
+        if (schedule[dept]) remaining[dept] = schedule[dept];
+    }
+
+    return Object.keys(remaining).length > 0 ? remaining : undefined;
+};
+
+const enforceSequentialDepartmentOrder = (
+    schedule: Record<string, { start: string; end: string }>
+): Record<string, { start: string; end: string }> => {
+    const normalized = { ...schedule };
+    let previousEnd: Date | null = null;
+
+    for (const dept of DEPARTMENTS) {
+        const window = normalized[dept];
+        if (!window) continue;
+
+        let start = startOfDay(new Date(window.start));
+        let end = startOfDay(new Date(window.end));
+
+        if (previousEnd && isBefore(start, previousEnd)) {
+            const shiftDays = Math.max(0, businessDayDistance(start, previousEnd));
+            if (shiftDays > 0) {
+                const downstream = DEPARTMENTS.filter(
+                    candidate => DEPARTMENTS.indexOf(candidate) >= DEPARTMENTS.indexOf(dept)
+                );
+                for (const candidate of downstream) {
+                    const candidateWindow = normalized[candidate];
+                    if (!candidateWindow) continue;
+                    const shiftedStart = shiftDateByBusinessDays(new Date(candidateWindow.start), shiftDays);
+                    const shiftedEnd = shiftDateByBusinessDays(new Date(candidateWindow.end), shiftDays);
+                    normalized[candidate] = {
+                        start: shiftedStart.toISOString(),
+                        end: shiftedEnd.toISOString()
+                    };
+                }
+                start = startOfDay(new Date(normalized[dept].start));
+                end = startOfDay(new Date(normalized[dept].end));
+            }
+        }
+
+        previousEnd = end;
+    }
+
+    return normalized;
+};
+
+const applyBatchLockstepAlignment = (jobs: Job[]): Job[] => {
+    if (jobs.length === 0) return jobs;
+
+    const result = jobs.map(job => ({ ...job }));
+    const byId = new Map<string, Job>(result.map(job => [job.id, job]));
+    const PRESS_BRAKE_INDEX = DEPARTMENTS.indexOf('Press Brake');
+    const cohorts = splitJobsIntoBatchCohorts(result).filter(cohort => cohort.jobs.length >= 2);
+
+    for (const cohort of cohorts) {
+        const baseEligible = cohort.jobs.filter(job => {
+            if (job.isOverdue) return false;
+            const currentIndex = DEPARTMENTS.indexOf(job.currentDepartment as Department);
+            if (currentIndex > PRESS_BRAKE_INDEX) return false;
+            return !!job.departmentSchedule;
+        });
+
+        if (baseEligible.length < 2) continue;
+
+        const subgroups = new Map<string, { alignDepts: Department[]; jobs: Job[] }>();
+        for (const job of baseEligible) {
+            const currentIndex = DEPARTMENTS.indexOf(job.currentDepartment as Department);
+            const startIndex = currentIndex >= 0 ? currentIndex : 0;
+            const alignDepts = BATCH_LOCKSTEP_DEPARTMENTS.filter(dept => {
+                const deptIndex = DEPARTMENTS.indexOf(dept);
+                return deptIndex >= startIndex &&
+                    deptIndex <= PRESS_BRAKE_INDEX &&
+                    !!job.departmentSchedule?.[dept];
+            });
+            if (alignDepts.length === 0) continue;
+
+            const signature = alignDepts.join('|');
+            if (!subgroups.has(signature)) {
+                subgroups.set(signature, { alignDepts, jobs: [] });
+            }
+            subgroups.get(signature)!.jobs.push(job);
+        }
+
+        for (const subgroup of subgroups.values()) {
+            if (subgroup.jobs.length < 2) continue;
+
+            const alignDepts = subgroup.alignDepts;
+            const sortedEligible = [...subgroup.jobs].sort(compareByDueDateAndSize);
+            const anchorJob = sortedEligible[0];
+            if (!anchorJob.departmentSchedule) continue;
+
+            const lastAlignedDept = alignDepts[alignDepts.length - 1];
+            const lastAlignedDeptIndex = DEPARTMENTS.indexOf(lastAlignedDept);
+            const anchorLastWindow = anchorJob.departmentSchedule[lastAlignedDept];
+            if (!anchorLastWindow) continue;
+
+            const maxDurations = new Map<Department, number>();
+            for (const dept of alignDepts) {
+                const deptMax = Math.max(
+                    ...sortedEligible.map(job => {
+                        const window = job.departmentSchedule?.[dept];
+                        if (!window) return 1;
+                        return Math.max(
+                            1,
+                            countBusinessDaysBetweenInclusive(new Date(window.start), new Date(window.end))
+                        );
+                    })
+                );
+                maxDurations.set(dept, deptMax);
+            }
+
+            const sharedWindows = new Map<Department, { start: Date; end: Date }>();
+            let cursorEnd = startOfDay(new Date(anchorLastWindow.end));
+            for (let i = alignDepts.length - 1; i >= 0; i--) {
+                const dept = alignDepts[i];
+                const duration = Math.max(1, maxDurations.get(dept) || 1);
+                const start = subtractWorkDays(cursorEnd, Math.max(duration - 1, 0));
+                sharedWindows.set(dept, { start, end: cursorEnd });
+                cursorEnd = startOfDay(start);
+            }
+
+            for (const sourceJob of sortedEligible) {
+                const target = byId.get(sourceJob.id);
+                if (!target?.departmentSchedule) continue;
+
+                const updatedSchedule = { ...target.departmentSchedule };
+                const oldLastWindow = updatedSchedule[lastAlignedDept];
+                if (!oldLastWindow) continue;
+                const oldLastEnd = startOfDay(new Date(oldLastWindow.end));
+
+                for (const dept of alignDepts) {
+                    const shared = sharedWindows.get(dept);
+                    if (!shared) continue;
+                    updatedSchedule[dept] = {
+                        start: shared.start.toISOString(),
+                        end: shared.end.toISOString()
+                    };
+                }
+
+                const sharedLast = sharedWindows.get(lastAlignedDept);
+                if (!sharedLast) continue;
+                const deltaBusinessDays = businessDayDistance(oldLastEnd, sharedLast.end);
+                if (deltaBusinessDays !== 0) {
+                    const downstreamDepts = DEPARTMENTS.filter(
+                        dept => DEPARTMENTS.indexOf(dept) > lastAlignedDeptIndex
+                    );
+                    for (const downstream of downstreamDepts) {
+                        const window = updatedSchedule[downstream];
+                        if (!window) continue;
+                        const shiftedStart = shiftDateByBusinessDays(new Date(window.start), deltaBusinessDays);
+                        const shiftedEnd = shiftDateByBusinessDays(new Date(window.end), deltaBusinessDays);
+                        updatedSchedule[downstream] = {
+                            start: shiftedStart.toISOString(),
+                            end: shiftedEnd.toISOString()
+                        };
+                    }
+                }
+
+                const normalizedSchedule = enforceSequentialDepartmentOrder(updatedSchedule);
+                const allStarts = Object.values(normalizedSchedule).map(s => new Date(s.start));
+                const allEnds = Object.values(normalizedSchedule).map(s => new Date(s.end));
+                const earliestStart = allStarts.length > 0
+                    ? new Date(Math.min(...allStarts.map(d => d.getTime())))
+                    : target.scheduledStartDate || new Date();
+                const latestEnd = allEnds.length > 0
+                    ? new Date(Math.max(...allEnds.map(d => d.getTime())))
+                    : earliestStart;
+                const dueDate = normalizeWorkEnd(new Date(target.dueDate));
+                const hasConflict = isBefore(dueDate, latestEnd);
+
+                byId.set(target.id, {
+                    ...target,
+                    departmentSchedule: normalizedSchedule,
+                    remainingDepartmentSchedule: buildRemainingScheduleFromCurrentDept(
+                        normalizedSchedule,
+                        target.currentDepartment as Department
+                    ),
+                    scheduledDepartmentByDate: buildScheduledDepartmentByDate(normalizedSchedule),
+                    scheduledStartDate: earliestStart,
+                    schedulingConflict: hasConflict,
+                    progressStatus: hasConflict ? 'SLIPPING' : (target.progressStatus || 'ON_TRACK')
+                });
+            }
+        }
+    }
+
+    return result.map(job => byId.get(job.id) || job);
+};
+
+export const alignBatchCohorts = (jobs: Job[]): Job[] => applyBatchLockstepAlignment(jobs);
+
 const orderJobsForBatching = (jobs: Job[], compareBase: (a: Job, b: Job) => number): Job[] => {
     type Group = {
         jobs: Job[];
-        priority: number;
-        weekTime: number;
         minDue: number;
         maxScore: number;
         maxPoints: number;
+        isBatch: boolean;
+        cohortSize: number;
     };
 
-    const grouped = new Map<string, { jobs: Job[]; priority: number; weekTime: number }>();
-    const singles: Group[] = [];
+    const batchKeys = new Set<string>();
+    const groups: Group[] = [];
+    const cohorts = splitJobsIntoBatchCohorts(jobs);
 
-    for (const job of jobs) {
-        const text = normalizeBatchText(job.description || '');
-        const category = getBatchCategory(text);
-        const weekStart = getDueWeekStart(new Date(job.dueDate));
-        const weekTime = weekStart.getTime();
-
-        if (!category) {
-            singles.push({
-                jobs: [job],
-                priority: 2,
-                weekTime,
-                minDue: new Date(job.dueDate).getTime(),
-                maxScore: job.urgencyScore || 0,
-                maxPoints: job.weldingPoints || 0
-            });
-            continue;
-        }
-
-        const gauge = extractGauge(text);
-        const material = extractMaterial(text);
-        const isStrict = Boolean(gauge && material);
-        const key = isStrict
-            ? `strict:${category}|${gauge}|${material}|${weekTime}`
-            : `relaxed:${category}|${weekTime}`;
-
-        if (!grouped.has(key)) {
-            grouped.set(key, { jobs: [], priority: isStrict ? 0 : 1, weekTime });
-        }
-        grouped.get(key)!.jobs.push(job);
+    for (const cohort of cohorts) {
+        cohort.jobs.sort(compareBase);
+        batchKeys.add(cohort.key);
+        groups.push({
+            jobs: cohort.jobs,
+            minDue: Math.min(...cohort.jobs.map(j => new Date(j.dueDate).getTime())),
+            maxScore: Math.max(...cohort.jobs.map(j => j.urgencyScore || 0)),
+            maxPoints: Math.max(...cohort.jobs.map(j => j.weldingPoints || 0)),
+            isBatch: cohort.jobs.length >= 2,
+            cohortSize: cohort.jobs.length
+        });
     }
 
-    const groups: Group[] = [];
-    grouped.forEach(group => {
-        group.jobs.sort(compareBase);
+    for (const job of jobs) {
+        const key = getBatchKeyForJob(job);
+        if (key && batchKeys.has(key)) continue;
         groups.push({
-            jobs: group.jobs,
-            priority: group.priority,
-            weekTime: group.weekTime,
-            minDue: Math.min(...group.jobs.map(j => new Date(j.dueDate).getTime())),
-            maxScore: Math.max(...group.jobs.map(j => j.urgencyScore || 0)),
-            maxPoints: Math.max(...group.jobs.map(j => j.weldingPoints || 0))
+            jobs: [job],
+            minDue: new Date(job.dueDate).getTime(),
+            maxScore: job.urgencyScore || 0,
+            maxPoints: job.weldingPoints || 0,
+            isBatch: false,
+            cohortSize: 1
         });
-    });
+    }
 
-    singles.sort((a, b) => compareBase(a.jobs[0], b.jobs[0]));
-
-    const ordered = [...groups, ...singles].sort((a, b) => {
-        if (a.weekTime !== b.weekTime) return a.weekTime - b.weekTime;
-        if (a.minDue !== b.minDue) return a.minDue - b.minDue;
-        if (a.priority !== b.priority) return a.priority - b.priority;
-        const scoreDiff = b.maxScore - a.maxScore;
-        if (Math.abs(scoreDiff) > 1) return scoreDiff;
-        return b.maxPoints - a.maxPoints;
-    });
-
-    return ordered.flatMap(group => group.jobs);
+    return groups
+        .sort((a, b) => {
+            if (a.minDue !== b.minDue) return a.minDue - b.minDue;
+            if (a.isBatch !== b.isBatch) return a.isBatch ? -1 : 1;
+            if (a.cohortSize !== b.cohortSize) return b.cohortSize - a.cohortSize;
+            const scoreDiff = b.maxScore - a.maxScore;
+            if (Math.abs(scoreDiff) > 1) return scoreDiff;
+            return b.maxPoints - a.maxPoints;
+        })
+        .flatMap(group => group.jobs);
 };
 
 // ============================================================================
@@ -326,15 +672,8 @@ const scheduleForwardFromToday = (
             dateCursor = addDays(dateCursor, 1);
         }
 
-        // Next department starts after this one ends (with gap based on size)
-        let gapDays = 0;
-        if (!job.noGaps) { // Respect no-gaps override
-            if (points >= BIG_ROCK_CONFIG.threshold) {
-                gapDays = 1; // Big rock: 1 day gap
-            } else if (points > SMALL_JOB_THRESHOLD) {
-                gapDays = 0.5; // Medium: 1/2 day gap
-            }
-        }
+        // Next department starts after this one ends (unified gap table)
+        const gapDays = getDeptGap(points, job.noGaps);
 
         currentStart = addWorkDays(deptEnd, gapDays + 1);
     }
@@ -357,7 +696,10 @@ const scheduleForwardFromToday = (
         scheduledEndDate,
         departmentSchedule: departmentSchedule as Job['departmentSchedule'],
         scheduledDepartmentByDate,
-        schedulingConflict: true, // Mark as conflict since it was overdue
+        schedulingConflict: isBefore(
+            normalizeWorkEnd(new Date(job.dueDate)),
+            scheduledEndDate
+        ), // Only flag conflict if forward schedule misses due date
         urgencyScore: calculateUrgencyScore(job).score,
         isOverdue: true // Flag for UI - this job was past due on import
     };
@@ -446,18 +788,17 @@ const getWeekKey = (date: Date): string => {
     return `${year}-W${String(weekNum).padStart(2, '0')}`;
 };
 
-/**
- * Check if adding points would exceed weekly capacity for a department
- */
 const canFitInWeek = (
     date: Date,
     dept: Department,
     points: number,
-    buckets: CapacityBuckets
+    buckets: CapacityBuckets,
+    allowOT: boolean = false
 ): boolean => {
     const weekKey = getWeekKey(date);
     const currentUsage = buckets.weeklyUsage?.[weekKey]?.[dept] || 0;
-    return (currentUsage + points) <= WEEKLY_CAPACITY;
+    const capacity = allowOT ? OT_WEEKLY_CAPACITY : WEEKLY_CAPACITY;
+    return (currentUsage + points) <= capacity;
 };
 
 /**
@@ -481,6 +822,35 @@ const reserveWeeklyCapacity = (
         };
     }
     buckets.weeklyUsage[weekKey][dept] += points;
+};
+
+/**
+ * Prorate weekly capacity across multiple weeks for multi-day jobs.
+ * Instead of reserving all points in the start week, distribute
+ * points evenly across each work day the job spans.
+ * Example: 200 pts / 8 days = 25 pts/day → 125 in week 1, 75 in week 2.
+ */
+const prorateWeeklyCapacity = (
+    startDate: Date,
+    durationDays: number,
+    dept: Department,
+    totalPoints: number,
+    buckets: CapacityBuckets
+): void => {
+    const effectiveDays = Math.max(durationDays, 1);
+    const pointsPerDay = totalPoints / effectiveDays;
+    let cursor = new Date(startDate);
+    let remaining = effectiveDays;
+
+    while (remaining > 0) {
+        // Skip weekends
+        while (isSaturday(cursor) || isSunday(cursor)) {
+            cursor = addDays(cursor, 1);
+        }
+        reserveWeeklyCapacity(cursor, dept, pointsPerDay, buckets);
+        cursor = addDays(cursor, 1);
+        remaining--;
+    }
 };
 
 /**
@@ -709,19 +1079,12 @@ export const reserveCapacity = (
             dayDate = addDays(dayDate, 1);
         }
 
-        // Reserve weekly capacity for this department (full job points for the week)
-        reserveWeeklyCapacity(deptStartDate, dept, job.weldingPoints || 0, buckets);
+        // Prorate weekly capacity across all weeks this dept spans
+        prorateWeeklyCapacity(deptStartDate, duration, dept, job.weldingPoints || 0, buckets);
 
-        // Next department starts after this one ends
-        // Gap logic: Small (≤7 pts) = 0 gap, Medium (8-49) = 1 day, Big Rock (≥50) = 2 days
+        // Next department starts after this one ends (unified gap table)
         const jobPoints = job.weldingPoints || 0;
-        let gapDays = 0;
-        if (jobPoints >= BIG_ROCK_CONFIG.threshold) {
-            gapDays = 2; // Big rock: 2 day gap
-        } else if (jobPoints > SMALL_JOB_THRESHOLD) {
-            gapDays = 1; // Medium: 1 day gap
-        }
-        // else: Small job - no gap (same day OK)
+        const gapDays = getDeptGap(jobPoints);
 
         if (gapDays > 0) {
             deptStartDate = addDays(dayDate, gapDays);
@@ -966,7 +1329,7 @@ const scheduleJobsOptimizeMode = (jobs: Job[]): Job[] => {
         scheduledJobs.push(scheduled);
     }
 
-    return scheduledJobs;
+    return applyBatchLockstepAlignment(scheduledJobs);
 };
 
 /**
@@ -1119,10 +1482,16 @@ const canFitDepartment = (
     duration: number,
     points: number,
     buckets: CapacityBuckets,
-    productType: ProductType = 'FAB' // Added for pool logic
+    productType: ProductType = 'FAB',
+    allowOT: boolean = false
 ): boolean => {
     const dailyLoad = points / Math.max(duration, 1);
     const limit = DEPARTMENT_CONFIG[dept]?.dailyCapacity || 195;
+
+    // Weekly capacity check — ensure job fits in the week
+    if (!canFitInWeek(startDate, dept, points, buckets, allowOT)) {
+        return false;
+    }
 
     // Identify Pool and Pool Limit
     const deptConfig = DEPARTMENT_CONFIG[dept];
@@ -1279,8 +1648,11 @@ const scheduleBackwardFromDue = (
     job: Job,
     buckets: CapacityBuckets,
     scheduledJobs?: Job[],
-    batchSize?: number
+    batchSize?: number,
+    options?: { allowOT?: boolean; dryRun?: boolean }
 ): Job => {
+    const allowOT = options?.allowOT ?? false;
+    const dryRun = options?.dryRun ?? false;
     const dueDate = normalizeWorkEnd(new Date(job.dueDate));
     const today = normalizeWorkStart(new Date());
     const durations = calculateAllDurations(job, batchSize);
@@ -1341,7 +1713,7 @@ const scheduleBackwardFromDue = (
 
         // Try ideal position first
         {
-            const capacityOk = canFitDepartment(dept, deptStart, deptEnd, duration, job.weldingPoints || 0, buckets, productType);
+            const capacityOk = canFitDepartment(dept, deptStart, deptEnd, duration, job.weldingPoints || 0, buckets, productType, allowOT);
             const limitOk = !exceedsDailyDeptLimit(deptStart, deptEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
             if (capacityOk && limitOk) {
                 foundSlot = true;
@@ -1360,7 +1732,7 @@ const scheduleBackwardFromDue = (
 
                 // Forward bound: don't overlap into the next department
                 if (!isBefore(forwardBound, fwdEnd)) {
-                    const fwdCapOk = canFitDepartment(dept, fwdStart, fwdEnd, duration, job.weldingPoints || 0, buckets, productType);
+                    const fwdCapOk = canFitDepartment(dept, fwdStart, fwdEnd, duration, job.weldingPoints || 0, buckets, productType, allowOT);
                     const fwdLimOk = !exceedsDailyDeptLimit(fwdStart, fwdEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
                     if (fwdCapOk && fwdLimOk) {
                         deptStart = fwdStart;
@@ -1376,7 +1748,7 @@ const scheduleBackwardFromDue = (
 
                 // Backward bound: don't go before today
                 if (!isBefore(bwdStart, today)) {
-                    const bwdCapOk = canFitDepartment(dept, bwdStart, bwdEnd, duration, job.weldingPoints || 0, buckets, productType);
+                    const bwdCapOk = canFitDepartment(dept, bwdStart, bwdEnd, duration, job.weldingPoints || 0, buckets, productType, allowOT);
                     const bwdLimOk = !exceedsDailyDeptLimit(bwdStart, bwdEnd, jobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
                     if (bwdCapOk && bwdLimOk) {
                         deptStart = bwdStart;
@@ -1409,13 +1781,17 @@ const scheduleBackwardFromDue = (
             }
         }
 
-        // Reserve capacity for this department
+        // Reserve capacity for this department (skip in dry-run mode)
         if (foundSlot) {
-            reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
+            if (!dryRun) {
+                reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
+            }
         } else {
             hasConflict = true;
             // Still reserve at best-effort position to prevent infinite stacking
-            reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
+            if (!dryRun) {
+                reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
+            }
         }
 
         // Record the schedule
@@ -1435,14 +1811,7 @@ const scheduleBackwardFromDue = (
 
         // Next department (going backwards) - gap depends on job size
         const points = job.weldingPoints || 0;
-        let gapDays = 0;
-        if (!job.noGaps) {
-            if (points >= BIG_ROCK_CONFIG.threshold) {
-                gapDays = 1;
-            } else if (points > SMALL_JOB_THRESHOLD) {
-                gapDays = 0.5;
-            }
-        }
+        const gapDays = getDeptGap(points, job.noGaps);
 
         if (hitTodayFloor) {
             // If we hit the today floor, all subsequent depts (going backward = earlier in flow)
@@ -1493,7 +1862,9 @@ const scheduleBackwardFromDue = (
             const capOk = canFitDepartment(dept, deptStart, deptEnd, duration, job.weldingPoints || 0, buckets, productType);
             const limOk = !exceedsDailyDeptLimit(deptStart, deptEnd, fwdJobDayCounts, MAX_DEPTS_PER_DAY_PER_JOB);
             if (capOk && limOk) {
-                reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
+                if (!dryRun) {
+                    reserveDepartmentCapacity(dept, deptStart, duration, job.weldingPoints || 0, buckets, productType, job.id);
+                }
             }
 
             reorderedSchedule[dept] = {
@@ -1511,11 +1882,7 @@ const scheduleBackwardFromDue = (
 
             // Next dept starts after gap
             const pts = job.weldingPoints || 0;
-            let gap = 0;
-            if (!job.noGaps) {
-                if (pts >= BIG_ROCK_CONFIG.threshold) gap = 1;
-                else if (pts > SMALL_JOB_THRESHOLD) gap = 0.5;
-            }
+            const gap = getDeptGap(pts, job.noGaps);
             forwardCursor = addWorkDays(deptEnd, gap + 1);
         }
 
@@ -1777,11 +2144,7 @@ const placeIdeal = (job: Job, batchSize?: number): Job => {
 
         // Next department gap
         const points = job.weldingPoints || 0;
-        let gapDays = 0;
-        if (!job.noGaps) {
-            if (points >= BIG_ROCK_CONFIG.threshold) gapDays = 1;
-            else if (points > SMALL_JOB_THRESHOLD) gapDays = 0.5;
-        }
+        const gapDays = getDeptGap(points, job.noGaps);
 
         currentEnd = gapDays > 0
             ? subtractWorkDays(deptStart, gapDays)
@@ -2022,9 +2385,18 @@ const compressSchedule = (jobs: Job[]): Job[] => {
                 }
 
                 if (shifted) {
-                    jobMap.set(candidate.id, shifted);
-                    if (weeklyLoad[weekKey]?.[dept]) weeklyLoad[weekKey][dept].total -= pts;
-                    movedAny = true;
+                    // Verify shifted job doesn't miss due date
+                    const shiftedEnds = Object.values(shifted.departmentSchedule || {}).map(s => new Date(s.end));
+                    const latestEnd = shiftedEnds.length > 0 ? new Date(Math.max(...shiftedEnds.map(d => d.getTime()))) : today;
+                    if (isBefore(new Date(shifted.dueDate), latestEnd)) {
+                        // Shift would cause due-date miss — reject it
+                        // Don't update jobMap or weeklyLoad, skip to next candidate
+                    } else {
+                        jobMap.set(candidate.id, shifted);
+                        movedAny = true;
+                        // Note: weeklyLoad is fully recomputed at top of each pass,
+                        // so no in-place subtraction needed here
+                    }
                 }
             }
         }
@@ -2057,7 +2429,8 @@ const validateSchedule = (jobs: Job[]): Job[] => {
         for (let i = 1; i < deptOrder.length; i++) {
             const prevEnd = new Date(job.departmentSchedule![deptOrder[i - 1]].end);
             const currStart = new Date(job.departmentSchedule![deptOrder[i]].start);
-            if (isBefore(currStart, prevEnd)) { outOfOrder = true; break; }
+            // Allow same-day transitions (valid for small jobs); only flag true overlaps
+            if (isBefore(currStart, startOfDay(prevEnd))) { outOfOrder = true; break; }
         }
 
         return {
@@ -3011,44 +3384,23 @@ const schedulePipeline = (jobs: Job[]): { jobs: Job[]; insights: ScheduleInsight
 
     const placed: Job[] = [];
 
+    // Shared capacity pool — overdue + on-time jobs see each other's reservations
+    const buckets = initBuckets(subDays(today, 30), addDays(today, 180));
+
     // Overdue jobs: forward from today (capacity-aware to avoid stacking)
     if (overdueJobs.length > 0) {
         overdueJobs.sort((a, b) => getDaysOverdue(b) - getDaysOverdue(a));
-        const buckets = initBuckets(subDays(today, 30), addDays(today, 180));
         for (const job of overdueJobs) {
             placed.push(scheduleForwardFromToday(job, buckets));
         }
         console.log(`[SCHEDULER]   ${overdueJobs.length} overdue → forward from today`);
     }
 
-    // On-time jobs: compute batch sizes, then place backward from due date
+    // On-time jobs: compute batch sizes, then place backward from due date (CAPACITY-AWARE)
     onTimeJobs.sort(compareByDueDateAndSize);
     const ordered = orderJobsForBatching(onTimeJobs, compareByDueDateAndSize);
 
-    // Compute batch sizes
-    const batchSizeMap = new Map<string, number>();
-    const batchGroupCounts = new Map<string, number>();
-    for (const job of ordered) {
-        const text = normalizeBatchText(job.description || '');
-        const cat = getBatchCategory(text);
-        if (!cat) { batchSizeMap.set(job.id, 1); continue; }
-        const gauge = extractGauge(text) || 'none';
-        const material = extractMaterial(text) || 'none';
-        const weekStart = getDueWeekStart(new Date(job.dueDate)).toISOString();
-        const key = `${cat}|${gauge}|${material}|${weekStart}`;
-        batchGroupCounts.set(key, (batchGroupCounts.get(key) || 0) + 1);
-    }
-    for (const job of ordered) {
-        if (batchSizeMap.has(job.id)) continue;
-        const text = normalizeBatchText(job.description || '');
-        const cat = getBatchCategory(text);
-        if (!cat) { batchSizeMap.set(job.id, 1); continue; }
-        const gauge = extractGauge(text) || 'none';
-        const material = extractMaterial(text) || 'none';
-        const weekStart = getDueWeekStart(new Date(job.dueDate)).toISOString();
-        const key = `${cat}|${gauge}|${material}|${weekStart}`;
-        batchSizeMap.set(job.id, batchGroupCounts.get(key) || 1);
-    }
+    const batchSizeMap = buildBatchSizeMap(ordered);
 
     // Populate urgency scores
     ordered.forEach(job => {
@@ -3057,14 +3409,45 @@ const schedulePipeline = (jobs: Job[]): { jobs: Job[]; insights: ScheduleInsight
         job.urgencyFactors = scoreResult.factors;
     });
 
+    let otCount = 0;
     for (const job of ordered) {
-        placed.push(placeIdeal(job, batchSizeMap.get(job.id) || 1));
+        const batchSize = batchSizeMap.get(job.id) || 1;
+
+        // Pass 1: Try regular capacity (850/week)
+        const dryResult = scheduleBackwardFromDue(job, buckets, placed, batchSize, { dryRun: true });
+
+        // Check if regular capacity can meet due date
+        const dryEnds = Object.values(dryResult.departmentSchedule || {}).map(s => new Date(s.end));
+        const dryLatest = dryEnds.length > 0 ? new Date(Math.max(...dryEnds.map(d => d.getTime()))) : today;
+        const wouldMiss = isBefore(normalizeWorkEnd(new Date(job.dueDate)), dryLatest);
+
+        if (!wouldMiss) {
+            // Fits at regular capacity — do the real run
+            placed.push(scheduleBackwardFromDue(job, buckets, placed, batchSize));
+        } else {
+            // OT escalation: retry with 950/week ceiling
+            const otResult = scheduleBackwardFromDue(job, buckets, placed, batchSize, { allowOT: true });
+            const otEnds = Object.values(otResult.departmentSchedule || {}).map(s => new Date(s.end));
+            const otLatest = otEnds.length > 0 ? new Date(Math.max(...otEnds.map(d => d.getTime()))) : today;
+            const stillMisses = isBefore(normalizeWorkEnd(new Date(job.dueDate)), otLatest);
+
+            if (!stillMisses) {
+                // OT saved it — tag the job
+                placed.push({ ...otResult, requiresOT: true });
+                otCount++;
+            } else {
+                // Even OT can't save it — accept the late position
+                placed.push({ ...otResult, requiresOT: true, schedulingConflict: true });
+                otCount++;
+            }
+        }
     }
-    console.log(`[SCHEDULER]   ${onTimeJobs.length} on-time → backward from due date`);
+    const lockstepPlaced = applyBatchLockstepAlignment(placed);
+    console.log(`[SCHEDULER]   ${onTimeJobs.length} on-time → backward from due date (${otCount} required OT escalation)`);
 
     // --- Phase 2: Capacity Audit ---
     console.log(`[SCHEDULER] Phase 2: Capacity audit...`);
-    const initialLoad = computeWeeklyLoad(placed);
+    const initialLoad = computeWeeklyLoad(lockstepPlaced);
     let overloadCount = 0;
     for (const depts of Object.values(initialLoad)) {
         for (const load of Object.values(depts)) {
@@ -3075,11 +3458,15 @@ const schedulePipeline = (jobs: Job[]): { jobs: Job[]; insights: ScheduleInsight
 
     // --- Phase 3: Compression ---
     console.log(`[SCHEDULER] Phase 3: Compressing...`);
-    const compressed = compressSchedule(placed);
+    const compressed = compressSchedule(lockstepPlaced);
+    // Re-align batches after compression. Lockstep only touches Engineering,
+    // Laser, and Press Brake — so it preserves compression's capacity work
+    // on Welding/Polishing/Assembly while keeping batches tight upstream.
+    const lockstepCompressed = applyBatchLockstepAlignment(compressed);
 
     // --- Phase 4: Validation ---
     console.log(`[SCHEDULER] Phase 4: Validating...`);
-    const validated = validateSchedule(compressed);
+    const validated = validateSchedule(lockstepCompressed);
     const conflicts = validated.filter(j => j.schedulingConflict).length;
     console.log(`[SCHEDULER]   ${conflicts} jobs with conflicts`);
 
@@ -3425,8 +3812,9 @@ export const trackJobProgress = (job: Job, previousJob: Job | null): Job => {
         } else if (currentIndex < expectedIndex) {
             // Check for stall (no movement for 2+ days)
             if (updatedJob.lastDepartmentChange) {
-                const daysSinceChange = Math.floor(
-                    (new Date().getTime() - new Date(updatedJob.lastDepartmentChange).getTime()) / (1000 * 60 * 60 * 24)
+                const daysSinceChange = businessDayDistance(
+                    startOfDay(new Date(updatedJob.lastDepartmentChange)),
+                    startOfDay(new Date())
                 );
                 if (daysSinceChange >= 2) {
                     updatedJob.progressStatus = 'STALLED';

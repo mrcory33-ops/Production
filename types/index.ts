@@ -138,6 +138,7 @@ export interface Job {
     scheduledDepartmentByDate?: Record<string, Department>; // Expected dept on each date (for slippage detection)
     priorityByDept?: Partial<Record<Department, { value: number; setAt: string; listId: string }>>;
     noGaps?: boolean; // Override: Remove all department gaps for this job
+    requiresOT?: boolean; // Capacity-aware placement needed OT ceiling to meet due date
     skippedDepartments?: Department[]; // Departments this job should skip (removed from schedule)
     requiresPainting?: boolean; // HARMONIC jobs that need off-site painting (adds ~1 week to Assembly)
     weldingSubStages?: WeldingSubStageInfo[]; // Door welding sub-pipeline breakdown (press/robot/tubeFrame/fullWeld)

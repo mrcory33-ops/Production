@@ -25,27 +25,30 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
   Engineering: {
     name: 'Engineering',
     displayOrder: 1,
-    pools: [{ count: 9, outputPerDay: 22, maxPerProject: 1 }],
-    dailyCapacity: 198,
-    weeklyTarget: { min: 850, max: 1000 },
+    // 9 workers × 19 pts/day = 171/day × 5 = 855/week
+    pools: [{ count: 9, outputPerDay: 19, maxPerProject: 1 }],
+    dailyCapacity: 171,
+    weeklyTarget: { min: 850, max: 950 },
     color: '#3b82f6',
     colorClass: 'dept-engineering'
   },
   Laser: {
     name: 'Laser',
     displayOrder: 2,
-    pools: [{ count: 3, outputPerDay: 67.5, maxPerProject: 2 }],
-    dailyCapacity: 202.5,
-    weeklyTarget: { min: 850, max: 1000 },
+    // 3 workers × 57 pts/day = 171/day × 5 = 855/week
+    pools: [{ count: 3, outputPerDay: 57, maxPerProject: 2 }],
+    dailyCapacity: 171,
+    weeklyTarget: { min: 850, max: 950 },
     color: '#f97316',
     colorClass: 'dept-laser'
   },
   'Press Brake': {
     name: 'Press Brake',
     displayOrder: 3,
-    pools: [{ count: 6, outputPerDay: 33, maxPerProject: 4 }],
-    dailyCapacity: 198,
-    weeklyTarget: { min: 850, max: 1000 },
+    // 6 workers × 28.5 pts/day = 171/day × 5 = 855/week
+    pools: [{ count: 6, outputPerDay: 28.5, maxPerProject: 4 }],
+    dailyCapacity: 171,
+    weeklyTarget: { min: 850, max: 950 },
     color: '#eab308',
     colorClass: 'dept-press-brake'
   },
@@ -53,33 +56,40 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
     name: 'Welding',
     displayOrder: 4,
     isConstraint: true, // THE HEARTBEAT
+    // DOORS pool: 6 × 14 = 84/day × 5 = 420/week
+    // FAB pool:   7 × 14 = 98/day × 5 = 490/week
+    // Combined: 182/day × 5 = 910/week (split across product types)
     pools: [
-      { count: 6, outputPerDay: 15, maxPerProject: 3, productTypes: ['DOORS'] },
-      { count: 7, outputPerDay: 15, maxPerProject: 3, productTypes: ['FAB', 'HARMONIC'] }
+      { count: 6, outputPerDay: 14, maxPerProject: 3, productTypes: ['DOORS'] },
+      { count: 7, outputPerDay: 14, maxPerProject: 3, productTypes: ['FAB', 'HARMONIC'] }
     ],
-    dailyCapacity: 195,
-    weeklyTarget: { min: 850, max: 1000 },
+    dailyCapacity: 182,
+    weeklyTarget: { min: 850, max: 950 },
     color: '#ef4444',
     colorClass: 'dept-welding'
   },
   Polishing: {
     name: 'Polishing',
     displayOrder: 5,
+    // FAB pool:   6 × 16 = 96/day × 5 = 480/week
+    // DOORS pool: 5 × 16 = 80/day × 5 = 400/week
+    // Combined: 176/day × 5 = 880/week (split across product types)
     pools: [
-      { count: 6, outputPerDay: 18, maxPerProject: 3, productTypes: ['FAB', 'HARMONIC'] },
-      { count: 5, outputPerDay: 18, maxPerProject: 3, productTypes: ['DOORS'] }
+      { count: 6, outputPerDay: 16, maxPerProject: 3, productTypes: ['FAB', 'HARMONIC'] },
+      { count: 5, outputPerDay: 16, maxPerProject: 3, productTypes: ['DOORS'] }
     ],
-    dailyCapacity: 198,
-    weeklyTarget: { min: 850, max: 1000 },
+    dailyCapacity: 176,
+    weeklyTarget: { min: 850, max: 950 },
     color: '#14b8a6',
     colorClass: 'dept-polishing'
   },
   Assembly: {
     name: 'Assembly',
     displayOrder: 6,
-    pools: [{ count: 12, outputPerDay: 16, maxPerProject: 3 }],
-    dailyCapacity: 192,
-    weeklyTarget: { min: 850, max: 1000 },
+    // 12 workers × 14 pts/day = 168/day × 5 = 840/week
+    pools: [{ count: 12, outputPerDay: 14, maxPerProject: 3 }],
+    dailyCapacity: 168,
+    weeklyTarget: { min: 850, max: 950 },
     timeMultiplier: 1.25,
     color: '#8b5cf6',
     colorClass: 'dept-assembly'
