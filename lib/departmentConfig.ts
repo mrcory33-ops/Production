@@ -5,6 +5,7 @@ export interface WorkerPool {
   outputPerDay: number;
   maxPerProject: number;
   productTypes?: ProductType[]; // Which product types this pool handles
+  weeklyCapacity?: number;      // Explicit weekly capacity override (pts/wk). When set, scheduling uses this instead of count × outputPerDay × 5.
 }
 
 export interface DepartmentCapacity {
@@ -25,8 +26,13 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
   Engineering: {
     name: 'Engineering',
     displayOrder: 1,
-    // 9 workers × 19 pts/day = 171/day × 5 = 855/week
-    pools: [{ count: 9, outputPerDay: 19, maxPerProject: 1 }],
+    // FAB pool:   5 engineers × 19 pts/day = 95/day × 5 = 475/week
+    // DOORS pool: 4 engineers × 19 pts/day = 76/day × 5 = 380/week
+    // Combined: 171/day × 5 = 855/week (split across product types)
+    pools: [
+      { count: 5, outputPerDay: 19, maxPerProject: 1, productTypes: ['FAB', 'HARMONIC'] },
+      { count: 4, outputPerDay: 19, maxPerProject: 1, productTypes: ['DOORS'] }
+    ],
     dailyCapacity: 171,
     weeklyTarget: { min: 850, max: 950 },
     color: '#3b82f6',
@@ -60,8 +66,8 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
     // FAB pool:   7 × 14 = 98/day × 5 = 490/week
     // Combined: 182/day × 5 = 910/week (split across product types)
     pools: [
-      { count: 6, outputPerDay: 14, maxPerProject: 3, productTypes: ['DOORS'] },
-      { count: 7, outputPerDay: 14, maxPerProject: 3, productTypes: ['FAB', 'HARMONIC'] }
+      { count: 6, outputPerDay: 14, maxPerProject: 3, productTypes: ['DOORS'], weeklyCapacity: 850 },
+      { count: 7, outputPerDay: 14, maxPerProject: 3, productTypes: ['FAB', 'HARMONIC'], weeklyCapacity: 850 }
     ],
     dailyCapacity: 182,
     weeklyTarget: { min: 850, max: 950 },
@@ -71,13 +77,11 @@ export const DEPARTMENT_CONFIG: Record<Department, DepartmentCapacity> = {
   Polishing: {
     name: 'Polishing',
     displayOrder: 5,
-    // FAB pool:   6 × 16 = 96/day × 5 = 480/week
-    // DOORS pool: 5 × 16 = 80/day × 5 = 400/week
-    // Combined: 176/day × 5 = 880/week (split across product types)
-    pools: [
-      { count: 6, outputPerDay: 16, maxPerProject: 3, productTypes: ['FAB', 'HARMONIC'] },
-      { count: 5, outputPerDay: 16, maxPerProject: 3, productTypes: ['DOORS'] }
-    ],
+    // Shared pool: 11 workers × 16 pts/day = 176/day × 5 = 880/week
+    // No product-type split — all workers handle all products.
+    // Seamless door throughput is limited upstream by the robot (14 doors/day),
+    // not by polishing capacity itself.
+    pools: [{ count: 11, outputPerDay: 16, maxPerProject: 3 }],
     dailyCapacity: 176,
     weeklyTarget: { min: 850, max: 950 },
     color: '#14b8a6',

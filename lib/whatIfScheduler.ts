@@ -6,8 +6,11 @@ import { calculateDeptDuration, DEPARTMENT_CONFIG } from './departmentConfig';
 // Constants — aligned with scheduler.ts and SCHEDULING_ENGINE.md
 // ─────────────────────────────────────────────────────────────
 
-/** $650 in quoted fabrication value ≈ 1 welding point */
+/** $650 in quoted fabrication value ≈ 1 welding point (FAB/HARMONIC) */
 const DOLLAR_TO_POINT_RATIO = 650;
+
+/** $475 in quoted door/frame value ≈ 1 welding point (DOORS) */
+const DOORS_DOLLAR_TO_POINT_RATIO = 475;
 
 /** Standard weekly capacity per department (fallback) */
 const BASE_WEEKLY_CAPACITY = 850;
@@ -23,6 +26,33 @@ const DEPT_WEEKLY_CAPACITY: Record<Department, number> = Object.fromEntries(
 /** Get the weekly capacity for a department, with optional OT bonus */
 function getDeptWeeklyCapacity(dept: Department, otBonus = 0): number {
     return (DEPT_WEEKLY_CAPACITY[dept] || BASE_WEEKLY_CAPACITY) + otBonus;
+}
+
+/**
+ * Get the weekly capacity for only the worker pool(s) that handle a given product type.
+ * Uses explicit `weeklyCapacity` when set on a pool (authoritative scheduling number),
+ * otherwise falls back to count × outputPerDay × 5.
+ * Falls back to full department capacity if no pool segmentation exists.
+ */
+function getPoolWeeklyCapacity(dept: Department, productType: ProductType, otBonus = 0): number {
+    const config = DEPARTMENT_CONFIG[dept];
+    if (!config) return BASE_WEEKLY_CAPACITY + otBonus;
+
+    // Find pools that serve this product type
+    const matchingPools = config.pools.filter(pool =>
+        !pool.productTypes || pool.productTypes.length === 0 || pool.productTypes.includes(productType)
+    );
+
+    if (matchingPools.length === 0) {
+        // No matching pools — fall back to full dept capacity
+        return config.dailyCapacity * 5 + otBonus;
+    }
+
+    // Use explicit weeklyCapacity when set, otherwise compute from workers
+    const weeklyCap = matchingPools.reduce((sum, pool) =>
+        sum + (pool.weeklyCapacity ?? pool.count * pool.outputPerDay * 5), 0
+    );
+    return weeklyCap + otBonus;
 }
 
 /**
@@ -60,7 +90,11 @@ export interface QuoteInput {
     isREF: boolean;
     engineeringReadyDate: Date;
     targetDate?: Date;
-    productType?: ProductType; // NEW — defaults to 'FAB' if omitted
+    productType?: ProductType; // defaults to 'FAB' if omitted
+    // DOORS-specific inputs
+    doorQty?: number;          // Number of doors in the order
+    frameQty?: number;         // Number of frames in the order
+    doorType?: 'seamless' | 'lockseam'; // Door press type
 }
 
 export interface QuoteEstimate {
@@ -153,9 +187,10 @@ export interface FeasibilityCheck {
 // Core Helpers
 // ─────────────────────────────────────────────────────────────
 
-/** Convert dollar value to welding points */
-export function convertDollarToPoints(dollarValue: number): number {
-    return Math.round((dollarValue / DOLLAR_TO_POINT_RATIO) * 10) / 10;
+/** Convert dollar value to welding points (product-type aware) */
+export function convertDollarToPoints(dollarValue: number, productType?: ProductType): number {
+    const ratio = productType === 'DOORS' ? DOORS_DOLLAR_TO_POINT_RATIO : DOLLAR_TO_POINT_RATIO;
+    return Math.round((dollarValue / ratio) * 10) / 10;
 }
 
 /** Calculate total points from quote inputs */
@@ -166,15 +201,16 @@ export function calculateQuotePoints(input: QuoteInput): {
     remainingValue: number;
 } {
     const totalValue = Math.max(0, input.totalValue || 0);
+    const pt = input.productType;
 
     const bigRockPoints = input.bigRocks.reduce((sum, br) => {
         const value = Number(br.value) || 0;
-        return sum + convertDollarToPoints(value);
+        return sum + convertDollarToPoints(value, pt);
     }, 0);
 
     const bigRockValue = input.bigRocks.reduce((sum, br) => sum + (Number(br.value) || 0), 0);
     const remainingValue = Math.max(0, totalValue - bigRockValue);
-    const remainingPoints = convertDollarToPoints(remainingValue);
+    const remainingPoints = convertDollarToPoints(remainingValue, pt);
 
     return {
         totalPoints: bigRockPoints + remainingPoints,
@@ -309,9 +345,11 @@ function cloneCapacityMap(capacityMap: CapacityMap): CapacityMap {
  * For each department, distributes the job's WELDING POINTS
  * proportionally across the workdays that dept occupies.
  *
- * This gives an accurate per-week load per department.
+ * When a productType filter is provided, only jobs of that same
+ * product type contribute to the capacity map. This prevents FAB
+ * welding load from blocking DOORS jobs (separate worker pools).
  */
-function buildCapacityMap(existingJobs: Job[]): CapacityMap {
+function buildCapacityMap(existingJobs: Job[], productTypeFilter?: ProductType): CapacityMap {
     const capacityMap: CapacityMap = new Map();
 
     for (const job of existingJobs) {
@@ -319,13 +357,16 @@ function buildCapacityMap(existingJobs: Job[]): CapacityMap {
         const points = Number(job.weldingPoints) || 0;
         if (points <= 0) continue;
 
+        // Filter by product type if specified
+        if (productTypeFilter && job.productType && job.productType !== productTypeFilter) {
+            continue;
+        }
+
         for (const [deptKey, schedule] of Object.entries(job.departmentSchedule)) {
             const dept = deptKey as Department;
             const startDate = new Date(schedule.start);
             const endDate = new Date(schedule.end);
 
-            // Each department contributes the full welding points to its capacity bucket
-            // (this is how the scheduler's computeWeeklyLoad works)
             const weekDist = distributeLoadByWorkday(startDate, endDate, points);
             for (const [weekKey, weekPoints] of weekDist.entries()) {
                 if (!capacityMap.has(weekKey)) {
@@ -464,8 +505,23 @@ export async function simulateQuoteSchedule(
     const productType: ProductType = input.productType || 'FAB';
     const gap = getDepartmentGap(totalPoints);
 
-    // Build capacity map from existing scheduled jobs
-    const capacityMap = buildCapacityMap(existingJobs);
+    // Build capacity map — filter by product type so DOORS/FAB don't compete
+    const capacityMap = buildCapacityMap(existingJobs, productType);
+
+    // DOORS-specific: build description + quantity for sub-pipeline
+    const doorQty = input.doorQty || 0;
+    const frameQty = input.frameQty || 0;
+    const totalQty = doorQty + frameQty;
+    // Build synthetic description for door type classification
+    // e.g. "door seamless" or "door lock seam" for leaf classification
+    // Frames: "frame" only (no sub-type needed)
+    let doorsDescription = '';
+    if (productType === 'DOORS') {
+        const parts: string[] = [];
+        if (doorQty > 0) parts.push(input.doorType === 'lockseam' ? 'door lock seam' : 'door seamless');
+        if (frameQty > 0) parts.push('frame');
+        doorsDescription = parts.join(' ');
+    }
 
     // Calculate urgency score
     let urgencyScore = 0;
@@ -479,16 +535,24 @@ export async function simulateQuoteSchedule(
     // then the next dept starts after this one ends + gap
     for (let i = 0; i < DEPARTMENTS.length; i++) {
         const dept = DEPARTMENTS[i];
-        const duration = calculateDeptDuration(dept, totalPoints, productType);
+        const duration = calculateDeptDuration(
+            dept, totalPoints, productType,
+            doorsDescription || undefined,  // description for door classification
+            undefined,                       // jobName
+            undefined,                       // requiresPainting
+            undefined,                       // customerName
+            undefined,                       // batchSize
+            totalQty > 0 ? totalQty : undefined // quantity for door sub-pipeline
+        );
 
         // Find earliest slot where this dept has capacity
+        // Use pool-specific capacity (e.g. 420/wk DOORS Welding, not 910/wk combined)
         const slotStart = findAvailableSlot(
-            dept, currentDate, totalPoints, duration, capacityMap, getDeptWeeklyCapacity(dept)
+            dept, currentDate, totalPoints, duration, capacityMap, getPoolWeeklyCapacity(dept, productType)
         );
         const endDate = getEndDateForDuration(slotStart, duration);
 
-        // 🔧 DEBUG: trace pipelining
-        console.log(`🔧 [PIPELINE] ${dept}: duration=${duration}d, cap=${getDeptWeeklyCapacity(dept)}/wk, earliest=${format(currentDate, 'MMM d')}, slotStart=${format(slotStart, 'MMM d')}, endDate=${format(endDate, 'MMM d')}${slotStart > currentDate ? ' ⚠️ CAPACITY PUSHED' : ''}`);
+
 
         // Record weekly load for this dept leg
         const weeklyLoad: Record<string, number> = {};
@@ -519,9 +583,7 @@ export async function simulateQuoteSchedule(
 
         // Next dept starts after 30% of this dept's duration + gap (pipelined)
         currentDate = getPipelinedNextStart(slotStart, duration, gap);
-        if (i < DEPARTMENTS.length - 1) {
-            console.log(`🔧 [PIPELINE] → next dept (${DEPARTMENTS[i + 1]}) earliest: ${format(currentDate, 'MMM d')} (30% of ${duration}d = ${Math.ceil(duration * PIPELINE_OVERLAP)}d from ${format(slotStart, 'MMM d')})`);
-        }
+
     }
 
     const estimatedCompletion = timeline[timeline.length - 1]?.endDate || addDays(input.engineeringReadyDate, 30);
@@ -555,19 +617,34 @@ export async function checkAdvancedFeasibility(
 
     const gap = getDepartmentGap(totalPoints);
 
+    // DOORS-specific: build description + quantity for sub-pipeline (same as simulateQuoteSchedule)
+    const doorQty = input.doorQty || 0;
+    const frameQty = input.frameQty || 0;
+    const feasTotalQty = doorQty + frameQty;
+    let feasDescription = '';
+    if (productType === 'DOORS') {
+        const parts: string[] = [];
+        if (doorQty > 0) parts.push(input.doorType === 'lockseam' ? 'door lock seam' : 'door seamless');
+        if (frameQty > 0) parts.push('frame');
+        feasDescription = parts.join(' ');
+    }
+    const feasQty = feasTotalQty > 0 ? feasTotalQty : undefined;
+    const feasDesc = feasDescription || undefined;
+
     // ═══════════════════════════════════════════════════════════
     // TIER 1: AS-IS — can the new job fit without changes?
     // ═══════════════════════════════════════════════════════════
 
-    const baseCapacityMap = buildCapacityMap(existingJobs);
+    const baseCapacityMap = buildCapacityMap(existingJobs, productType);
     const existingJobsById = new Map<string, Job>();
     for (const job of existingJobs) existingJobsById.set(job.id, job);
     let asIsDate = new Date(input.engineeringReadyDate);
+    let lastDeptEndDate = new Date(input.engineeringReadyDate);
     const asIsBottlenecks: BottleneckDetail[] = [];
 
     for (const dept of DEPARTMENTS) {
-        const duration = calculateDeptDuration(dept, totalPoints, productType);
-        const slotStart = findAvailableSlot(dept, asIsDate, totalPoints, duration, baseCapacityMap, getDeptWeeklyCapacity(dept));
+        const duration = calculateDeptDuration(dept, totalPoints, productType, feasDesc, undefined, undefined, undefined, undefined, feasQty);
+        const slotStart = findAvailableSlot(dept, asIsDate, totalPoints, duration, baseCapacityMap, getPoolWeeklyCapacity(dept, productType));
 
         if (slotStart > asIsDate) {
             const delayDays = differenceInDays(slotStart, asIsDate);
@@ -575,11 +652,12 @@ export async function checkAdvancedFeasibility(
         }
 
         const endDate = getEndDateForDuration(slotStart, duration);
+        lastDeptEndDate = endDate; // Track actual end of last department
         asIsDate = getPipelinedNextStart(slotStart, duration, gap);
     }
 
-    // asIsDate is now the projected completion under Tier 1
-    const asIsCompletion = asIsDate;
+    // Use the actual end date of the last department (Assembly), not the pipelined cursor
+    const asIsCompletion = lastDeptEndDate;
     const asIsAchievable = asIsCompletion <= targetDate;
 
     // ═══════════════════════════════════════════════════════════
@@ -636,14 +714,16 @@ export async function checkAdvancedFeasibility(
     if (jobsToMove.length > 0 && !asIsAchievable) {
         // Re-simulate with freed capacity
         let moveDate = new Date(input.engineeringReadyDate);
+        let moveLastEnd = new Date(input.engineeringReadyDate);
         for (const dept of DEPARTMENTS) {
-            const duration = calculateDeptDuration(dept, totalPoints, productType);
-            const slotStart = findAvailableSlot(dept, moveDate, totalPoints, duration, capacityMapAfterMoves, getDeptWeeklyCapacity(dept));
+            const duration = calculateDeptDuration(dept, totalPoints, productType, feasDesc, undefined, undefined, undefined, undefined, feasQty);
+            const slotStart = findAvailableSlot(dept, moveDate, totalPoints, duration, capacityMapAfterMoves, getPoolWeeklyCapacity(dept, productType));
             const endDate = getEndDateForDuration(slotStart, duration);
+            moveLastEnd = endDate;
             moveDate = getPipelinedNextStart(slotStart, duration, gap);
         }
 
-        withMovesCompletion = moveDate;
+        withMovesCompletion = moveLastEnd;
         withMovesAchievable = withMovesCompletion <= targetDate;
     }
 
@@ -671,7 +751,7 @@ export async function checkAdvancedFeasibility(
         if (wk < todayStr || wk > targetStr) continue;
 
         for (const [dept, load] of deptMap.entries()) {
-            const cap = getDeptWeeklyCapacity(dept as Department);
+            const cap = getPoolWeeklyCapacity(dept as Department, productType);
             if (load > cap) {
                 overCapacityDepts.push({
                     department: dept,
@@ -689,13 +769,14 @@ export async function checkAdvancedFeasibility(
         // Try each OT tier from lowest to highest until one works
         for (const otTier of OT_TIERS) {
             let otDate = new Date(input.engineeringReadyDate);
+            let otLastEnd = new Date(input.engineeringReadyDate);
             const otCapacityMap = cloneCapacityMap(otBaseCapacityMap);
 
             // Simulate with OT capacity
             for (const dept of DEPARTMENTS) {
-                const duration = calculateDeptDuration(dept, totalPoints, productType);
+                const duration = calculateDeptDuration(dept, totalPoints, productType, feasDesc, undefined, undefined, undefined, undefined, feasQty);
                 const slotStart = findAvailableSlot(
-                    dept, otDate, totalPoints, duration, otCapacityMap, getDeptWeeklyCapacity(dept, otTier.bonusPoints)
+                    dept, otDate, totalPoints, duration, otCapacityMap, getPoolWeeklyCapacity(dept, productType, otTier.bonusPoints)
                 );
                 const endDate = getEndDateForDuration(slotStart, duration);
 
@@ -707,19 +788,20 @@ export async function checkAdvancedFeasibility(
                     weekMap.set(dept, (weekMap.get(dept) || 0) + pts);
                 }
 
+                otLastEnd = endDate;
                 otDate = getPipelinedNextStart(slotStart, duration, gap);
             }
 
-            if (otDate <= targetDate) {
+            if (otLastEnd <= targetDate) {
                 withOTAchievable = true;
-                otCompletion = otDate;
+                otCompletion = otLastEnd;
                 bestOTTier = otTier.tier;
 
                 // Build OT week breakdown for this tier
                 // Identify which weeks actually needed OT (exceeded dept-specific capacity)
                 for (const [wk, deptMap] of otCapacityMap.entries()) {
                     for (const [dept, load] of deptMap.entries()) {
-                        const deptBase = getDeptWeeklyCapacity(dept as Department);
+                        const deptBase = getPoolWeeklyCapacity(dept as Department, productType);
                         if (load > deptBase) {
                             const excess = Math.round(load - deptBase);
                             otWeekDetails.push({
@@ -747,9 +829,9 @@ export async function checkAdvancedFeasibility(
             const otCapacityMap = cloneCapacityMap(otBaseCapacityMap);
 
             for (const dept of DEPARTMENTS) {
-                const duration = calculateDeptDuration(dept, totalPoints, productType);
+                const duration = calculateDeptDuration(dept, totalPoints, productType, feasDesc, undefined, undefined, undefined, undefined, feasQty);
                 const slotStart = findAvailableSlot(
-                    dept, otDate, totalPoints, duration, otCapacityMap, getDeptWeeklyCapacity(dept, maxTier.bonusPoints)
+                    dept, otDate, totalPoints, duration, otCapacityMap, getPoolWeeklyCapacity(dept, productType, maxTier.bonusPoints)
                 );
                 const endDate = getEndDateForDuration(slotStart, duration);
                 otDate = getPipelinedNextStart(slotStart, duration, gap);
@@ -860,6 +942,8 @@ export function checkTargetFeasibility(
 
 // ─────────────────────────────────────────────────────────────
 // Sales Rep Capacity Trade
+// ─────────────────────────────────────────────────────────────
+
 /** A group of jobs under one sales order that could be pushed back */
 export interface RepTradeCandidate {
     salesOrder: string;
@@ -873,6 +957,36 @@ export interface RepTradeCandidate {
     currentDueDate: Date; // Earliest due date across jobs in the SO
 }
 
+/** Per-department, per-week capacity change caused by a trade */
+export interface CapacityDelta {
+    department: Department;
+    weekKey: string;
+    pointsFreed: number;       // How many points were removed from this dept/week
+    loadBefore: number;        // Dept load in that week BEFORE the trade
+    loadAfter: number;         // Dept load in that week AFTER the trade
+    capacityCeiling: number;   // Weekly capacity for this dept
+    wasBottleneck: boolean;    // Was this dept/week at or over capacity before?
+    isBottleneckAfter: boolean; // Still at/over capacity after?
+}
+
+/** Detailed reasoning for why a trade scenario does or doesn't help */
+export interface TradeReasoning {
+    summary: string;           // Human-readable explanation
+    capacityImpact: CapacityDelta[];  // Per-department breakdown of capacity freed
+    quoteBottleneck: {         // Which dept is the real bottleneck for the new quote
+        department: Department;
+        delayDays: number;
+        reason: string;
+    } | null;
+    safetyDetail: {            // Detailed safety analysis for the pushed job(s)
+        bufferDaysBeforePush: number;   // Due date minus schedule end (original)
+        bufferDaysAfterPush: number;    // New due date minus latest dept end (after push)
+        latestDeptEnd: Date | null;     // When the pushed job finishes its last dept
+        riskLevel: 'safe' | 'moderate' | 'risky';
+        riskExplanation: string;
+    };
+}
+
 /** Result of pushing one SO group's due date back */
 export interface RepTradeScenario {
     candidate: RepTradeCandidate;
@@ -881,6 +995,7 @@ export interface RepTradeScenario {
     newCompletion: Date;             // New quote completion after this trade
     improvementDays: number;         // Days saved on the new quote vs baseline
     safeToMove: boolean;             // True if pushed job's schedule ends before new due date
+    reasoning: TradeReasoning;       // Detailed explanation of the trade's impact
 }
 
 /** Full rep trade analysis result */
@@ -894,6 +1009,7 @@ export interface RepTradeResult {
         newCompletion: Date;
         improvementDays: number;
         allSafe: boolean;
+        reasoning: TradeReasoning;
     }[];
 }
 
@@ -908,26 +1024,81 @@ const PUSH_TIERS = [1, 2]; // Push due dates by 1 week and 2 weeks
  *  1. Finds the rep's jobs still in Engineering
  *  2. Groups them by sales order
  *  3. For each SO, simulates pushing the due date (+ entire schedule) back 1 and 2 weeks
- *  4. Rebuilds the capacity map to see how the new quote benefits
- *  5. Checks that each pushed job's schedule still ends before the new due date
+ *  4. Rebuilds the capacity map and diffs before/after to see exactly which depts/weeks benefit
+ *  5. Re-simulates the new quote against the modified capacity to measure improvement
+ *  6. Analyzes safety: computes buffer days before & after push, checks if pushed jobs
+ *     collide with overloaded weeks, and assigns a risk level (safe/moderate/risky)
+ *  7. Identifies the bottleneck department — if the new quote doesn't improve, explains why
+ *     (e.g. "Engineering freed 120pts but Welding is the real constraint")
  */
 export async function simulateRepTrade(
     repCode: string,
     quoteInput: QuoteInput,
     existingJobs: Job[]
 ): Promise<RepTradeResult> {
-    // 1. Get baseline completion (no trades)
+    // ═══════════════════════════════════════════════════════════
+    // STEP 1: Get baseline — what happens with NO trades?
+    // ═══════════════════════════════════════════════════════════
     const baselineEstimate = await simulateQuoteSchedule(quoteInput, existingJobs);
     const baselineCompletion = baselineEstimate.estimatedCompletion;
+    const baselineCapacityMap = buildCapacityMap(existingJobs);
 
-    // 2. Find rep's jobs still in Engineering
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2: Find rep's jobs still in Engineering
+    // ═══════════════════════════════════════════════════════════
+    // Departments that come AFTER Engineering in the pipeline.
+    // If a job's schedule shows any of these with a start date in the past,
+    // the job has moved on — regardless of what currentDepartment says.
+    const POST_ENGINEERING_DEPTS: Department[] = [
+        'Laser', 'Press Brake', 'Welding', 'Polishing', 'Assembly'
+    ];
+    const today = startOfDay(new Date());
+
+    /** Check if a job has genuinely NOT left Engineering yet */
+    const isStillInEngineering = (j: Job): boolean => {
+        // Primary check — must say Engineering
+        if (j.currentDepartment !== 'Engineering') return false;
+
+        // Cross-check against departmentSchedule:
+        // If a downstream department has already started, the job has moved on
+        if (j.departmentSchedule) {
+            const sched = j.departmentSchedule as Record<string, { start: string; end: string }>;
+            for (const dept of POST_ENGINEERING_DEPTS) {
+                const entry = sched[dept];
+                if (entry?.start) {
+                    const deptStart = startOfDay(new Date(entry.start));
+                    if (deptStart <= today) {
+                        // This downstream dept has already started — job is NOT in Engineering
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // Cross-check against remainingDepartmentSchedule:
+        // If it exists and Engineering is NOT in it, the job has moved past Engineering
+        if (j.remainingDepartmentSchedule) {
+            const remaining = j.remainingDepartmentSchedule as Record<string, { start: string; end: string }>;
+            if (!remaining['Engineering']) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
     const repEngJobs = existingJobs.filter(
         (j) =>
             j.salesRepCode?.toUpperCase() === repCode.toUpperCase() &&
-            j.currentDepartment === 'Engineering'
+            isStillInEngineering(j) &&
+            j.status !== 'COMPLETED' &&
+            j.status !== 'HOLD'
     );
 
-    // 3. Group by sales order
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 3: Group by sales order
+    // ═══════════════════════════════════════════════════════════
     const soGroups = new Map<string, Job[]>();
     for (const job of repEngJobs) {
         const so = job.salesOrder || job.id;
@@ -935,7 +1106,9 @@ export async function simulateRepTrade(
         soGroups.get(so)!.push(job);
     }
 
-    // 4. Build candidates
+    // ═══════════════════════════════════════════════════════════
+    // STEP 4: Build candidates
+    // ═══════════════════════════════════════════════════════════
     const candidates: RepTradeCandidate[] = [];
     for (const [so, jobs] of soGroups.entries()) {
         const totalPoints = jobs.reduce((sum, j) => sum + (Number(j.weldingPoints) || 0), 0);
@@ -945,6 +1118,7 @@ export async function simulateRepTrade(
         const currentDueDate = dueDates.length > 0
             ? new Date(Math.min(...dueDates.map((d) => d.getTime())))
             : new Date();
+
 
         candidates.push({
             salesOrder: so,
@@ -962,10 +1136,9 @@ export async function simulateRepTrade(
     // Sort candidates by total points (biggest capacity impact first)
     candidates.sort((a, b) => b.totalPoints - a.totalPoints);
 
-    /**
-     * Shift a job forward by N work days: push dueDate AND every department
-     * in its schedule forward. This frees capacity in earlier weeks.
-     */
+    // ═══════════════════════════════════════════════════════════
+    // HELPER: Shift a job forward by N work days
+    // ═══════════════════════════════════════════════════════════
     const pushJobForward = (j: Job, days: number): Job => {
         const shifted: Job = {
             ...j,
@@ -984,53 +1157,293 @@ export async function simulateRepTrade(
         return shifted;
     };
 
-    /**
-     * Check if ALL pushed jobs finish before their new due date.
-     * Looks at the latest department end date vs the new due date.
-     */
-    const checkSafety = (jobIds: Set<string>, pushDays: number): boolean => {
+    // ═══════════════════════════════════════════════════════════
+    // HELPER: Compute capacity deltas between baseline and trade
+    // Shows exactly which dept/weeks got relief (or got worse)
+    // ═══════════════════════════════════════════════════════════
+    const computeCapacityDeltas = (
+        beforeMap: CapacityMap,
+        afterMap: CapacityMap
+    ): CapacityDelta[] => {
+        const deltas: CapacityDelta[] = [];
+        const allWeeks = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+
+        for (const weekKey of allWeeks) {
+            const beforeDepts = beforeMap.get(weekKey);
+            const afterDepts = afterMap.get(weekKey);
+            const allDepts = new Set([
+                ...(beforeDepts?.keys() || []),
+                ...(afterDepts?.keys() || []),
+            ]);
+
+            for (const dept of allDepts) {
+                const loadBefore = beforeDepts?.get(dept) || 0;
+                const loadAfter = afterDepts?.get(dept) || 0;
+                const pointsFreed = loadBefore - loadAfter;
+
+                // Only report meaningful deltas (> 1pt to avoid floating point noise)
+                if (Math.abs(pointsFreed) < 1) continue;
+
+                const cap = getDeptWeeklyCapacity(dept as Department);
+                deltas.push({
+                    department: dept as Department,
+                    weekKey,
+                    pointsFreed: Math.round(pointsFreed),
+                    loadBefore: Math.round(loadBefore),
+                    loadAfter: Math.round(loadAfter),
+                    capacityCeiling: cap,
+                    wasBottleneck: loadBefore >= cap * 0.95,  // within 5% counts as bottleneck
+                    isBottleneckAfter: loadAfter >= cap * 0.95,
+                });
+            }
+        }
+
+        // Sort: biggest freed first
+        deltas.sort((a, b) => b.pointsFreed - a.pointsFreed);
+        return deltas;
+    };
+
+    // ═══════════════════════════════════════════════════════════
+    // HELPER: Analyze safety + buffer for a set of pushed jobs
+    // CAPACITY-AWARE: checks the post-trade capacity map.
+    // If the pushed schedule lands in overloaded weeks, it estimates
+    // additional delay days so the risk badge reflects reality.
+    // ═══════════════════════════════════════════════════════════
+    const analyzeSafety = (
+        jobIds: Set<string>,
+        pushDays: number,
+        afterCapacityMap: CapacityMap
+    ): TradeReasoning['safetyDetail'] => {
+        let worstBufferBefore = Infinity;
+        let worstBufferAfter = Infinity;
+        let worstLatestEnd: Date | null = null;
+
         for (const jid of jobIds) {
             const orig = existingJobs.find((j) => j.id === jid);
             if (!orig?.departmentSchedule || !orig.dueDate) continue;
 
-            const newDue = addWorkDays(new Date(orig.dueDate), pushDays);
+            const origDue = new Date(orig.dueDate);
+            const newDue = addWorkDays(origDue, pushDays);
 
-            // Find latest end across all departments in the PUSHED schedule
-            let latestEnd: Date | null = null;
+            // ── Original buffer (before trade) ──
+            let origLatestEnd: Date | null = null;
             for (const sched of Object.values(orig.departmentSchedule as Record<string, { start: string; end: string }>)) {
-                const end = addWorkDays(new Date(sched.end), pushDays);
-                if (!latestEnd || end > latestEnd) latestEnd = end;
+                const end = new Date(sched.end);
+                if (!origLatestEnd || end > origLatestEnd) origLatestEnd = end;
             }
 
-            if (latestEnd && latestEnd > newDue) return false;
+            // ── Capacity-aware pushed completion ──
+            // For each department in the pushed schedule, check if the
+            // week it lands in is overloaded. If so, estimate how many
+            // extra workdays the job will be delayed.
+            let capacityDelayDays = 0;
+            const pushedSched = orig.departmentSchedule as Record<string, { start: string; end: string }>;
+
+            for (const [dept, sched] of Object.entries(pushedSched)) {
+                const pushedEnd = addWorkDays(new Date(sched.end), pushDays);
+                const weekKey = format(startOfWeek(pushedEnd, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+
+                // Look up the capacity load in the week this dept lands in
+                const deptTyped = dept as Department;
+                const weekDepts = afterCapacityMap.get(weekKey);
+                const loadInWeek = weekDepts?.get(deptTyped) || 0;
+                const cap = getDeptWeeklyCapacity(deptTyped);
+
+                if (loadInWeek > cap) {
+                    // Overloaded! Estimate spillover delay:
+                    // How many extra days does the overflow represent?
+                    const overflow = loadInWeek - cap;
+                    const dailyThroughput = cap / 5; // pts per day
+                    const extraDays = dailyThroughput > 0
+                        ? Math.ceil(overflow / dailyThroughput)
+                        : 0;
+
+                    capacityDelayDays = Math.max(capacityDelayDays, extraDays);
+                }
+            }
+
+            // Compute pushed latest end WITH capacity delay
+            let pushedLatestEnd: Date | null = null;
+            for (const sched of Object.values(pushedSched)) {
+                const end = addWorkDays(new Date(sched.end), pushDays + capacityDelayDays);
+                if (!pushedLatestEnd || end > pushedLatestEnd) pushedLatestEnd = end;
+            }
+
+            if (origLatestEnd) {
+                const bufferBefore = differenceInDays(origDue, origLatestEnd);
+                if (bufferBefore < worstBufferBefore) worstBufferBefore = bufferBefore;
+            }
+
+            if (pushedLatestEnd) {
+                const bufferAfter = differenceInDays(newDue, pushedLatestEnd);
+                if (bufferAfter < worstBufferAfter) {
+                    worstBufferAfter = bufferAfter;
+                    worstLatestEnd = pushedLatestEnd;
+                }
+            }
         }
-        return true;
+
+        // Handle case where no valid jobs were found
+        if (worstBufferBefore === Infinity) worstBufferBefore = 0;
+        if (worstBufferAfter === Infinity) worstBufferAfter = 0;
+
+        // Determine risk level based on buffer days after push
+        let riskLevel: 'safe' | 'moderate' | 'risky';
+        let riskExplanation: string;
+
+        if (worstBufferAfter >= 5) {
+            riskLevel = 'safe';
+            riskExplanation = `Your customer's order will still ship on time — it finishes ${worstBufferAfter} days early even after the push.`;
+        } else if (worstBufferAfter >= 0) {
+            riskLevel = 'moderate';
+            riskExplanation = `Your customer's order will be tight — it finishes just ${worstBufferAfter} day${worstBufferAfter !== 1 ? 's' : ''} before the new due date. Any hiccup could make it late.`;
+        } else {
+            riskLevel = 'risky';
+            riskExplanation = `Your customer's order would ship ${Math.abs(worstBufferAfter)} days late, even with the extended due date. This trade will upset that customer.`;
+        }
+
+        return {
+            bufferDaysBeforePush: worstBufferBefore,
+            bufferDaysAfterPush: worstBufferAfter,
+            latestDeptEnd: worstLatestEnd,
+            riskLevel,
+            riskExplanation,
+        };
     };
 
-    // 5. Simulate individual SO trades at each push tier
+    // ═══════════════════════════════════════════════════════════
+    // HELPER: Find the bottleneck department for the new quote
+    // by examining the trade estimate's timeline
+    // ═══════════════════════════════════════════════════════════
+    const findQuoteBottleneck = (
+        tradeEstimate: QuoteEstimate,
+        baseEstimate: QuoteEstimate
+    ): TradeReasoning['quoteBottleneck'] => {
+        // Find the department with the largest capacity delay in the trade estimate
+        let worstDept: Department | null = null;
+        let worstDelay = 0;
+
+        for (const tl of tradeEstimate.timeline) {
+            const delayDays = tl.capacityDelayDays ?? 0;
+            if (delayDays > worstDelay) {
+                worstDelay = delayDays;
+                worstDept = tl.department;
+            }
+        }
+
+        if (!worstDept || worstDelay === 0) return null;
+
+        // Check if this department was also the bottleneck in the baseline
+        const baselineDept = baseEstimate.timeline.find(t => t.department === worstDept);
+        const baseDelay = baselineDept?.capacityDelayDays || 0;
+
+        const reason = baseDelay > 0 && worstDelay >= baseDelay
+            ? `${worstDept} is at capacity — this trade didn't free enough capacity there (${worstDelay}d delay remains, was ${baseDelay}d before)`
+            : `${worstDept} has a ${worstDelay}-day capacity delay that limits how much this trade can help`;
+
+        return {
+            department: worstDept,
+            delayDays: worstDelay,
+            reason,
+        };
+    };
+
+    // ═══════════════════════════════════════════════════════════
+    // HELPER: Build the human-readable summary for a scenario
+    // Keep it SIMPLE — salespeople need plain English.
+    // ═══════════════════════════════════════════════════════════
+    const buildSummary = (
+        candidate: RepTradeCandidate | null, // null for "push all"
+        pushWeeks: number,
+        improvementDays: number,
+        capacityImpact: CapacityDelta[],
+        bottleneck: TradeReasoning['quoteBottleneck'],
+        safety: TradeReasoning['safetyDetail']
+    ): string => {
+        const weekLabel = pushWeeks === 1 ? '1 week' : `${pushWeeks} weeks`;
+        const soLabel = candidate
+            ? `SO ${candidate.salesOrder}`
+            : `all ${candidates.length} sales orders`;
+
+        if (improvementDays === 0) {
+            // No improvement — explain why in plain English
+            if (bottleneck) {
+                return `Pushing ${soLabel} back ${weekLabel} doesn't help your new quote. The shop is backed up in ${bottleneck.department}, and this trade doesn't free up room there.`;
+            }
+            const freedDepts = [...new Set(capacityImpact.filter(d => d.pointsFreed > 0).map(d => d.department))];
+            if (freedDepts.length > 0) {
+                return `Pushing ${soLabel} back ${weekLabel} frees up room in ${freedDepts.join(' and ')}, but the new quote is held up somewhere else — so it doesn't help.`;
+            }
+            return `Pushing ${soLabel} back ${weekLabel} doesn't help — those jobs aren't competing with your new quote for shop time.`;
+        }
+
+        // There IS improvement — keep it simple
+        let summary = `Pushing ${soLabel} back ${weekLabel} gets your new quote done ${improvementDays} day${improvementDays !== 1 ? 's' : ''} sooner.`;
+
+        // Mention which dept it helps (just the first one, keep it simple)
+        const helpedDepts = capacityImpact
+            .filter(d => d.pointsFreed > 0 && d.wasBottleneck)
+            .map(d => d.department);
+        const uniqueHelped = [...new Set(helpedDepts)];
+        if (uniqueHelped.length > 0) {
+            summary += ` It frees up room in ${uniqueHelped.slice(0, 2).join(' and ')}, which is where the shop was backed up.`;
+        }
+
+        if (bottleneck && bottleneck.delayDays > 0) {
+            summary += ` Heads up: ${bottleneck.department} is still busy, so there's a limit to how much this can help.`;
+        }
+
+        return summary;
+    };
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 5: Simulate individual SO trades at each push tier
+    // ═══════════════════════════════════════════════════════════
     const scenarios: RepTradeScenario[] = [];
+
     for (const candidate of candidates) {
         const candidateJobIds = new Set(candidate.jobs.map((j) => j.id));
 
         for (const weeks of PUSH_TIERS) {
             const pushDays = weeks * 5;
 
+            // Build modified job list with pushed SO
             const modifiedJobs = existingJobs.map((j) => {
                 if (!candidateJobIds.has(j.id)) return j;
                 return pushJobForward(j, pushDays);
             });
 
+            // Re-simulate the new quote against modified capacity
             const tradeEstimate = await simulateQuoteSchedule(quoteInput, modifiedJobs);
             const newCompletion = tradeEstimate.estimatedCompletion;
-            const improvementDays = differenceInDays(baselineCompletion, newCompletion);
+            const improvementDays = Math.max(0, differenceInDays(baselineCompletion, newCompletion));
+
+            // Compute capacity deltas (what actually changed in the capacity map)
+            const afterCapacityMap = buildCapacityMap(modifiedJobs);
+            const capacityImpact = computeCapacityDeltas(baselineCapacityMap, afterCapacityMap);
+
+            // Analyze safety (buffer days, risk level)
+            const safetyDetail = analyzeSafety(candidateJobIds, pushDays, afterCapacityMap);
+
+            // Find the bottleneck for the new quote
+            const quoteBottleneck = findQuoteBottleneck(tradeEstimate, baselineEstimate);
+
+            // Build summary
+            const summary = buildSummary(candidate, weeks, improvementDays, capacityImpact, quoteBottleneck, safetyDetail);
 
             scenarios.push({
                 candidate,
                 pushWeeks: weeks,
                 newDueDate: addWorkDays(candidate.currentDueDate, pushDays),
                 newCompletion,
-                improvementDays: Math.max(0, improvementDays),
-                safeToMove: checkSafety(candidateJobIds, pushDays),
+                improvementDays,
+                safeToMove: safetyDetail.riskLevel !== 'risky',
+                reasoning: {
+                    summary,
+                    capacityImpact,
+                    quoteBottleneck,
+                    safetyDetail,
+                },
             });
         }
     }
@@ -1043,7 +1456,9 @@ export async function simulateRepTrade(
         return a.pushWeeks - b.pushWeeks;
     });
 
-    // 6. "Push all" scenarios at each tier
+    // ═══════════════════════════════════════════════════════════
+    // STEP 6: "Push all" scenarios at each tier
+    // ═══════════════════════════════════════════════════════════
     const pushAllScenarios: RepTradeResult['pushAllScenarios'] = [];
     if (candidates.length > 0) {
         const allCandidateJobIds = new Set(candidates.flatMap((c) => c.jobs.map((j) => j.id)));
@@ -1058,13 +1473,32 @@ export async function simulateRepTrade(
 
             const allTradeEstimate = await simulateQuoteSchedule(quoteInput, modifiedJobs);
             const allNewCompletion = allTradeEstimate.estimatedCompletion;
-            const allImprovementDays = differenceInDays(baselineCompletion, allNewCompletion);
+            const allImprovementDays = Math.max(0, differenceInDays(baselineCompletion, allNewCompletion));
+
+            // Compute capacity deltas for "push all"
+            const afterCapacityMap = buildCapacityMap(modifiedJobs);
+            const capacityImpact = computeCapacityDeltas(baselineCapacityMap, afterCapacityMap);
+
+            // Analyze safety for all pushed jobs
+            const safetyDetail = analyzeSafety(allCandidateJobIds, pushDays, afterCapacityMap);
+
+            // Find bottleneck
+            const quoteBottleneck = findQuoteBottleneck(allTradeEstimate, baselineEstimate);
+
+            // Build summary
+            const summary = buildSummary(null, weeks, allImprovementDays, capacityImpact, quoteBottleneck, safetyDetail);
 
             pushAllScenarios.push({
                 pushWeeks: weeks,
                 newCompletion: allNewCompletion,
-                improvementDays: Math.max(0, allImprovementDays),
-                allSafe: checkSafety(allCandidateJobIds, pushDays),
+                improvementDays: allImprovementDays,
+                allSafe: safetyDetail.riskLevel !== 'risky',
+                reasoning: {
+                    summary,
+                    capacityImpact,
+                    quoteBottleneck,
+                    safetyDetail,
+                },
             });
         }
     }

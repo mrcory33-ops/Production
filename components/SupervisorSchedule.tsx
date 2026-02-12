@@ -10,8 +10,8 @@ import {
 import { db } from '@/lib/firebase';
 import { Department, Job, SupervisorAlert } from '@/types';
 import { format, startOfDay } from 'date-fns';
-import { normalizeBatchText, getBatchCategory } from '@/lib/scheduler';
-import { getDepartmentStatus, subscribeToAlerts, createPullNotice } from '@/lib/supervisorAlerts';
+import { getBatchKeyForJob, BATCH_COHORT_WINDOW_BUSINESS_DAYS } from '@/lib/scheduler';
+import { getDepartmentStatus, subscribeToAlerts } from '@/lib/supervisorAlerts';
 import { DEPT_ORDER, DEPARTMENT_CONFIG } from '@/lib/departmentConfig';
 import AlertCreateModal from './AlertCreateModal';
 import {
@@ -19,7 +19,7 @@ import {
     Eye, Power, Calendar, ChevronRight, Plus, X, UserPlus,
     ClipboardPlus, BellRing, ShieldAlert, Package, PackageX,
     FileX2, Clock3, ArrowLeft, Loader2, GripVertical, Check,
-    Pencil, MessageSquare, Search, ArrowDownToLine
+    Pencil, MessageSquare
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────
@@ -247,34 +247,6 @@ export default function SupervisorSchedule() {
         }
     }, [selectedDept]);
 
-    // ── Pull Job to Queue (from Future Work) ──
-    const pullJobToQueue = useCallback(async (jobId: string, reason: string) => {
-        const job = jobs.find(j => j.id === jobId);
-        if (!job) return;
-        const fromDept = job.currentDepartment;
-        const toDept = selectedDept;
-        try {
-            // 1. Update the job's currentDepartment + stamp pull metadata
-            await updateDoc(doc(db, 'jobs', jobId), {
-                currentDepartment: toDept,
-                supervisorPulledAt: Timestamp.now(),
-                supervisorPulledFrom: fromDept,
-                supervisorPullReason: reason,
-                updatedAt: Timestamp.now(),
-            });
-            // 2. Create a supervisor-pull alert for the plant manager
-            await createPullNotice({
-                jobId,
-                jobName: job.name,
-                fromDepartment: fromDept,
-                toDepartment: toDept,
-                pullReason: reason,
-            });
-        } catch (err) {
-            console.error('Failed to pull job to queue', err);
-        }
-    }, [jobs, selectedDept]);
-
     return (
         <div className="flex h-screen bg-[#111] overflow-hidden text-slate-200 font-sans">
             <AlertCreateModal
@@ -439,7 +411,7 @@ export default function SupervisorSchedule() {
                                 <AlertsView alerts={deptAlerts} allAlerts={activeAlerts} departmentStatus={departmentStatus} />
                             )}
                             {activeView === 'future' && (
-                                <FutureWorkView jobs={futureJobs} department={selectedDept} onPullToQueue={pullJobToQueue} />
+                                <FutureWorkView jobs={futureJobs} department={selectedDept} />
                             )}
                         </>
                     )}
@@ -519,11 +491,12 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
 
     // Batch key: only the 8 defined categories are eligible for batching
     // Key is category-only — all items of the same type batch together
-    const getBatchKey = (j: Job): string | null => {
-        const text = normalizeBatchText(j.description || '');
-        const category = getBatchCategory(text);
-        if (!category) return null; // Not a batchable item
-        return category;
+    // NOTE: This now uses the same composite key as the scheduler.
+    const getBatchKey = (j: Job): string | null => getBatchKeyForJob(j);
+    const getBatchCohortKey = (j: Job): string | null => {
+        const key = getBatchKey(j);
+        if (!key) return null;
+        return `${key}|DEPT:${j.currentDepartment || 'UNKNOWN'}`;
     };
 
     // Calculate 12 business days ahead from today
@@ -537,7 +510,7 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
         }
         return result;
     };
-    const batchWindowEnd = addBusinessDays(startOfDay(new Date()), 12);
+    const batchWindowEnd = addBusinessDays(startOfDay(new Date()), BATCH_COHORT_WINDOW_BUSINESS_DAYS);
 
     // Only batch jobs in Press Brake or earlier departments
     const PRESS_BRAKE_INDEX = DEPT_ORDER.indexOf('Press Brake');
@@ -550,7 +523,7 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
             if (!isBatchEligible(j)) return;
             const dueDate = new Date(j.dueDate);
             if (dueDate > batchWindowEnd) return; // Outside 12 business day window
-            const key = getBatchKey(j);
+            const key = getBatchCohortKey(j);
             if (!key) return;
             counts[key] = (counts[key] || 0) + 1;
             if (!labels[key]) labels[key] = j.description || j.productType || 'FAB';
@@ -562,10 +535,6 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
     const getWorkerJobs = (workerName: string) => jobs.filter(j => j.assignedWorkers?.[department]?.includes(workerName));
 
     const rosterNames = roster.map(w => w.name);
-
-    // Split sorted jobs into active (assigned) and queue (unassigned)
-    const activeJobs = useMemo(() => sorted.filter(j => (j.assignedWorkers?.[department]?.length || 0) > 0), [sorted, department]);
-    const queueJobs = useMemo(() => sorted.filter(j => (j.assignedWorkers?.[department]?.length || 0) === 0), [sorted, department]);
 
     // Count by product type
     const fabCount = jobs.filter(j => j.productType === 'FAB').length;
@@ -655,69 +624,23 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                    {/* ── ACTIVE JOBS SECTION ── */}
-                    {activeJobs.length > 0 && (
-                        <div className="mb-4">
-                            <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-gradient-to-r from-emerald-900/40 to-emerald-900/20 border border-emerald-700/40">
-                                <span className="text-emerald-400 text-xs">⚡</span>
-                                <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-widest flex-1">Active</span>
-                                <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-900/50 border border-emerald-700/40 px-1.5 py-0.5 rounded">{activeJobs.length}</span>
-                            </div>
-                            <div className="space-y-2">
-                                {activeJobs.map(job => {
-                                    const type = job.productType || 'FAB';
-                                    const key = getBatchKey(job);
-                                    const batchCount = key ? (batchInfo.counts[key] || 0) : 0;
-                                    const inBatchGroup = batchCount >= 2;
-                                    const batchAccent = type === 'FAB' ? '#0ea5e9' : type === 'DOORS' ? '#f59e0b' : '#8b5cf6';
-                                    return (
-                                        <JobQueueCard
-                                            key={job.id}
-                                            job={job}
-                                            department={department}
-                                            rosterNames={rosterNames}
-                                            onAssign={onAssignWorker}
-                                            onUnassign={onUnassignWorker}
-                                            onProgressUpdate={onProgressUpdate}
-                                            isSaving={savingProgress === job.id}
-                                            isAssigning={assigningJob === job.id}
-                                            onSetAssigning={onSetAssigningJob}
-                                            hasAlert={alerts.some(a => a.jobId === job.id)}
-                                            onReportIssue={onReportIssue}
-                                            inBatchGroup={inBatchGroup}
-                                            batchAccentColor={batchAccent}
-                                            isActiveCard
-                                        />
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* ── QUEUE SECTION ── */}
-                    {activeJobs.length > 0 && queueJobs.length > 0 && (
-                        <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-[#1a1a1a] border border-[#333]">
-                            <GripVertical className="w-3 h-3 text-[#555]" />
-                            <span className="text-[10px] font-bold text-[#666] uppercase tracking-widest flex-1">Queue</span>
-                            <span className="text-[10px] font-mono font-bold text-[#666] bg-[#111] border border-[#333] px-1.5 py-0.5 rounded">{queueJobs.length}</span>
-                        </div>
-                    )}
                     {sorted.length === 0 && (
                         <div className="flex flex-col items-center justify-center h-48 text-[#555]">
                             <ClipboardList className="w-10 h-10 mb-3 opacity-30" />
                             <p className="text-xs text-center font-mono">No jobs in {department}</p>
                         </div>
                     )}
-                    {queueJobs.map((job, idx) => {
+                    {sorted.map((job, idx) => {
                         const type = job.productType || 'FAB';
-                        const key = getBatchKey(job);
-                        const prevKey = idx > 0 ? getBatchKey(queueJobs[idx - 1]) : null;
+                        const key = getBatchCohortKey(job);
+                        const prevKey = idx > 0 ? getBatchCohortKey(sorted[idx - 1]) : null;
                         const batchCount = key ? (batchInfo.counts[key] || 0) : 0;
                         const inBatchGroup = batchCount >= 2;
                         const isGroupStart = key !== prevKey;
                         const showBatchHeader = isGroupStart && inBatchGroup;
                         const typeColor = PRODUCT_TYPE_COLORS[type] || PRODUCT_TYPE_COLORS.FAB;
                         const batchAccent = type === 'FAB' ? '#0ea5e9' : type === 'DOORS' ? '#f59e0b' : '#8b5cf6';
+
                         return (
                             <React.Fragment key={job.id}>
                                 {showBatchHeader && (
@@ -776,7 +699,7 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
 // JOB QUEUE CARD
 // ─────────────────────────────────────────────────────────────────
 
-function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onProgressUpdate, isSaving, isAssigning, onSetAssigning, hasAlert, onReportIssue, inBatchGroup, batchAccentColor, isActiveCard }: {
+function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onProgressUpdate, isSaving, isAssigning, onSetAssigning, hasAlert, onReportIssue, inBatchGroup, batchAccentColor }: {
     job: Job; department: Department; rosterNames: string[];
     onAssign: (jobId: string, worker: string) => void;
     onUnassign: (jobId: string, worker: string) => void;
@@ -787,7 +710,6 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
     onReportIssue: (jobId: string) => void;
     inBatchGroup?: boolean;
     batchAccentColor?: string;
-    isActiveCard?: boolean;
 }) {
     const assignedWorkers = job.assignedWorkers?.[department] || [];
     const isActive = assignedWorkers.length > 0;
@@ -795,13 +717,10 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
     const dueDate = new Date(job.dueDate);
     const isOverdue = dueDate < new Date();
     const productColor = PRODUCT_TYPE_COLORS[job.productType] || PRODUCT_TYPE_COLORS.FAB;
-    const lit = isActiveCard === true;
 
     return (
-        <div className={`border rounded-lg transition-all relative
-            ${lit
-                ? `bg-gradient-to-b from-white to-slate-50 shadow-lg shadow-emerald-500/10 ${hasAlert ? 'border-rose-400' : 'border-emerald-300'}`
-                : `bg-gradient-to-b from-[#222] to-[#1c1c1c] ${hasAlert ? 'border-rose-800/60' : isActive ? 'border-emerald-800/50' : 'border-[#333]'}`}
+        <div className={`bg-gradient-to-b from-[#222] to-[#1c1c1c] border rounded-lg transition-all relative
+            ${hasAlert ? 'border-rose-800/60' : isActive ? 'border-emerald-800/50' : 'border-[#333]'}
             ${inBatchGroup ? 'border-l-[3px]' : ''}`}
             style={inBatchGroup && batchAccentColor ? { borderLeftColor: batchAccentColor } : undefined}>
             {/* Product type color bar */}
@@ -813,40 +732,40 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
                 <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <span className={`text-sm font-mono font-bold ${lit ? 'text-slate-900' : 'text-white'}`}>{job.id}</span>
+                            {/* BIGGER WO Number */}
+                            <span className="text-sm font-mono font-bold text-white">{job.id}</span>
+                            {/* Product type badge */}
                             <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${productColor.bg} ${productColor.text} border ${productColor.border}`}>
                                 {productColor.label}
                             </span>
-                            {!lit && isActive && (
+                            {isActive && (
                                 <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-emerald-600/20 text-emerald-300 border border-emerald-700/30 flex items-center gap-1">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Active
                                 </span>
                             )}
                             {hasAlert && (
-                                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1
-                                    ${lit ? 'text-rose-600 bg-rose-100 border border-rose-300' : 'text-rose-400 bg-rose-900/30 border border-rose-800'}`}>
+                                <span className="text-[8px] font-bold text-rose-400 px-1.5 py-0.5 rounded bg-rose-900/30 border border-rose-800 flex items-center gap-1">
                                     <AlertTriangle className="w-2.5 h-2.5" /> Blocked
                                 </span>
                             )}
                         </div>
-                        <h4 className={`text-[12px] font-medium truncate ${lit ? 'text-slate-700' : 'text-slate-300'}`}>{job.name}</h4>
+                        <h4 className="text-[12px] text-slate-300 font-medium truncate">{job.name}</h4>
                     </div>
                     <div className="shrink-0 flex items-start gap-1.5">
+                        {/* Report Issue button */}
                         <button
                             onClick={() => onReportIssue(job.id)}
                             title="Report Issue"
-                            className={`p-1.5 rounded border transition-all
-                                ${lit ? 'border-slate-300 text-slate-400 hover:text-rose-500 hover:border-rose-400 hover:bg-rose-50' : 'border-[#333] text-[#666] hover:text-rose-400 hover:border-rose-700/50 hover:bg-rose-900/20'}`}
+                            className="p-1.5 rounded border border-[#333] text-[#666] hover:text-rose-400 hover:border-rose-700/50 hover:bg-rose-900/20 transition-all"
                         >
                             <AlertTriangle className="w-3.5 h-3.5" />
                         </button>
                         <div className="text-right">
-                            <div className={`px-1.5 py-0.5 rounded border shadow-inner inline-block
-                                ${lit ? 'bg-emerald-50 border-emerald-200' : 'bg-[#111] border-[#333]'}`}>
-                                <span className={`text-xs font-mono font-bold ${lit ? 'text-emerald-700' : 'text-sky-400'}`}>{job.weldingPoints}</span>
-                                <span className={`text-[8px] ml-0.5 ${lit ? 'text-emerald-500' : 'text-[#666]'}`}>pt</span>
+                            <div className="px-1.5 py-0.5 rounded bg-[#111] border border-[#333] shadow-inner inline-block">
+                                <span className="text-sky-400 text-xs font-mono font-bold">{job.weldingPoints}</span>
+                                <span className="text-[8px] text-[#666] ml-0.5">pt</span>
                             </div>
-                            <div className={`text-[9px] font-mono mt-0.5 ${isOverdue ? 'text-rose-500' : lit ? 'text-slate-500' : 'text-[#666]'}`}>
+                            <div className={`text-[9px] font-mono mt-0.5 ${isOverdue ? 'text-rose-400' : 'text-[#666]'}`}>
                                 {dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                             </div>
                         </div>
@@ -857,20 +776,17 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
                 {(job.openPOs || job.closedPOs) && (
                     <div className="flex items-center gap-1.5 mb-2">
                         {job.openPOs && !job.closedPOs && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold
-                                ${lit ? 'bg-orange-100 text-orange-600 border border-orange-300' : 'bg-orange-900/30 text-orange-300 border border-orange-700/40'}`}>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-orange-900/30 text-orange-300 border border-orange-700/40">
                                 <Package className="w-3 h-3" /> Open
                             </span>
                         )}
                         {job.openPOs && job.closedPOs && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold
-                                ${lit ? 'bg-yellow-100 text-yellow-600 border border-yellow-300' : 'bg-yellow-900/30 text-yellow-300 border border-yellow-700/40'}`}>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-yellow-900/30 text-yellow-300 border border-yellow-700/40">
                                 <Package className="w-3 h-3" /> Partial
                             </span>
                         )}
                         {!job.openPOs && job.closedPOs && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold
-                                ${lit ? 'bg-emerald-100 text-emerald-600 border border-emerald-300' : 'bg-emerald-900/30 text-emerald-300 border border-emerald-700/40'}`}>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-900/30 text-emerald-300 border border-emerald-700/40">
                                 <Check className="w-3 h-3" /> Received
                             </span>
                         )}
@@ -879,12 +795,9 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
 
                 {/* Part Description */}
                 {job.description && (
-                    <div className={`mb-2 px-2 py-1.5 rounded border
-                        ${lit ? 'bg-emerald-50/80 border-emerald-200/60' : 'bg-[#111] border-[#2a2a2a]'}`}>
-                        <span className={`text-[8px] uppercase tracking-wider font-bold block mb-0.5
-                            ${lit ? 'text-emerald-600' : 'text-[#555]'}`}>Part</span>
-                        <p className={`text-[11px] font-medium leading-tight
-                            ${lit ? 'text-slate-800' : 'text-slate-200'}`} title={job.description}>{job.description}</p>
+                    <div className="mb-2 px-2 py-1.5 rounded bg-[#111] border border-[#2a2a2a]">
+                        <span className="text-[8px] text-[#555] uppercase tracking-wider font-bold block mb-0.5">Part</span>
+                        <p className="text-[11px] text-slate-200 font-medium leading-tight" title={job.description}>{job.description}</p>
                     </div>
                 )}
 
@@ -892,10 +805,9 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
                 {assignedWorkers.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-2">
                         {assignedWorkers.map(w => (
-                            <span key={w} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold
-                                ${lit ? 'bg-sky-100 text-sky-700 border border-sky-300' : 'bg-sky-900/30 text-sky-300 border border-sky-700/30'}`}>
+                            <span key={w} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-900/30 text-sky-300 border border-sky-700/30 text-[10px] font-bold">
                                 {w}
-                                <button onClick={() => onUnassign(job.id, w)} className={`transition-colors ${lit ? 'text-sky-600 hover:text-rose-500' : 'text-sky-500 hover:text-rose-400'}`}>
+                                <button onClick={() => onUnassign(job.id, w)} className="text-sky-500 hover:text-rose-400 transition-colors">
                                     <X className="w-2.5 h-2.5" />
                                 </button>
                             </span>
@@ -911,30 +823,26 @@ function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onPr
                     isAssigning={isAssigning}
                     onSetAssigning={onSetAssigning}
                     onAssign={onAssign}
-                    isActiveCard={isActiveCard}
                 />
 
                 {/* Progress (only show when active) */}
                 {isActive && (
-                    <div className={`pt-2 border-t ${lit ? 'border-slate-200' : 'border-[#333]/50'}`}>
+                    <div className="pt-2 border-t border-[#333]/50">
                         <div className="flex items-center justify-between mb-1.5">
-                            <span className={`text-[9px] font-bold uppercase tracking-wider ${lit ? 'text-slate-500' : 'text-[#666]'}`}>Progress</span>
+                            <span className="text-[9px] text-[#666] font-bold uppercase tracking-wider">Progress</span>
                             <div className="flex items-center gap-1">
                                 {isSaving && <Loader2 className="w-2.5 h-2.5 text-sky-400 animate-spin" />}
-                                <span className={`text-xs font-mono font-bold ${progress >= 100 ? 'text-emerald-500' : progress > 0 ? (lit ? 'text-sky-600' : 'text-sky-400') : (lit ? 'text-slate-400' : 'text-[#555]')}`}>{progress}%</span>
+                                <span className={`text-xs font-mono font-bold ${progress >= 100 ? 'text-emerald-400' : progress > 0 ? 'text-sky-400' : 'text-[#555]'}`}>{progress}%</span>
                             </div>
                         </div>
-                        <div className={`h-2 border rounded-sm overflow-hidden mb-2
-                            ${lit ? 'bg-slate-200 border-slate-300' : 'bg-[#0a0a0a] border-[#333]'}`}>
-                            <div className={`h-full transition-all duration-500 ${progress >= 100 ? 'bg-emerald-500' : 'bg-sky-500'}`} style={{ width: `${progress}%` }} />
+                        <div className="h-2 bg-[#0a0a0a] border border-[#333] rounded-sm overflow-hidden mb-2">
+                            <div className={`h-full transition-all duration-500 ${progress >= 100 ? 'bg-emerald-600' : 'bg-sky-600'}`} style={{ width: `${progress}%` }} />
                         </div>
                         <div className="flex gap-1">
                             {[0, 25, 50, 75, 100].map(val => (
                                 <button key={val} onClick={() => onProgressUpdate(job.id, val)} disabled={isSaving}
                                     className={`flex-1 py-1 rounded text-[9px] font-bold transition-all border
-                                        ${progress === val
-                                            ? (lit ? 'bg-sky-100 text-sky-700 border-sky-300' : 'bg-sky-600/30 text-sky-300 border-sky-600/50')
-                                            : (lit ? 'bg-white text-slate-500 border-slate-300 hover:text-slate-800 hover:border-slate-400' : 'bg-[#111] text-[#666] border-[#333] hover:text-white hover:border-[#555]')}
+                                        ${progress === val ? 'bg-sky-600/30 text-sky-300 border-sky-600/50' : 'bg-[#111] text-[#666] border-[#333] hover:text-white hover:border-[#555]'}
                                         ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}>
                                     {val}%
                                 </button>
@@ -1110,11 +1018,10 @@ function WorkerEditPopup({ worker, onSave, onClose }: {
 // ASSIGN WORKER DROPDOWN (Portal-based to avoid overflow clipping)
 // ─────────────────────────────────────────────────────────────────
 
-function AssignWorkerDropdown({ jobId, rosterNames, assignedWorkers, isAssigning, onSetAssigning, onAssign, isActiveCard }: {
+function AssignWorkerDropdown({ jobId, rosterNames, assignedWorkers, isAssigning, onSetAssigning, onAssign }: {
     jobId: string; rosterNames: string[]; assignedWorkers: string[];
     isAssigning: boolean; onSetAssigning: (v: string | null) => void;
     onAssign: (jobId: string, worker: string) => void;
-    isActiveCard?: boolean;
 }) {
     const btnRef = useRef<HTMLButtonElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -1152,8 +1059,7 @@ function AssignWorkerDropdown({ jobId, rosterNames, assignedWorkers, isAssigning
             <button
                 ref={btnRef}
                 onClick={() => onSetAssigning(isAssigning ? null : jobId)}
-                className={`w-full py-1.5 rounded border border-dashed text-[10px] transition-colors flex items-center justify-center gap-1 uppercase font-bold tracking-wider
-                    ${isActiveCard ? 'border-slate-400 text-slate-500 hover:text-slate-800 hover:border-sky-500' : 'border-[#444] text-[#666] hover:text-white hover:border-sky-500/50'}`}
+                className="w-full py-1.5 rounded border border-dashed border-[#444] text-[10px] text-[#666] hover:text-white hover:border-sky-500/50 transition-colors flex items-center justify-center gap-1 uppercase font-bold tracking-wider"
             >
                 <UserPlus className="w-3 h-3" /> Assign Worker
             </button>
@@ -1297,92 +1203,27 @@ function AlertsView({ alerts, allAlerts, departmentStatus }: {
 // FUTURE WORK VIEW
 // ─────────────────────────────────────────────────────────────────
 
-const PULL_REASONS = [
-    'Job arrived early',
-    'Customer priority change',
-    'Material available ahead of schedule',
-    'Capacity available now',
-    'Other',
-] as const;
-
-function FutureWorkView({ jobs, department, onPullToQueue }: { jobs: Job[]; department: Department; onPullToQueue: (jobId: string, reason: string) => void }) {
+function FutureWorkView({ jobs, department }: { jobs: Job[]; department: Department }) {
     const nowMs = new Date().getTime();
-    const [searchTerm, setSearchTerm] = useState('');
-    const [pullingJobId, setPullingJobId] = useState<string | null>(null);
-    const [selectedReason, setSelectedReason] = useState<string>(PULL_REASONS[0]);
-    const [customReason, setCustomReason] = useState('');
-    const [isPulling, setIsPulling] = useState(false);
-
-    const filtered = useMemo(() => {
-        if (!searchTerm.trim()) return jobs;
-        const q = searchTerm.toLowerCase();
-        return jobs.filter(j =>
-            j.id.toLowerCase().includes(q) ||
-            j.name.toLowerCase().includes(q) ||
-            (j.description || '').toLowerCase().includes(q)
-        );
-    }, [jobs, searchTerm]);
-
-    const handlePull = async () => {
-        if (!pullingJobId) return;
-        const reason = selectedReason === 'Other' ? customReason.trim() || 'Other' : selectedReason;
-        setIsPulling(true);
-        try {
-            await onPullToQueue(pullingJobId, reason);
-            setPullingJobId(null);
-            setSelectedReason(PULL_REASONS[0]);
-            setCustomReason('');
-        } finally {
-            setIsPulling(false);
-        }
-    };
 
     return (
         <div className="p-6 overflow-y-auto h-full space-y-4 max-w-4xl mx-auto">
-            {/* Search Bar */}
-            <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#555]" />
-                <input
-                    type="text"
-                    placeholder="Search by WO#, job name, or description…"
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-[#1a1a1a] border border-[#333] rounded-lg text-sm text-slate-200 placeholder-[#555] focus:outline-none focus:border-sky-600/50 focus:ring-1 focus:ring-sky-600/20 transition-all font-mono"
-                />
-                {searchTerm && (
-                    <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#555] hover:text-slate-300 transition-colors">
-                        <X className="w-3.5 h-3.5" />
-                    </button>
-                )}
-            </div>
-
-            {filtered.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 text-[#555]">
+            {jobs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-[#555]">
                     <Eye className="w-12 h-12 mb-4 opacity-30" />
-                    {searchTerm ? (
-                        <p className="text-sm font-mono uppercase tracking-wider">No jobs matching &quot;{searchTerm}&quot;</p>
-                    ) : (
-                        <>
-                            <p className="text-sm font-mono uppercase tracking-wider">No upcoming jobs for {department}</p>
-                            <p className="text-xs text-[#444] mt-2">Jobs will appear here once scheduled for this department</p>
-                        </>
-                    )}
+                    <p className="text-sm font-mono uppercase tracking-wider">No upcoming jobs for {department}</p>
+                    <p className="text-xs text-[#444] mt-2">Jobs will appear here once scheduled for this department</p>
                 </div>
             ) : (
                 <>
-                    <p className="text-[11px] text-[#666] font-mono uppercase tracking-wider">
-                        {filtered.length} upcoming job{filtered.length !== 1 ? 's' : ''} heading to {department}
-                        {searchTerm && <span className="text-sky-500"> · filtered</span>}
-                    </p>
-                    {filtered.map(job => {
+                    <p className="text-[11px] text-[#666] font-mono uppercase tracking-wider">{jobs.length} upcoming job{jobs.length !== 1 ? 's' : ''} heading to {department}</p>
+                    {jobs.map(job => {
                         const schedule = job.departmentSchedule || job.remainingDepartmentSchedule;
                         const arrivalDate = schedule?.[department]?.start ? new Date(schedule[department].start) : null;
                         const daysUntil = arrivalDate ? Math.ceil((arrivalDate.getTime() - nowMs) / 86400000) : null;
-                        const showingPull = pullingJobId === job.id;
                         return (
-                            <div key={job.id} className={`bg-gradient-to-b from-[#222] to-[#1c1c1c] border rounded-lg overflow-hidden transition-colors
-                                ${showingPull ? 'border-amber-600/60' : 'border-[#333] hover:border-[#555]'}`}>
-                                <div className="h-1 w-full" style={{ backgroundColor: job.productType === 'FAB' ? '#0ea5e9' : job.productType === 'DOORS' ? '#f59e0b' : '#8b5cf6' }} />
+                            <div key={job.id} className="bg-gradient-to-b from-[#222] to-[#1c1c1c] border border-[#333] rounded-lg overflow-hidden hover:border-[#555] transition-colors">
+                                <div className="h-1 w-full bg-gradient-to-r from-[#333] via-[#444] to-[#333]" />
                                 <div className="p-4 flex items-center gap-4">
                                     <div className="shrink-0 w-14 h-14 rounded bg-[#111] border border-[#333] flex flex-col items-center justify-center shadow-inner">
                                         {daysUntil !== null ? (
@@ -1400,75 +1241,11 @@ function FutureWorkView({ jobs, department, onPullToQueue }: { jobs: Job[]; depa
                                             <span>Due: {new Date(job.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                                         </div>
                                     </div>
-                                    <div className="shrink-0 flex items-center gap-3">
-                                        <div className="px-2 py-1 rounded bg-[#111] border border-[#333] shadow-inner">
-                                            <span className="text-sky-400 text-sm font-mono font-bold">{job.weldingPoints}</span>
-                                            <span className="text-[8px] text-[#666] ml-0.5">pt</span>
-                                        </div>
-                                        <button
-                                            onClick={() => setPullingJobId(showingPull ? null : job.id)}
-                                            title="Pull to today's queue"
-                                            className={`p-2 rounded-lg border transition-all text-xs font-bold
-                                                ${showingPull
-                                                    ? 'bg-amber-600/20 border-amber-600/50 text-amber-400'
-                                                    : 'border-[#444] text-[#666] hover:text-amber-400 hover:border-amber-600/40 hover:bg-amber-900/20'}`}
-                                        >
-                                            <ArrowDownToLine className="w-4 h-4" />
-                                        </button>
+                                    <div className="shrink-0 px-2 py-1 rounded bg-[#111] border border-[#333] shadow-inner">
+                                        <span className="text-sky-400 text-sm font-mono font-bold">{job.weldingPoints}</span>
+                                        <span className="text-[8px] text-[#666] ml-0.5">pt</span>
                                     </div>
                                 </div>
-
-                                {/* Pull Reason Popover */}
-                                {showingPull && (
-                                    <div className="px-4 pb-4 pt-1 border-t border-amber-800/30 bg-amber-950/20">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <ArrowDownToLine className="w-3.5 h-3.5 text-amber-400" />
-                                            <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Pull to {department} Queue</span>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {PULL_REASONS.map(reason => (
-                                                    <button
-                                                        key={reason}
-                                                        onClick={() => { setSelectedReason(reason); if (reason !== 'Other') setCustomReason(''); }}
-                                                        className={`px-2.5 py-1 rounded text-[10px] font-bold border transition-all
-                                                            ${selectedReason === reason
-                                                                ? 'bg-amber-600/30 text-amber-300 border-amber-600/50'
-                                                                : 'bg-[#111] text-[#888] border-[#333] hover:border-[#555] hover:text-slate-200'}`}
-                                                    >
-                                                        {reason}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                            {selectedReason === 'Other' && (
-                                                <input
-                                                    type="text"
-                                                    placeholder="Describe reason…"
-                                                    value={customReason}
-                                                    onChange={e => setCustomReason(e.target.value)}
-                                                    className="w-full px-3 py-1.5 bg-[#111] border border-[#333] rounded text-[11px] text-slate-200 placeholder-[#555] focus:outline-none focus:border-amber-600/50"
-                                                    autoFocus
-                                                />
-                                            )}
-                                            <div className="flex gap-2 pt-1">
-                                                <button
-                                                    onClick={handlePull}
-                                                    disabled={isPulling || (selectedReason === 'Other' && !customReason.trim())}
-                                                    className="flex-1 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                                                >
-                                                    {isPulling ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowDownToLine className="w-3 h-3" />}
-                                                    {isPulling ? 'Pulling…' : 'Confirm Pull'}
-                                                </button>
-                                                <button
-                                                    onClick={() => setPullingJobId(null)}
-                                                    className="px-3 py-1.5 rounded border border-[#444] text-[#888] text-[10px] font-bold uppercase hover:text-slate-200 transition-colors"
-                                                >
-                                                    Cancel
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
                         );
                     })}

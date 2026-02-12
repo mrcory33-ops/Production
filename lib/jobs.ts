@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { scheduleAllJobs, trackJobProgress } from './scheduler';
+import { scheduleAllJobs, trackJobProgress, alignBatchCohorts } from './scheduler';
 import { collection, doc, writeBatch, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { Job, ScheduleInsights } from '@/types';
 import { DEPT_ORDER } from './departmentConfig';
@@ -164,6 +164,7 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{
 
     // 6. Execute Batches
     const jobsToSave = [...scheduledNewJobs, ...updatedExistingJobs];
+    const alignedJobsToSave = alignBatchCohorts(jobsToSave);
 
     // Define a union type for operations
     type BatchOp =
@@ -171,7 +172,7 @@ export const syncJobsInput = async (parsedJobs: Job[]): Promise<{
         | { type: 'update'; id: string; data: { status: string; updatedAt: Date } };
 
     const allOps: BatchOp[] = [
-        ...jobsToSave.map(job => ({ type: 'set' as const, data: job })),
+        ...alignedJobsToSave.map(job => ({ type: 'set' as const, data: job })),
         ...idsToComplete.map(id => ({ type: 'update' as const, id, data: { status: 'COMPLETED', updatedAt: new Date() } }))
     ];
 

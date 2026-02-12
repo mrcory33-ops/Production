@@ -28,6 +28,34 @@ const DEPT_GAP_DAYS = {
     bigRock: 1     // ≥ BIG_ROCK threshold (60 pts)
 } as const;
 
+// ── Pool Key Helpers ────────────────────────────────────────────────────────
+// Resolve a (dept, productType) pair to a pool key for weekly capacity tracking.
+// Split pools get keys like "Welding:DOORS"; shared pools get "Laser".
+const getPoolKey = (dept: Department, productType: ProductType = 'FAB'): string => {
+    const config = DEPARTMENT_CONFIG[dept];
+    if (!config) return dept;
+    const pool = config.pools.find(p => p.productTypes && p.productTypes.includes(productType));
+    if (pool && pool.productTypes) {
+        // This pool is product-type-specific → include type in key
+        return `${dept}:${productType}`;
+    }
+    // Shared pool (no productTypes filter) → bare dept name
+    return dept;
+};
+
+// Get the weekly capacity for the pool that handles (dept, productType).
+// Uses pool.weeklyCapacity when set, otherwise count × outputPerDay × 5.
+const getSchedulerPoolCapacity = (dept: Department, productType: ProductType = 'FAB', allowOT: boolean = false): number => {
+    const config = DEPARTMENT_CONFIG[dept];
+    if (!config) return allowOT ? OT_WEEKLY_CAPACITY : WEEKLY_CAPACITY;
+    const pool = config.pools.find(p =>
+        !p.productTypes || p.productTypes.length === 0 || p.productTypes.includes(productType)
+    );
+    if (!pool) return allowOT ? OT_WEEKLY_CAPACITY : WEEKLY_CAPACITY;
+    const base = pool.weeklyCapacity ?? (pool.count * pool.outputPerDay * 5);
+    return allowOT ? base + (OT_WEEKLY_CAPACITY - WEEKLY_CAPACITY) : base;
+};
+
 const getDeptGap = (points: number, noGaps?: boolean): number => {
     if (noGaps) return 0;
     if (points >= BIG_ROCK_CONFIG.threshold) return DEPT_GAP_DAYS.bigRock;
@@ -719,7 +747,7 @@ export type CapacityBuckets = Record<string, Record<Department, number> & {
     bigRockJobIds: Record<Department, Set<string>>; // Track which jobs have been counted as big rocks
     poolUsage: Record<Department, Record<number, number>>; // Usage per pool index: { Welding: { 0: 50, 1: 100 } }
 }> & {
-    weeklyUsage: Record<string, Record<Department, number>>; // Usage per week: { "2026-W05": { "Welding": 450 } }
+    weeklyUsage: Record<string, Record<string, number>>; // Usage per week by pool key: { "2026-W05": { "Welding:FAB": 300, "Welding:DOORS": 200 } }
 };
 
 /**
@@ -793,11 +821,13 @@ const canFitInWeek = (
     dept: Department,
     points: number,
     buckets: CapacityBuckets,
+    productType: ProductType = 'FAB',
     allowOT: boolean = false
 ): boolean => {
     const weekKey = getWeekKey(date);
-    const currentUsage = buckets.weeklyUsage?.[weekKey]?.[dept] || 0;
-    const capacity = allowOT ? OT_WEEKLY_CAPACITY : WEEKLY_CAPACITY;
+    const poolKey = getPoolKey(dept, productType);
+    const currentUsage = buckets.weeklyUsage?.[weekKey]?.[poolKey] || 0;
+    const capacity = getSchedulerPoolCapacity(dept, productType, allowOT);
     return (currentUsage + points) <= capacity;
 };
 
@@ -808,20 +838,17 @@ const reserveWeeklyCapacity = (
     date: Date,
     dept: Department,
     points: number,
-    buckets: CapacityBuckets
+    buckets: CapacityBuckets,
+    productType: ProductType = 'FAB'
 ): void => {
     const weekKey = getWeekKey(date);
     if (!buckets.weeklyUsage[weekKey]) {
-        buckets.weeklyUsage[weekKey] = {
-            Engineering: 0,
-            Laser: 0,
-            'Press Brake': 0,
-            Welding: 0,
-            Polishing: 0,
-            Assembly: 0
-        };
+        buckets.weeklyUsage[weekKey] = {};
     }
-    buckets.weeklyUsage[weekKey][dept] += points;
+    const poolKey = getPoolKey(dept, productType);
+    buckets.weeklyUsage[weekKey][poolKey] = (buckets.weeklyUsage[weekKey][poolKey] || 0) + points;
+    // Also maintain aggregate dept-level total for backward compat (Phase 2 load maps)
+    buckets.weeklyUsage[weekKey][dept] = (buckets.weeklyUsage[weekKey][dept] || 0) + points;
 };
 
 /**
@@ -835,7 +862,8 @@ const prorateWeeklyCapacity = (
     durationDays: number,
     dept: Department,
     totalPoints: number,
-    buckets: CapacityBuckets
+    buckets: CapacityBuckets,
+    productType: ProductType = 'FAB'
 ): void => {
     const effectiveDays = Math.max(durationDays, 1);
     const pointsPerDay = totalPoints / effectiveDays;
@@ -847,7 +875,7 @@ const prorateWeeklyCapacity = (
         while (isSaturday(cursor) || isSunday(cursor)) {
             cursor = addDays(cursor, 1);
         }
-        reserveWeeklyCapacity(cursor, dept, pointsPerDay, buckets);
+        reserveWeeklyCapacity(cursor, dept, pointsPerDay, buckets, productType);
         cursor = addDays(cursor, 1);
         remaining--;
     }
@@ -955,7 +983,7 @@ export const canFitJob = (
         }
 
         // Check weekly capacity - can this job fit in the week?
-        if (!canFitInWeek(dayDate, dept, jobPoints, buckets)) {
+        if (!canFitInWeek(dayDate, dept, jobPoints, buckets, job.productType || 'FAB')) {
             return false; // Week is full
         }
 
@@ -1080,7 +1108,7 @@ export const reserveCapacity = (
         }
 
         // Prorate weekly capacity across all weeks this dept spans
-        prorateWeeklyCapacity(deptStartDate, duration, dept, job.weldingPoints || 0, buckets);
+        prorateWeeklyCapacity(deptStartDate, duration, dept, job.weldingPoints || 0, buckets, productType);
 
         // Next department starts after this one ends (unified gap table)
         const jobPoints = job.weldingPoints || 0;
@@ -1489,7 +1517,7 @@ const canFitDepartment = (
     const limit = DEPARTMENT_CONFIG[dept]?.dailyCapacity || 195;
 
     // Weekly capacity check — ensure job fits in the week
-    if (!canFitInWeek(startDate, dept, points, buckets, allowOT)) {
+    if (!canFitInWeek(startDate, dept, points, buckets, productType, allowOT)) {
         return false;
     }
 
@@ -2224,6 +2252,7 @@ const computeWeeklyLoad = (jobs: Job[]): WeeklyCapacityMap => {
         if (!job.departmentSchedule) continue;
         const points = job.weldingPoints || 0;
         const isBigRock = points >= BIG_ROCK_CONFIG.threshold;
+        const productType = job.productType || 'FAB';
 
         for (const [dept, schedule] of Object.entries(job.departmentSchedule)) {
             // Skip Engineering burden for nesting-ready jobs — work is done, just waiting for Laser
@@ -2252,8 +2281,13 @@ const computeWeeklyLoad = (jobs: Job[]): WeeklyCapacityMap => {
                 cursor = addDays(cursor, 1);
             }
 
+            // Resolve pool key for this job's product type
+            const poolKey = getPoolKey(dept as Department, productType);
+
             for (const [wk, pts] of Object.entries(weekContribs)) {
                 if (!capacity[wk]) capacity[wk] = {};
+
+                // Dept-level entry (backward compat: analyzeSchedule, etc.)
                 if (!capacity[wk][dept]) {
                     capacity[wk][dept] = { total: 0, bigRockPts: 0, smallRockPts: 0, contributions: [] };
                 }
@@ -2261,6 +2295,17 @@ const computeWeeklyLoad = (jobs: Job[]): WeeklyCapacityMap => {
                 if (isBigRock) capacity[wk][dept].bigRockPts += pts;
                 else capacity[wk][dept].smallRockPts += pts;
                 capacity[wk][dept].contributions.push({ jobId: job.id, pts });
+
+                // Pool-key entry (for split depts like Engineering, Welding)
+                if (poolKey !== dept) {
+                    if (!capacity[wk][poolKey]) {
+                        capacity[wk][poolKey] = { total: 0, bigRockPts: 0, smallRockPts: 0, contributions: [] };
+                    }
+                    capacity[wk][poolKey].total += pts;
+                    if (isBigRock) capacity[wk][poolKey].bigRockPts += pts;
+                    else capacity[wk][poolKey].smallRockPts += pts;
+                    capacity[wk][poolKey].contributions.push({ jobId: job.id, pts });
+                }
             }
         }
     }
@@ -2330,17 +2375,41 @@ const compressSchedule = (jobs: Job[]): Job[] => {
     const jobMap = new Map<string, Job>();
     for (const job of jobs) jobMap.set(job.id, { ...job });
 
+    // Build the set of pool keys that have split capacity (e.g. "Welding:FAB", "Engineering:DOORS")
+    // For these, we check per-pool capacity. For shared depts, we check the bare dept key.
+    const splitPoolKeys = new Set<string>();
+    for (const dept of DEPARTMENTS) {
+        const config = DEPARTMENT_CONFIG[dept];
+        if (!config) continue;
+        for (const pool of config.pools) {
+            if (pool.productTypes && pool.productTypes.length > 0) {
+                for (const pt of pool.productTypes) {
+                    splitPoolKeys.add(`${dept}:${pt}`);
+                }
+            }
+        }
+    }
+
     // Iterative compression: up to 10 passes
     for (let pass = 0; pass < 10; pass++) {
         const currentJobs = Array.from(jobMap.values());
         const weeklyLoad = computeWeeklyLoad(currentJobs);
 
-        // Find overloaded week-dept pairs
-        const overloaded: { weekKey: string; dept: string; excess: number }[] = [];
+        // Find overloaded week-dept/pool pairs
+        const overloaded: { weekKey: string; deptKey: string; excess: number }[] = [];
         for (const [wk, depts] of Object.entries(weeklyLoad)) {
-            for (const [dept, load] of Object.entries(depts)) {
-                if (load.total > WEEKLY_TARGET) {
-                    overloaded.push({ weekKey: wk, dept, excess: load.total - WEEKLY_TARGET });
+            for (const [key, load] of Object.entries(depts)) {
+                // For split depts, check pool keys; for shared depts, check bare dept key
+                // Skip bare dept keys for split departments (they're the aggregate)
+                const isSplitDept = splitPoolKeys.has(key) ||
+                    [...splitPoolKeys].some(pk => pk.startsWith(key + ':'));
+                if (isSplitDept && !key.includes(':')) continue; // Skip aggregate for split depts
+
+                const target = key.includes(':')
+                    ? getSchedulerPoolCapacity(key.split(':')[0] as Department, key.split(':')[1] as ProductType)
+                    : getSchedulerPoolCapacity(key as Department);
+                if (load.total > target) {
+                    overloaded.push({ weekKey: wk, deptKey: key, excess: load.total - target });
                 }
             }
         }
@@ -2353,9 +2422,12 @@ const compressSchedule = (jobs: Job[]): Job[] => {
         overloaded.sort((a, b) => b.excess - a.excess);
         let movedAny = false;
 
-        for (const { weekKey, dept } of overloaded) {
-            const load = weeklyLoad[weekKey]?.[dept];
-            if (!load || load.total <= WEEKLY_TARGET) continue;
+        for (const { weekKey, deptKey } of overloaded) {
+            const load = weeklyLoad[weekKey]?.[deptKey];
+            const target = deptKey.includes(':')
+                ? getSchedulerPoolCapacity(deptKey.split(':')[0] as Department, deptKey.split(':')[1] as ProductType)
+                : getSchedulerPoolCapacity(deptKey as Department);
+            if (!load || load.total <= target) continue;
 
             // Find moveable jobs: most FORWARD SLACK first, smallest jobs first
             const contributors = load.contributions
@@ -2371,8 +2443,8 @@ const compressSchedule = (jobs: Job[]): Job[] => {
 
             for (const { job: candidate, pts } of contributors) {
                 if (!candidate) continue;
-                const currentLoad = weeklyLoad[weekKey]?.[dept]?.total || 0;
-                if (currentLoad <= WEEKLY_TARGET) break;
+                const currentLoad = weeklyLoad[weekKey]?.[deptKey]?.total || 0;
+                if (currentLoad <= target) break;
 
                 // Try shifting 5, 3, or 1 work days LATER (toward due date)
                 let shifted: Job | null = null;
@@ -2504,16 +2576,39 @@ const findLateJobs = (jobs: Job[], weeklyLoad: WeeklyCapacityMap): LateJob[] => 
 // ── Helper: find overloaded weeks ──
 const findOverloadedWeeks = (weeklyLoad: WeeklyCapacityMap): OverloadedWeek[] => {
     const overloaded: OverloadedWeek[] = [];
+
+    // Build the set of split pool keys
+    const splitPoolKeys = new Set<string>();
+    for (const dept of DEPARTMENTS) {
+        const config = DEPARTMENT_CONFIG[dept];
+        if (!config) continue;
+        for (const pool of config.pools) {
+            if (pool.productTypes && pool.productTypes.length > 0) {
+                for (const pt of pool.productTypes) {
+                    splitPoolKeys.add(`${dept}:${pt}`);
+                }
+            }
+        }
+    }
+
     for (const [wk, depts] of Object.entries(weeklyLoad)) {
-        for (const [dept, load] of Object.entries(depts)) {
-            if (load.total > WEEKLY_TARGET) {
+        for (const [key, load] of Object.entries(depts)) {
+            // Skip aggregate keys for split departments
+            const isSplitDept = splitPoolKeys.has(key) ||
+                [...splitPoolKeys].some(pk => pk.startsWith(key + ':'));
+            if (isSplitDept && !key.includes(':')) continue;
+
+            const target = key.includes(':')
+                ? getSchedulerPoolCapacity(key.split(':')[0] as Department, key.split(':')[1] as ProductType)
+                : getSchedulerPoolCapacity(key as Department);
+            if (load.total > target) {
                 overloaded.push({
                     weekKey: wk,
                     weekStart: wk,
-                    department: dept,
+                    department: key,
                     scheduledPoints: Math.round(load.total),
-                    capacity: WEEKLY_TARGET,
-                    excess: Math.round(load.total - WEEKLY_TARGET),
+                    capacity: target,
+                    excess: Math.round(load.total - target),
                     jobCount: load.contributions.length
                 });
             }
@@ -3127,19 +3222,22 @@ const getImpactedOverloads = (
         if (!weekKey || !department) continue;
 
         const total = weeklyLoad[weekKey]?.[department]?.total || 0;
-        if (total > WEEKLY_TARGET) {
+        const target = department.includes(':')
+            ? getSchedulerPoolCapacity(department.split(':')[0] as Department, department.split(':')[1] as ProductType)
+            : getSchedulerPoolCapacity(department as Department);
+        if (total > target) {
             overloads.push({
                 weekKey,
                 department,
                 scheduledPoints: Math.round(total),
-                excess: Math.round(total - WEEKLY_TARGET)
+                excess: Math.round(total - target)
             });
         }
     }
 
     overloads.sort((a, b) => b.excess - a.excess);
     return overloads;
-};
+};;
 
 /**
  * Plan an "Adjust" action for a supervisor alert.

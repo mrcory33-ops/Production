@@ -6,7 +6,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { addDays, format, startOfDay, isSameDay, startOfWeek, isWeekend, isSunday, isSaturday, differenceInCalendarDays } from 'date-fns';
 import { Job, Department, SupervisorAlert } from '@/types';
 import { DEPARTMENT_CONFIG, DEPT_ORDER, calculateDoorWeldingSubStages } from '@/lib/departmentConfig';
-import { normalizeBatchText, getBatchCategory } from '@/lib/scheduler';
+import { getBatchKeyForJob, BATCH_COHORT_WINDOW_BUSINESS_DAYS } from '@/lib/scheduler';
 import SegmentEditPopover from './SegmentEditPopover';
 import JobStatusSymbols from './JobStatusSymbols';
 import JobConfigPopover from './JobConfigPopover';
@@ -718,11 +718,12 @@ export default function CustomGanttTable({
                         // Batch key: only the 8 defined categories are eligible for batching
                         // Key is category-only — all items of the same type batch together
                         // (the scheduler engine handles fine-grained gauge/material splitting internally)
-                        const getGanttBatchKey = (j: Job): string | null => {
-                            const text = normalizeBatchText(j.description || '');
-                            const category = getBatchCategory(text);
-                            if (!category) return null; // Not a batchable item
-                            return category;
+                        // NOTE: This now uses the same composite key as the scheduler.
+                        const getGanttBatchKey = (j: Job): string | null => getBatchKeyForJob(j);
+                        const getGanttCohortKey = (j: Job): string | null => {
+                            const key = getGanttBatchKey(j);
+                            if (!key) return null;
+                            return `${key}|DEPT:${j.currentDepartment || 'UNKNOWN'}`;
                         };
 
                         // Calculate 12 business days ahead from today
@@ -736,7 +737,7 @@ export default function CustomGanttTable({
                             }
                             return result;
                         };
-                        const batchWindowEnd = addBusinessDays(startOfDay(today), 12);
+                        const batchWindowEnd = addBusinessDays(startOfDay(today), BATCH_COHORT_WINDOW_BUSINESS_DAYS);
                         const isolatedDepartment = visibleDepartments && visibleDepartments.size === 1
                             ? Array.from(visibleDepartments)[0]
                             : null;
@@ -768,7 +769,7 @@ export default function CustomGanttTable({
                             if (!isBatchEligible(j)) return;
                             const dueDate = new Date(j.dueDate);
                             if (dueDate > batchWindowEnd) return; // Outside 12 business day window
-                            const key = getGanttBatchKey(j);
+                            const key = getGanttCohortKey(j);
                             if (!key) return;
                             batchCounts[key] = (batchCounts[key] || 0) + 1;
                         });
@@ -776,7 +777,7 @@ export default function CustomGanttTable({
                         // its earliest member's due date so the group stays together
                         const batchAnchorDate: Record<string, number> = {};
                         filteredJobs.forEach(j => {
-                            const key = getGanttBatchKey(j);
+                            const key = getGanttCohortKey(j);
                             if (!key) return;
                             const count = batchCounts[key] || 0;
                             if (count < 2) return; // Not actually in a batch group
@@ -795,8 +796,8 @@ export default function CustomGanttTable({
                             const bType = PRODUCT_TYPE_SORT[b.productType || 'FAB'] ?? 1;
                             if (aType !== bType) return aType - bType;
 
-                            const aKey = getGanttBatchKey(a);
-                            const bKey = getGanttBatchKey(b);
+                            const aKey = getGanttCohortKey(a);
+                            const bKey = getGanttCohortKey(b);
                             const aInBatch = aKey ? (batchCounts[aKey] || 0) >= 2 : false;
                             const bInBatch = bKey ? (batchCounts[bKey] || 0) >= 2 : false;
 
@@ -828,8 +829,8 @@ export default function CustomGanttTable({
                             const jobAlerts = alertsByJobId[job.id] || [];
 
                             // Batch group detection — only for recognized categories in Press Brake or earlier
-                            const batchKey = getGanttBatchKey(job);
-                            const prevBatchKey = rowIndex > 0 ? getGanttBatchKey(sortedJobs[rowIndex - 1]) : null;
+                            const batchKey = getGanttCohortKey(job);
+                            const prevBatchKey = rowIndex > 0 ? getGanttCohortKey(sortedJobs[rowIndex - 1]) : null;
                             const jobEligible = isBatchEligible(job) && batchKey !== null;
                             const batchCount = (jobEligible && batchKey) ? (batchCounts[batchKey] || 0) : 0;
                             const inBatch = batchCount >= 2;

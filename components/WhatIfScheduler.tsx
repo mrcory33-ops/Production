@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Job } from '@/types';
+import { Job, ProductType } from '@/types';
 import {
     QuoteInput,
     QuoteEstimate,
@@ -13,6 +13,8 @@ import {
     checkAdvancedFeasibility,
     simulateRepTrade,
     RepTradeResult,
+    TradeReasoning,
+    CapacityDelta,
 } from '@/lib/whatIfScheduler';
 import { BIG_ROCK_CONFIG } from '@/lib/scoringConfig';
 import type { ParsedSalesAcknowledgment } from '@/lib/parseSalesAcknowledgment';
@@ -35,6 +37,12 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
     const [estimate, setEstimate] = useState<QuoteEstimate | null>(null);
     const [feasibility, setFeasibility] = useState<FeasibilityCheck | null>(null);
     const [loading, setLoading] = useState(false);
+    // Product type
+    const [productType, setProductType] = useState<ProductType>('FAB');
+    // DOORS-specific
+    const [doorQty, setDoorQty] = useState<string>('');
+    const [frameQty, setFrameQty] = useState<string>('');
+    const [doorType, setDoorType] = useState<'seamless' | 'lockseam'>('seamless');
 
     // Rep Trade state
     const [repCode, setRepCode] = useState<string>('');
@@ -72,17 +80,61 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
             const data: ParsedSalesAcknowledgment = result.data;
             setParsedPdf(data);
 
-            // Auto-fill form fields
-            setTotalValue(data.orderSubTotal.toString());
-            setTotalQuantity(data.totalQuantity.toString());
+            // ── DOORS filtering: only count items with "door"/"dr" or "frame" ──
+            const isDoors = productType === 'DOORS';
+            const isDoorItem = (desc: string) => /\b(door|dr)\b/i.test(desc);
+            const isFrameItem = (desc: string) => /\b(frame|fr)\b/i.test(desc);
+            const buildableItems = isDoors
+                ? data.lineItems.filter(item => {
+                    const desc = item.description.toLowerCase();
+                    return isDoorItem(desc) || isFrameItem(desc);
+                })
+                : data.lineItems;
 
-            // Auto-detect Big Rocks (items whose individual welding points ≥ BIG_ROCK_CONFIG.threshold)
-            const bigRockThresholdDollars = BIG_ROCK_CONFIG.threshold * 650; // reverse the $/point ratio
-            const detectedBigRocks = data.lineItems
+            // Auto-fill form fields
+            // For DOORS: use full order subtotal for point value, but buildable qty only
+            setTotalValue(data.orderSubTotal.toString());
+            const buildableQty = buildableItems.reduce((sum, item) => sum + item.quantity, 0);
+            setTotalQuantity(buildableQty.toString());
+
+            // ── DOORS auto-fill: count doors vs frames, detect PR (pair = qty×2) ──
+            if (isDoors) {
+                let autoDoors = 0;
+                let autoFrames = 0;
+                let detectedDoorType: 'seamless' | 'lockseam' = 'seamless';
+
+                for (const item of buildableItems) {
+                    const desc = item.description.toLowerCase();
+                    const isPair = /\bpr\b/.test(desc);
+                    const physicalQty = isPair ? item.quantity * 2 : item.quantity;
+
+                    if (isDoorItem(desc)) {
+                        autoDoors += physicalQty;
+                        if (desc.includes('lock') && desc.includes('seam')) {
+                            detectedDoorType = 'lockseam';
+                        }
+                    } else if (isFrameItem(desc)) {
+                        autoFrames += physicalQty;
+                    }
+                }
+
+                if (autoDoors > 0) setDoorQty(autoDoors.toString());
+                if (autoFrames > 0) setFrameQty(autoFrames.toString());
+                setDoorType(detectedDoorType);
+                // Clear REF for DOORS (not applicable)
+                setIsREF(false);
+            }
+
+            // Auto-detect Big Rocks
+            // DOORS uses lower threshold (30 pts) vs FAB (60 pts)
+            const effectiveThreshold = isDoors ? 30 : BIG_ROCK_CONFIG.threshold;
+            const dollarPerPt = isDoors ? 475 : 650;
+            const bigRockThresholdDollars = effectiveThreshold * dollarPerPt;
+            const detectedBigRocks = buildableItems
                 .filter(item => item.extension >= bigRockThresholdDollars)
                 .map(item => ({
                     value: item.extension,
-                    points: convertDollarToPoints(item.extension),
+                    points: convertDollarToPoints(item.extension, productType),
                 }));
 
             if (detectedBigRocks.length > 0) {
@@ -108,7 +160,7 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
         } finally {
             setPdfUploading(false);
         }
-    }, []);
+    }, [productType]);
 
     const handleDragEnter = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -197,6 +249,10 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                 isREF,
                 engineeringReadyDate: new Date(engineeringDate),
                 targetDate: mode === 'TARGET' && targetDate ? new Date(targetDate) : undefined,
+                productType,
+                doorQty: productType === 'DOORS' ? (parseInt(doorQty) || 0) : undefined,
+                frameQty: productType === 'DOORS' ? (parseInt(frameQty) || 0) : undefined,
+                doorType: productType === 'DOORS' ? doorType : undefined,
             };
 
             const result = await simulateQuoteSchedule(input, existingJobs);
@@ -248,8 +304,11 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
             bigRocks: hasBigRocks ? bigRocks : [],
             isREF,
             engineeringReadyDate: new Date(),
+            productType,
         })
         : null;
+
+    const dollarPerPoint = productType === 'DOORS' ? 475 : 650;
 
     return (
         <div className="min-h-screen bg-[#181818] py-12 px-4 sm:px-6">
@@ -342,11 +401,14 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                         </div>
                                         <div className="max-h-48 overflow-y-auto">
                                             {parsedPdf.lineItems.map((item, idx) => {
-                                                const pts = convertDollarToPoints(item.extension);
+                                                const pts = convertDollarToPoints(item.extension, productType);
                                                 const isBigRock = pts >= BIG_ROCK_CONFIG.threshold;
                                                 return (
                                                     <div key={idx} className={`flex items-center gap-3 px-4 py-2 text-xs border-b border-[#2a2a2a] last:border-0 ${isBigRock ? 'bg-amber-950/20' : ''}`}>
-                                                        <span className="font-mono text-[#666] w-7 shrink-0">{item.itemNumber.replace('S', '')}</span>
+                                                        <span className="font-mono text-[#666] w-16 shrink-0">
+                                                            {item.itemNumber.replace('S', '')}
+                                                            {item.tag && <span className="text-[#555] ml-1">({item.tag})</span>}
+                                                        </span>
                                                         <span className="text-[#bbb] flex-1 truncate">{item.description}</span>
                                                         <span className="text-[#888] shrink-0">×{item.quantity}</span>
                                                         <span className="text-[#aaa] font-mono shrink-0 w-20 text-right">${item.extension.toLocaleString()}</span>
@@ -355,6 +417,73 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                     </div>
                                                 );
                                             })}
+                                        </div>
+                                    </div>
+                                )}
+                            </section>
+
+                            {/* Section: Product Type */}
+                            <section>
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="w-1 h-6 bg-[#aaa] rounded-full"></div>
+                                    <h2 className="text-sm font-bold text-[#ccc] uppercase tracking-wider">Product Type</h2>
+                                    <span className="text-xs text-[#888] ml-auto">${dollarPerPoint}/pt</span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-3">
+                                    {(['FAB', 'DOORS', 'HARMONIC'] as ProductType[]).map((pt) => {
+                                        const icons: Record<ProductType, string> = { FAB: '🔧', DOORS: '🚪', HARMONIC: '〰️' };
+                                        const labels: Record<ProductType, string> = { FAB: 'Fabrication', DOORS: 'Doors & Frames', HARMONIC: 'Harmonic' };
+                                        return (
+                                            <button
+                                                key={pt}
+                                                onClick={() => setProductType(pt)}
+                                                className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 transition-all font-bold text-sm ${productType === pt
+                                                    ? 'border-[#777] bg-[#2a2a2a] text-white scale-[1.02]'
+                                                    : 'border-[#333] bg-[#242424] text-[#888] hover:border-[#444] hover:text-[#bbb]'
+                                                    }`}
+                                            >
+                                                <span>{icons[pt]}</span>
+                                                <span>{labels[pt]}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* DOORS-specific: Door Qty + Frame Qty */}
+                                {productType === 'DOORS' && (
+                                    <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                                        <div className="space-y-2">
+                                            <label className="block text-sm font-semibold text-[#bbb]">Door Qty</label>
+                                            <input
+                                                type="number"
+                                                value={doorQty}
+                                                onChange={(e) => setDoorQty(e.target.value)}
+                                                className="w-full px-4 py-3 bg-[#2a2a2a] border border-[#444] rounded-xl text-white focus:ring-2 focus:ring-[#666] focus:border-[#666] transition-all outline-none placeholder-[#666]"
+                                                placeholder="0"
+                                                min="0"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="block text-sm font-semibold text-[#bbb]">Door Type</label>
+                                            <select
+                                                value={doorType}
+                                                onChange={(e) => setDoorType(e.target.value as 'seamless' | 'lockseam')}
+                                                className="w-full px-4 py-3 bg-[#2a2a2a] border border-[#444] rounded-xl text-white focus:ring-2 focus:ring-[#666] focus:border-[#666] transition-all outline-none"
+                                            >
+                                                <option value="seamless">Seamless</option>
+                                                <option value="lockseam">Lock Seam</option>
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="block text-sm font-semibold text-[#bbb]">Frame Qty</label>
+                                            <input
+                                                type="number"
+                                                value={frameQty}
+                                                onChange={(e) => setFrameQty(e.target.value)}
+                                                className="w-full px-4 py-3 bg-[#2a2a2a] border border-[#444] rounded-xl text-white focus:ring-2 focus:ring-[#666] focus:border-[#666] transition-all outline-none placeholder-[#666]"
+                                                placeholder="0"
+                                                min="0"
+                                            />
                                         </div>
                                     </div>
                                 )}
@@ -418,15 +547,17 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                             />
                                             <span className="text-sm font-medium text-[#bbb] group-hover:text-white transition-colors">Contains Big Rocks</span>
                                         </label>
-                                        <label className="flex items-center gap-2 cursor-pointer group">
-                                            <input
-                                                type="checkbox"
-                                                checked={isREF}
-                                                onChange={(e) => setIsREF(e.target.checked)}
-                                                className="w-5 h-5 border-[#555] rounded bg-[#333] text-[#bbb] focus:ring-[#666] transition-all"
-                                            />
-                                            <span className="text-sm font-medium text-[#bbb] group-hover:text-white transition-colors">REF Speciality</span>
-                                        </label>
+                                        {productType !== 'DOORS' && (
+                                            <label className="flex items-center gap-2 cursor-pointer group">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isREF}
+                                                    onChange={(e) => setIsREF(e.target.checked)}
+                                                    className="w-5 h-5 border-[#555] rounded bg-[#333] text-[#bbb] focus:ring-[#666] transition-all"
+                                                />
+                                                <span className="text-sm font-medium text-[#bbb] group-hover:text-white transition-colors">REF Speciality</span>
+                                            </label>
+                                        )}
                                     </div>
                                 </div>
 
@@ -900,39 +1031,104 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                                     <span className="text-[#888] text-xs">Due {format(candidate.currentDueDate, 'MMM d')}</span>
                                                                 </div>
                                                                 <div className="grid sm:grid-cols-2 gap-3">
-                                                                    {soScenarios.map((s) => (
-                                                                        <div
-                                                                            key={s.pushWeeks}
-                                                                            className={`rounded-lg p-3 border transition-colors ${s.improvementDays > 0
-                                                                                ? 'bg-[#1a1a2e] border-indigo-500/30 hover:border-indigo-500/50'
-                                                                                : 'bg-[#1a1a1a] border-[#2a2a2a] opacity-60'
-                                                                                }`}
-                                                                        >
-                                                                            <div className="flex items-center justify-between gap-3">
-                                                                                <div>
-                                                                                    <div className="text-[10px] font-black text-[#666] uppercase tracking-widest mb-1">
-                                                                                        Push {s.pushWeeks} week{s.pushWeeks > 1 ? 's' : ''}
+                                                                    {soScenarios.map((s) => {
+                                                                        // Determine risk badge styling
+                                                                        const riskColors = {
+                                                                            safe: { bg: 'bg-green-500/10', text: 'text-green-400', border: 'border-green-500/30' },
+                                                                            moderate: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30' },
+                                                                            risky: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30' },
+                                                                        };
+                                                                        const risk = s.reasoning?.safetyDetail?.riskLevel || (s.safeToMove ? 'safe' : 'risky');
+                                                                        const colors = riskColors[risk];
+
+                                                                        return (
+                                                                            <div
+                                                                                key={s.pushWeeks}
+                                                                                className={`rounded-lg p-3 border transition-colors ${s.improvementDays > 0
+                                                                                    ? 'bg-[#1a1a2e] border-indigo-500/30 hover:border-indigo-500/50'
+                                                                                    : 'bg-[#1a1a1a] border-[#2a2a2a]'
+                                                                                    }`}
+                                                                            >
+                                                                                {/* Header: Push duration + improvement */}
+                                                                                <div className="flex items-center justify-between gap-3">
+                                                                                    <div>
+                                                                                        <div className="text-[10px] font-black text-[#666] uppercase tracking-widest mb-1">
+                                                                                            Push {s.pushWeeks} week{s.pushWeeks > 1 ? 's' : ''}
+                                                                                        </div>
+                                                                                        <p className="text-[#aaa] text-xs">
+                                                                                            <span className="text-[#888] line-through">{format(s.candidate.currentDueDate, 'MMM d')}</span>
+                                                                                            {' → '}
+                                                                                            <span className="text-amber-400 font-bold">{format(s.newDueDate, 'MMM d')}</span>
+                                                                                        </p>
+                                                                                        <p className="text-[#aaa] text-xs mt-0.5">
+                                                                                            Quote finishes <span className="text-white font-bold">{format(s.newCompletion, 'MMM d')}</span>
+                                                                                        </p>
                                                                                     </div>
-                                                                                    <p className="text-[#aaa] text-xs">
-                                                                                        <span className="text-[#888] line-through">{format(s.candidate.currentDueDate, 'MMM d')}</span>
-                                                                                        {' → '}
-                                                                                        <span className="text-amber-400 font-bold">{format(s.newDueDate, 'MMM d')}</span>
-                                                                                    </p>
-                                                                                    <p className="text-[#aaa] text-xs mt-0.5">
-                                                                                        Quote finishes <span className="text-white font-bold">{format(s.newCompletion, 'MMM d')}</span>
-                                                                                    </p>
-                                                                                </div>
-                                                                                <div className="text-right shrink-0">
-                                                                                    <div className={`text-xl font-black ${s.improvementDays > 0 ? 'text-green-400' : 'text-[#555]'}`}>
-                                                                                        {s.improvementDays > 0 ? `-${s.improvementDays}d` : '0d'}
+                                                                                    <div className="text-right shrink-0">
+                                                                                        <div className={`text-xl font-black ${s.improvementDays > 0 ? 'text-green-400' : 'text-[#555]'}`}>
+                                                                                            {s.improvementDays > 0 ? `-${s.improvementDays}d` : '0d'}
+                                                                                        </div>
                                                                                     </div>
                                                                                 </div>
+
+                                                                                {/* Risk Badge — replaces the old binary safe/tight */}
+                                                                                <div className={`mt-2 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5 ${colors.bg} ${colors.text} border ${colors.border}`}>
+                                                                                    {risk === 'safe' && '✅'}
+                                                                                    {risk === 'moderate' && '⚠️'}
+                                                                                    {risk === 'risky' && '🚫'}
+                                                                                    {risk === 'safe' && `Safe — ${s.reasoning?.safetyDetail?.bufferDaysAfterPush ?? '?'}d buffer`}
+                                                                                    {risk === 'moderate' && `Tight — only ${s.reasoning?.safetyDetail?.bufferDaysAfterPush ?? '?'}d buffer`}
+                                                                                    {risk === 'risky' && `Risk — ${Math.abs(s.reasoning?.safetyDetail?.bufferDaysAfterPush ?? 0)}d past due`}
+                                                                                </div>
+
+                                                                                {/* Detailed Reasoning */}
+                                                                                {s.reasoning && (
+                                                                                    <div className="mt-3 pt-3 border-t border-[#333]/50 space-y-2">
+                                                                                        {/* Summary explanation */}
+                                                                                        <p className="text-[#999] text-xs leading-relaxed">
+                                                                                            {s.reasoning.summary}
+                                                                                        </p>
+
+                                                                                        {/* Capacity impact breakdown */}
+                                                                                        {s.reasoning.capacityImpact.length > 0 && (
+                                                                                            <div className="mt-2">
+                                                                                                <div className="text-[9px] font-black text-[#555] uppercase tracking-widest mb-1">Capacity Impact</div>
+                                                                                                <div className="space-y-1">
+                                                                                                    {s.reasoning.capacityImpact
+                                                                                                        .filter(d => d.pointsFreed > 0)
+                                                                                                        .slice(0, 4)
+                                                                                                        .map((d, i) => (
+                                                                                                            <div key={i} className="flex items-center justify-between text-[11px]">
+                                                                                                                <span className="text-[#888]">
+                                                                                                                    {d.department} <span className="text-[#555]">·</span> <span className="font-mono text-[#666]">{d.weekKey}</span>
+                                                                                                                </span>
+                                                                                                                <span className="font-mono">
+                                                                                                                    <span className="text-green-400">-{d.pointsFreed}pts</span>
+                                                                                                                    <span className="text-[#555] ml-1">({d.loadAfter}/{d.capacityCeiling})</span>
+                                                                                                                    {d.wasBottleneck && !d.isBottleneckAfter && (
+                                                                                                                        <span className="text-green-500 ml-1">✓ cleared</span>
+                                                                                                                    )}
+                                                                                                                </span>
+                                                                                                            </div>
+                                                                                                        ))}
+                                                                                                    {s.reasoning.capacityImpact.filter(d => d.pointsFreed > 0).length > 4 && (
+                                                                                                        <p className="text-[10px] text-[#555]">
+                                                                                                            +{s.reasoning.capacityImpact.filter(d => d.pointsFreed > 0).length - 4} more dept/weeks affected
+                                                                                                        </p>
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        )}
+
+                                                                                        {/* Safety detail */}
+                                                                                        <p className="text-[10px] text-[#777] leading-relaxed">
+                                                                                            {s.reasoning.safetyDetail.riskExplanation}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                )}
                                                                             </div>
-                                                                            <div className={`mt-2 text-[10px] font-bold uppercase tracking-wider ${s.safeToMove ? 'text-green-500' : 'text-amber-500'}`}>
-                                                                                {s.safeToMove ? '✅ Safe — finishes before new due date' : '⚠️ Tight — may miss new due date'}
-                                                                            </div>
-                                                                        </div>
-                                                                    ))}
+                                                                        );
+                                                                    })}
                                                                 </div>
                                                             </div>
                                                         );
@@ -952,26 +1148,52 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                     🚀 Best Case — Push All {repTradeResult.candidates.length} SOs
                                                 </h4>
                                                 <div className="grid sm:grid-cols-2 gap-3">
-                                                    {repTradeResult.pushAllScenarios.map((pa) => (
-                                                        <div key={pa.pushWeeks} className="bg-[#111]/50 rounded-lg p-3">
-                                                            <div className="flex items-center justify-between gap-3">
-                                                                <div>
-                                                                    <div className="text-[10px] font-black text-[#666] uppercase tracking-widest mb-1">
-                                                                        Push all {pa.pushWeeks}w
+                                                    {repTradeResult.pushAllScenarios.map((pa) => {
+                                                        const risk = pa.reasoning?.safetyDetail?.riskLevel || (pa.allSafe ? 'safe' : 'risky');
+                                                        const riskColors = {
+                                                            safe: { bg: 'bg-green-500/10', text: 'text-green-400', border: 'border-green-500/30' },
+                                                            moderate: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30' },
+                                                            risky: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30' },
+                                                        };
+                                                        const colors = riskColors[risk];
+
+                                                        return (
+                                                            <div key={pa.pushWeeks} className="bg-[#111]/50 rounded-lg p-3">
+                                                                <div className="flex items-center justify-between gap-3">
+                                                                    <div>
+                                                                        <div className="text-[10px] font-black text-[#666] uppercase tracking-widest mb-1">
+                                                                            Push all {pa.pushWeeks}w
+                                                                        </div>
+                                                                        <p className="text-[#aaa] text-xs">
+                                                                            Quote finishes <span className="text-white font-bold">{format(pa.newCompletion, 'MMM d')}</span>
+                                                                        </p>
                                                                     </div>
-                                                                    <p className="text-[#aaa] text-xs">
-                                                                        Quote finishes <span className="text-white font-bold">{format(pa.newCompletion, 'MMM d')}</span>
-                                                                    </p>
+                                                                    <div className={`text-2xl font-black ${pa.improvementDays > 0 ? 'text-green-400' : 'text-[#555]'}`}>
+                                                                        {pa.improvementDays > 0 ? `-${pa.improvementDays}d` : '0d'}
+                                                                    </div>
                                                                 </div>
-                                                                <div className={`text-2xl font-black ${pa.improvementDays > 0 ? 'text-green-400' : 'text-[#555]'}`}>
-                                                                    {pa.improvementDays > 0 ? `-${pa.improvementDays}d` : '0d'}
+
+                                                                {/* Risk Badge */}
+                                                                <div className={`mt-2 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5 ${colors.bg} ${colors.text} border ${colors.border}`}>
+                                                                    {risk === 'safe' && `✅ All safe — ${pa.reasoning?.safetyDetail?.bufferDaysAfterPush ?? '?'}d buffer`}
+                                                                    {risk === 'moderate' && `⚠️ Tight — only ${pa.reasoning?.safetyDetail?.bufferDaysAfterPush ?? '?'}d buffer`}
+                                                                    {risk === 'risky' && `🚫 Risk — ${Math.abs(pa.reasoning?.safetyDetail?.bufferDaysAfterPush ?? 0)}d past due`}
                                                                 </div>
+
+                                                                {/* Reasoning */}
+                                                                {pa.reasoning && (
+                                                                    <div className="mt-3 pt-3 border-t border-[#333]/30 space-y-2">
+                                                                        <p className="text-[#999] text-xs leading-relaxed">
+                                                                            {pa.reasoning.summary}
+                                                                        </p>
+                                                                        <p className="text-[10px] text-[#777] leading-relaxed">
+                                                                            {pa.reasoning.safetyDetail.riskExplanation}
+                                                                        </p>
+                                                                    </div>
+                                                                )}
                                                             </div>
-                                                            <div className={`mt-2 text-[10px] font-bold uppercase tracking-wider ${pa.allSafe ? 'text-green-500' : 'text-amber-500'}`}>
-                                                                {pa.allSafe ? '✅ All safe' : '⚠️ Some may be tight'}
-                                                            </div>
-                                                        </div>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
                                         )}
