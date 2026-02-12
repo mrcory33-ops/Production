@@ -289,7 +289,7 @@
     font-weight: 500;
     color: white;
     white-space: nowrap;
-    overflow: hidden;
+    overflow: visible;
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease, width 0.3s ease, opacity 0.2s ease;
     z-index: 20;

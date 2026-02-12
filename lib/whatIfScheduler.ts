@@ -357,13 +357,21 @@ function buildCapacityMap(existingJobs: Job[], productTypeFilter?: ProductType):
         const points = Number(job.weldingPoints) || 0;
         if (points <= 0) continue;
 
-        // Filter by product type if specified
-        if (productTypeFilter && job.productType && job.productType !== productTypeFilter) {
-            continue;
-        }
+        const jobMismatchesFilter = productTypeFilter && job.productType && job.productType !== productTypeFilter;
 
         for (const [deptKey, schedule] of Object.entries(job.departmentSchedule)) {
             const dept = deptKey as Department;
+
+            // Only filter by product type for departments that have
+            // product-type-specific pools (Engineering, Welding).
+            // Shared departments (Laser, Press Brake, Polishing, Assembly)
+            // count ALL jobs toward capacity regardless of product type.
+            if (jobMismatchesFilter) {
+                const config = DEPARTMENT_CONFIG[dept];
+                const hasProductTypePools = config?.pools.some(p => p.productTypes && p.productTypes.length > 0);
+                if (hasProductTypePools) continue;
+            }
+
             const startDate = new Date(schedule.start);
             const endDate = new Date(schedule.end);
 
@@ -895,50 +903,6 @@ export async function checkAdvancedFeasibility(
     };
 }
 
-// ─────────────────────────────────────────────────────────────
-// Simple Feasibility Check (backwards-compatible)
-// ─────────────────────────────────────────────────────────────
-
-export function checkTargetFeasibility(
-    estimate: QuoteEstimate,
-    targetDate: Date
-): { isAchievable: boolean; status: string; gapDays: number; earliestCompletion: Date; bottleneck?: string } {
-    const completionTime = estimate.estimatedCompletion.getTime();
-    const targetTime = targetDate.getTime();
-    const gapMs = targetTime - completionTime;
-    const gapDays = Math.round(gapMs / (1000 * 60 * 60 * 24));
-
-    let status: 'ACHIEVABLE' | 'TIGHT' | 'NOT_POSSIBLE';
-    let isAchievable = false;
-
-    if (gapDays >= 5) {
-        status = 'ACHIEVABLE';
-        isAchievable = true;
-    } else if (gapDays >= 0) {
-        status = 'TIGHT';
-        isAchievable = true;
-    } else {
-        status = 'NOT_POSSIBLE';
-        isAchievable = false;
-    }
-
-    let bottleneck: string | undefined;
-    if (!isAchievable && estimate.timeline.length > 0) {
-        const longestDept = estimate.timeline.reduce(
-            (max, curr) => (curr.duration > max.duration ? curr : max),
-            estimate.timeline[0]
-        );
-        bottleneck = `${longestDept.department} (${longestDept.duration} days needed)`;
-    }
-
-    return {
-        isAchievable,
-        status,
-        gapDays,
-        earliestCompletion: estimate.estimatedCompletion,
-        bottleneck,
-    };
-}
 
 // ─────────────────────────────────────────────────────────────
 // Sales Rep Capacity Trade

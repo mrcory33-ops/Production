@@ -19,7 +19,7 @@ import {
 import { BIG_ROCK_CONFIG } from '@/lib/scoringConfig';
 import type { ParsedSalesAcknowledgment } from '@/lib/parseSalesAcknowledgment';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
-import { format } from 'date-fns';
+import { format, differenceInBusinessDays } from 'date-fns';
 
 interface QuoteEstimatorProps {
     existingJobs: Job[];
@@ -705,6 +705,11 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                             {format(estimate.estimatedCompletion, 'MMM')} <span className="text-4xl">{format(estimate.estimatedCompletion, 'dd')}</span>
                                         </p>
                                         <p className="text-sm font-bold text-[#aaa] mt-1">{format(estimate.estimatedCompletion, 'yyyy')}</p>
+                                        {productType === 'DOORS' && engineeringDate && differenceInBusinessDays(estimate.estimatedCompletion, new Date(engineeringDate)) <= 15 && (
+                                            <p className="mt-3 text-xs font-black uppercase tracking-widest text-amber-400 bg-amber-500/15 border border-amber-500/30 rounded-lg px-3 py-1.5 text-center animate-pulse">
+                                                ⚡ Fast Ship Required
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -986,23 +991,29 @@ export default function WhatIfScheduler({ existingJobs }: QuoteEstimatorProps) {
                                                 <table className="w-full text-sm">
                                                     <thead>
                                                         <tr className="text-[10px] font-black text-[#555] uppercase tracking-widest border-b border-[#333]">
-                                                            <th className="text-left py-2 pr-3">Sales Order</th>
-                                                            <th className="text-left py-2 pr-3">Work Orders</th>
+                                                            <th className="text-left py-2 pr-3">Job</th>
                                                             <th className="text-right py-2 pr-3">Points</th>
                                                             <th className="text-right py-2">Current Due</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {repTradeResult.candidates.map((c) => (
-                                                            <tr key={c.salesOrder} className="border-b border-[#2a2a2a] hover:bg-[#222] transition-colors">
-                                                                <td className="py-2.5 pr-3 font-mono text-indigo-400 font-bold">{c.salesOrder}</td>
-                                                                <td className="py-2.5 pr-3 text-[#aaa]">
-                                                                    {c.jobs.map((j) => j.id).join(', ')}
-                                                                </td>
-                                                                <td className="py-2.5 pr-3 text-right font-mono text-white">{c.totalPoints}</td>
-                                                                <td className="py-2.5 text-right text-[#aaa]">{format(c.currentDueDate, 'MMM d')}</td>
-                                                            </tr>
-                                                        ))}
+                                                        {repTradeResult.candidates.map((c) => {
+                                                            const jobName = c.jobs[0]?.name || '';
+                                                            const workOrders = c.jobs.map((j) => j.id).join(', ');
+                                                            return (
+                                                                <tr key={c.salesOrder} className="border-b border-[#2a2a2a] hover:bg-[#222] transition-colors">
+                                                                    <td className="py-2.5 pr-3">
+                                                                        <span className="font-mono text-indigo-400 font-bold">{c.salesOrder}</span>
+                                                                        {jobName && <span className="text-[#888] mx-1.5">–</span>}
+                                                                        {jobName && <span className="text-[#ccc] font-semibold">{jobName}</span>}
+                                                                        <span className="text-[#888] mx-1.5">–</span>
+                                                                        <span className="font-mono text-[#aaa]">{workOrders}</span>
+                                                                    </td>
+                                                                    <td className="py-2.5 pr-3 text-right font-mono text-white">{c.totalPoints}</td>
+                                                                    <td className="py-2.5 text-right text-[#aaa]">{format(c.currentDueDate, 'MMM d')}</td>
+                                                                </tr>
+                                                            );
+                                                        })}
                                                     </tbody>
                                                 </table>
                                             </div>

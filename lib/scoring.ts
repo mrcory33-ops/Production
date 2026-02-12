@@ -53,7 +53,7 @@ export const calculateUrgencyScore = (job: Job): UrgencyResult => {
     }
 
     // 2. Fast Ship Bonus
-    if (weights.fastShip.enabled && (job as any).fastShip === true) {
+    if (weights.fastShip.enabled && job.fastShip === true) {
         factors.fastShipBonus = weights.fastShip.bonusPoints || 25;
     }
 

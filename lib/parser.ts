@@ -172,6 +172,7 @@ export const parseGlobalShopExport = async (fileBuffer: ArrayBuffer): Promise<Jo
             salesOrder: resolvedSalesOrder,
 
             isPriority: false, // Default, user must flag manually? Or look for specific notes?
+            fastShip: masterRow['FAST_SHIP'] === 'TRUE' || masterRow['FAST_SHIP'] === true,
             sizeClass: totalWeldingPoints >= 70 ? 'LARGE' : 'SMALL',
 
             status: 'PENDING', // Logic to check if started?

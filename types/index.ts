@@ -150,6 +150,7 @@ export interface Job {
     weldingSubStages?: WeldingSubStageInfo[]; // Door welding sub-pipeline breakdown (press/robot/tubeFrame/fullWeld)
     doorSubType?: DoorSubType; // Door classification for sub-pipeline routing
     departmentProgress?: Partial<Record<Department, number>>; // Supervisor-reported % complete per department (0-100)
+    weldingStationProgress?: Partial<Record<WeldingSubStage, number>>; // Per welding sub-stage progress (0-100) — press/robot tracked independently
     assignedWorkers?: Partial<Record<Department, string[]>>; // Workers assigned to this job per department
 
     // Supervisor Pull Tracking

@@ -8,10 +8,10 @@ import {
     Timestamp, setDoc, getDoc, arrayUnion, arrayRemove
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Department, Job, SupervisorAlert } from '@/types';
+import { Department, Job, SupervisorAlert, WeldingSubStage } from '@/types';
 import { format, startOfDay } from 'date-fns';
 import { getBatchKeyForJob, BATCH_COHORT_WINDOW_BUSINESS_DAYS } from '@/lib/scheduler';
-import { getDepartmentStatus, subscribeToAlerts } from '@/lib/supervisorAlerts';
+import { getDepartmentStatus, subscribeToAlerts, createPullNotice } from '@/lib/supervisorAlerts';
 import { DEPT_ORDER, DEPARTMENT_CONFIG } from '@/lib/departmentConfig';
 import AlertCreateModal from './AlertCreateModal';
 import {
@@ -19,7 +19,7 @@ import {
     Eye, Power, Calendar, ChevronRight, Plus, X, UserPlus,
     ClipboardPlus, BellRing, ShieldAlert, Package, PackageX,
     FileX2, Clock3, ArrowLeft, Loader2, GripVertical, Check,
-    Pencil, MessageSquare
+    Pencil, MessageSquare, Search, ArrowDownToLine
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────
@@ -37,6 +37,32 @@ const toDate = (value: unknown): Date | null => {
     }
     const parsed = new Date(String(value));
     return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+// Normalize Firestore Timestamps → ISO strings for departmentSchedule
+const normalizeScheduleDates = (
+    schedule?: Record<string, { start: any; end: any }>
+): Record<string, { start: string; end: string }> | undefined => {
+    if (!schedule) return undefined;
+    const result: Record<string, { start: string; end: string }> = {};
+    for (const [dept, dates] of Object.entries(schedule)) {
+        const s = toDate(dates?.start);
+        const e = toDate(dates?.end);
+        if (s && e) result[dept] = { start: s.toISOString(), end: e.toISOString() };
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+};
+
+// Get Monday–Friday window for the current work week
+const getCurrentWorkWeek = (): { weekStart: Date; weekEnd: Date } => {
+    const today = startOfDay(new Date());
+    const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon … 6=Sat
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() + mondayOffset);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 4); // Friday
+    return { weekStart: startOfDay(weekStart), weekEnd: startOfDay(weekEnd) };
 };
 
 // Product type color mapping
@@ -113,6 +139,8 @@ export default function SupervisorSchedule() {
                     id: data.id || docSnap.id,
                     dueDate: toDate(data.dueDate) || new Date(),
                     updatedAt: toDate(data.updatedAt) || new Date(),
+                    departmentSchedule: normalizeScheduleDates((data as any).departmentSchedule),
+                    remainingDepartmentSchedule: normalizeScheduleDates((data as any).remainingDepartmentSchedule),
                 });
             });
             setJobs(fetched);
@@ -152,7 +180,16 @@ export default function SupervisorSchedule() {
     const activeAlerts = useMemo(() => alerts.filter(a => a.status === 'active'), [alerts]);
     const deptAlerts = useMemo(() => activeAlerts.filter(a => a.department === selectedDept), [activeAlerts, selectedDept]);
     const deptJobs = useMemo(() => {
-        const filtered = jobs.filter(j => j.currentDepartment === selectedDept);
+        const { weekStart, weekEnd } = getCurrentWorkWeek();
+        const filtered = jobs.filter(j => {
+            const schedule = j.remainingDepartmentSchedule || j.departmentSchedule;
+            const window = schedule?.[selectedDept];
+            if (!window) return false;
+            const start = startOfDay(new Date(window.start));
+            const end = startOfDay(new Date(window.end));
+            // Job overlaps this work week if: start <= weekEnd AND end >= weekStart
+            return start <= weekEnd && end >= weekStart;
+        });
         // For Engineering sub-slots, further filter by product type
         if (selectedSlot === 'Engineering F/H') return filtered.filter(j => j.productType === 'FAB' || j.productType === 'HARMONIC');
         if (selectedSlot === 'Engineering D') return filtered.filter(j => j.productType === 'DOORS');
@@ -161,15 +198,22 @@ export default function SupervisorSchedule() {
 
     // ── Future work ──
     const futureJobs = useMemo(() => {
-        const now = new Date();
+        const { weekEnd } = getCurrentWorkWeek();
         return jobs.filter(j => {
-            if (j.currentDepartment === selectedDept) return false;
-            const schedule = j.departmentSchedule || j.remainingDepartmentSchedule;
-            if (!schedule?.[selectedDept]) return false;
-            return new Date(schedule[selectedDept].start) > now;
+            const schedule = j.remainingDepartmentSchedule || j.departmentSchedule;
+            const window = schedule?.[selectedDept];
+            if (!window) return false;
+            const start = startOfDay(new Date(window.start));
+            // Future = starts after this work week
+            return start > weekEnd;
         }).sort((a, b) => {
-            const sA = (a.departmentSchedule || a.remainingDepartmentSchedule)?.[selectedDept]?.start;
-            const sB = (b.departmentSchedule || b.remainingDepartmentSchedule)?.[selectedDept]?.start;
+            // Sort swap candidates (in-dept) first, then by scheduled start
+            const aInDept = a.currentDepartment === selectedDept;
+            const bInDept = b.currentDepartment === selectedDept;
+            if (aInDept && !bInDept) return -1;
+            if (!aInDept && bInDept) return 1;
+            const sA = (a.remainingDepartmentSchedule || a.departmentSchedule)?.[selectedDept]?.start;
+            const sB = (b.remainingDepartmentSchedule || b.departmentSchedule)?.[selectedDept]?.start;
             return (sA ? new Date(sA).getTime() : Infinity) - (sB ? new Date(sB).getTime() : Infinity);
         });
     }, [jobs, selectedDept]);
@@ -246,6 +290,68 @@ export default function SupervisorSchedule() {
             setSavingProgress(null);
         }
     }, [selectedDept]);
+
+    // ── Save Welding Station Progress (Press/Robot) ──
+    const handleStationProgressUpdate = useCallback(async (jobId: string, stage: WeldingSubStage, pct: number) => {
+        setSavingProgress(jobId);
+        try {
+            const updates: Record<string, any> = {
+                [`weldingStationProgress.${stage}`]: pct,
+                updatedAt: Timestamp.now(),
+            };
+            // When press > 0 and robot doesn't exist yet, initialize robot at 0
+            if (stage === 'press' && pct > 0) {
+                const job = jobs.find(j => j.id === jobId);
+                if (job && (job.weldingStationProgress?.robot === undefined)) {
+                    updates['weldingStationProgress.robot'] = 0;
+                }
+            }
+            await updateDoc(doc(db, 'jobs', jobId), updates);
+        } catch (err) {
+            console.error('Failed to update station progress', err);
+        } finally {
+            setSavingProgress(null);
+        }
+    }, [jobs]);
+
+    // ── Assign Door Leaf to Press ──
+    const assignToPress = useCallback(async (jobId: string) => {
+        try {
+            await updateDoc(doc(db, 'jobs', jobId), {
+                'weldingStationProgress.press': 0,
+                updatedAt: Timestamp.now(),
+            });
+        } catch (err) {
+            console.error('Failed to assign to press', err);
+        }
+    }, []);
+
+    // Pull job from Future Work into today's queue for this department.
+    const pullJobToQueue = useCallback(async (jobId: string, reason: string) => {
+        const job = jobs.find(j => j.id === jobId);
+        if (!job) return;
+        const fromDept = job.currentDepartment;
+        const toDept = selectedDept;
+        try {
+            await updateDoc(doc(db, 'jobs', jobId), {
+                currentDepartment: toDept,
+                supervisorPulledAt: Timestamp.now(),
+                supervisorPulledFrom: fromDept,
+                supervisorPullReason: reason,
+                updatedAt: Timestamp.now(),
+            });
+
+            await createPullNotice({
+                jobId,
+                jobName: job.name,
+                fromDepartment: fromDept,
+                toDepartment: toDept,
+                pullReason: reason,
+            });
+        } catch (err) {
+            console.error('Failed to pull job to queue', err);
+        }
+    }, [jobs, selectedDept]);
 
     return (
         <div className="flex h-screen bg-[#111] overflow-hidden text-slate-200 font-sans">
@@ -385,6 +491,7 @@ export default function SupervisorSchedule() {
                                 <TodaysPlanView
                                     jobs={deptJobs}
                                     department={selectedDept}
+                                    selectedSlot={selectedSlot}
                                     roster={roster}
                                     rosterLoading={rosterLoading}
                                     showAddWorker={showAddWorker}
@@ -400,6 +507,8 @@ export default function SupervisorSchedule() {
                                     onAssignWorker={assignWorkerToJob}
                                     onUnassignWorker={unassignWorkerFromJob}
                                     onProgressUpdate={handleProgressUpdate}
+                                    onStationProgressUpdate={handleStationProgressUpdate}
+                                    onAssignToPress={assignToPress}
                                     savingProgress={savingProgress}
                                     assigningJob={assigningJob}
                                     onSetAssigningJob={setAssigningJob}
@@ -411,7 +520,7 @@ export default function SupervisorSchedule() {
                                 <AlertsView alerts={deptAlerts} allAlerts={activeAlerts} departmentStatus={departmentStatus} />
                             )}
                             {activeView === 'future' && (
-                                <FutureWorkView jobs={futureJobs} department={selectedDept} />
+                                <FutureWorkView jobs={futureJobs} department={selectedDept} onPullToQueue={pullJobToQueue} />
                             )}
                         </>
                     )}
@@ -445,11 +554,40 @@ function NavSwitch({ icon, label, active, onClick, count, isAlert }: {
 
 
 // ─────────────────────────────────────────────────────────────────
+// PRODUCT FILTER TABS (extracted to avoid TSX type-assertion issue)
+// ─────────────────────────────────────────────────────────────────
+
+function FilterTabs({ isWelding, productFilter, setProductFilter, jobs, fabCount, doorsCount, harmonicCount }: {
+    isWelding: boolean; productFilter: ProductFilter; setProductFilter: (v: ProductFilter) => void;
+    jobs: Job[]; fabCount: number; doorsCount: number; harmonicCount: number;
+}) {
+    const tabs: [ProductFilter, string, number, string][] = isWelding
+        ? [['ALL', 'All', jobs.length, 'bg-[#333] text-slate-300 border-[#555]'], ['FAB', 'FAB', fabCount, 'bg-sky-900/40 text-sky-300 border-sky-700/50'], ['DOORS', 'Doors', doorsCount, 'bg-amber-900/40 text-amber-300 border-amber-700/50']]
+        : [['ALL', 'All', jobs.length, 'bg-[#333] text-slate-300 border-[#555]'], ['FAB', 'FAB', fabCount, 'bg-sky-900/40 text-sky-300 border-sky-700/50'], ['DOORS', 'Doors', doorsCount, 'bg-amber-900/40 text-amber-300 border-amber-700/50'], ['HARMONIC', 'Harmonic', harmonicCount, 'bg-violet-900/40 text-violet-300 border-violet-700/50']];
+    return (
+        <div className="px-4 pb-3 flex gap-1">
+            {tabs.map(([key, label, count, activeStyle]) => (
+                <button key={key}
+                    onClick={() => setProductFilter(key)}
+                    className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all border flex items-center gap-1.5
+                        ${productFilter === key ? activeStyle : 'bg-transparent text-[#666] border-transparent hover:text-[#999]'}`}
+                >
+                    {label}
+                    <span className={`text-[9px] ${productFilter === key ? 'opacity-80' : 'opacity-50'}`}>{count}</span>
+                </button>
+            ))}
+        </div>
+    );
+}
+
+
+// ─────────────────────────────────────────────────────────────────
 // TODAY'S PLAN — Job Queue + Worker Columns
 // ─────────────────────────────────────────────────────────────────
 
-function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker, newWorkerName, onNewWorkerNameChange, onAddWorker, onRemoveWorker, onSetShowAddWorker, onEditWorker, editingWorker, onUpdateWorkerProfile, onCancelEditWorker, onAssignWorker, onUnassignWorker, onProgressUpdate, savingProgress, assigningJob, onSetAssigningJob, alerts, onReportIssue }: {
-    jobs: Job[]; department: Department; roster: WorkerProfile[]; rosterLoading: boolean;
+
+function TodaysPlanView({ jobs, department, selectedSlot, roster, rosterLoading, showAddWorker, newWorkerName, onNewWorkerNameChange, onAddWorker, onRemoveWorker, onSetShowAddWorker, onEditWorker, editingWorker, onUpdateWorkerProfile, onCancelEditWorker, onAssignWorker, onUnassignWorker, onProgressUpdate, onStationProgressUpdate, onAssignToPress, savingProgress, assigningJob, onSetAssigningJob, alerts, onReportIssue }: {
+    jobs: Job[]; department: Department; selectedSlot: SupervisorScheduleSlot; roster: WorkerProfile[]; rosterLoading: boolean;
     showAddWorker: boolean; newWorkerName: string;
     onNewWorkerNameChange: (v: string) => void;
     onAddWorker: () => void; onRemoveWorker: (p: WorkerProfile) => void; onSetShowAddWorker: (v: boolean) => void;
@@ -458,30 +596,50 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
     onUpdateWorkerProfile: (old: WorkerProfile, updated: WorkerProfile) => void;
     onCancelEditWorker: () => void;
     onAssignWorker: (jobId: string, worker: string) => void; onUnassignWorker: (jobId: string, worker: string) => void;
-    onProgressUpdate: (jobId: string, pct: number) => void; savingProgress: string | null;
+    onProgressUpdate: (jobId: string, pct: number) => void;
+    onStationProgressUpdate: (jobId: string, stage: WeldingSubStage, pct: number) => void;
+    onAssignToPress: (jobId: string) => void;
+    savingProgress: string | null;
     assigningJob: string | null; onSetAssigningJob: (v: string | null) => void;
     alerts: SupervisorAlert[];
     onReportIssue: (jobId: string) => void;
 }) {
     const [productFilter, setProductFilter] = useState<ProductFilter>('ALL');
 
+    // ── Frame vs Door Leaf classifiers (Welding Doors workflow) ──
+    const isWelding = department === 'Welding';
+    const isDoorLeaf = (job: Job) => job.productType === 'DOORS' && !/\b(frame|fr)\b/i.test(job.description || '');
+    const isFrame = (job: Job) => job.productType === 'DOORS' && /\b(frame|fr)\b/i.test(job.description || '');
+    const isDoorsView = isWelding && productFilter === 'DOORS';
+
     // Sort jobs: active first, then group by product type, then by description (batching), then by due date
     const PRODUCT_TYPE_SORT: Record<string, number> = { DOORS: 0, FAB: 1, HARMONIC: 2 };
     const sorted = useMemo(() => {
         let filtered = [...jobs];
         if (productFilter !== 'ALL') {
-            filtered = filtered.filter(j => j.productType === productFilter);
+            // In Welding, FAB tab includes both FAB and HARMONIC
+            if (isWelding && productFilter === 'FAB') {
+                filtered = filtered.filter(j => j.productType === 'FAB' || j.productType === 'HARMONIC');
+            } else {
+                filtered = filtered.filter(j => j.productType === productFilter);
+            }
         }
         return filtered.sort((a, b) => {
             const aActive = (a.assignedWorkers?.[department]?.length || 0) > 0;
             const bActive = (b.assignedWorkers?.[department]?.length || 0) > 0;
             if (aActive && !bActive) return -1;
             if (!aActive && bActive) return 1;
-            // Group by product type within active/inactive
+            // Sort by scheduled start date in this department (earliest first)
+            const schedA = (a.remainingDepartmentSchedule || a.departmentSchedule)?.[department];
+            const schedB = (b.remainingDepartmentSchedule || b.departmentSchedule)?.[department];
+            const startA = schedA ? new Date(schedA.start).getTime() : Infinity;
+            const startB = schedB ? new Date(schedB.start).getTime() : Infinity;
+            if (startA !== startB) return startA - startB;
+            // Secondary: group by product type
             const aType = PRODUCT_TYPE_SORT[a.productType || 'FAB'] ?? 1;
             const bType = PRODUCT_TYPE_SORT[b.productType || 'FAB'] ?? 1;
             if (aType !== bType) return aType - bType;
-            // Group by description (batch key) within product type
+            // Tertiary: batch key grouping
             const aDesc = (a.description || '').trim().toLowerCase();
             const bDesc = (b.description || '').trim().toLowerCase();
             if (aDesc !== bDesc) return aDesc.localeCompare(bDesc);
@@ -536,10 +694,26 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
 
     const rosterNames = roster.map(w => w.name);
 
-    // Count by product type
-    const fabCount = jobs.filter(j => j.productType === 'FAB').length;
+    // Count by product type (for Welding, merge FAB+HARMONIC)
+    const fabCount = isWelding
+        ? jobs.filter(j => j.productType === 'FAB' || j.productType === 'HARMONIC').length
+        : jobs.filter(j => j.productType === 'FAB').length;
     const doorsCount = jobs.filter(j => j.productType === 'DOORS').length;
     const harmonicCount = jobs.filter(j => j.productType === 'HARMONIC').length;
+
+    // ── Doors-specific derived data ──
+    const pressJobs = useMemo(() => isDoorsView
+        ? sorted.filter(j => isDoorLeaf(j) && j.weldingStationProgress?.press !== undefined && (j.weldingStationProgress.press ?? 0) < 100)
+        : [], [sorted, isDoorsView]);
+    const robotJobs = useMemo(() => isDoorsView
+        ? sorted.filter(j => isDoorLeaf(j) && (j.weldingStationProgress?.press ?? -1) > 0)
+        : [], [sorted, isDoorsView]);
+    const unassignedDoorLeafs = useMemo(() => isDoorsView
+        ? sorted.filter(j => isDoorLeaf(j) && j.weldingStationProgress?.press === undefined)
+        : [], [sorted, isDoorsView]);
+    const frameWorkerJobs = useMemo(() => isDoorsView
+        ? sorted.filter(j => isFrame(j))
+        : [], [sorted, isDoorsView]);
 
     return (
         <div className="flex h-full overflow-hidden">
@@ -608,19 +782,7 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
                         </div>
                         <span className="bg-[#111] text-sky-400 border border-[#333] px-2 py-0.5 rounded text-xs font-mono font-bold">{sorted.length}</span>
                     </div>
-                    {/* Product Type Filter Tabs */}
-                    <div className="px-4 pb-3 flex gap-1">
-                        {([['ALL', 'All', jobs.length, 'bg-[#333] text-slate-300 border-[#555]'], ['FAB', 'FAB', fabCount, 'bg-sky-900/40 text-sky-300 border-sky-700/50'], ['DOORS', 'Doors', doorsCount, 'bg-amber-900/40 text-amber-300 border-amber-700/50'], ['HARMONIC', 'Harmonic', harmonicCount, 'bg-violet-900/40 text-violet-300 border-violet-700/50']] as [ProductFilter, string, number, string][]).map(([key, label, count, activeStyle]) => (
-                            <button key={key}
-                                onClick={() => setProductFilter(key)}
-                                className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all border flex items-center gap-1.5
-                                    ${productFilter === key ? activeStyle : 'bg-transparent text-[#666] border-transparent hover:text-[#999]'}`}
-                            >
-                                {label}
-                                <span className={`text-[9px] ${productFilter === key ? 'opacity-80' : 'opacity-50'}`}>{count}</span>
-                            </button>
-                        ))}
-                    </div>
+                    <FilterTabs isWelding={isWelding} productFilter={productFilter} setProductFilter={setProductFilter} jobs={jobs} fabCount={fabCount} doorsCount={doorsCount} harmonicCount={harmonicCount} />
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -671,26 +833,183 @@ function TodaysPlanView({ jobs, department, roster, rosterLoading, showAddWorker
                         );
                     })}
                 </div>
-            </div>
+            </div >
 
-            {/* ── WORKER COLUMNS (Right Area) ── */}
-            <div className="flex-1 overflow-y-auto p-3 grid gap-3"
-                style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
-                {rosterLoading ? (
-                    <div className="flex items-center justify-center w-full"><Loader2 className="w-6 h-6 text-[#555] animate-spin" /></div>
-                ) : roster.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center w-full text-[#555]">
-                        <Users className="w-12 h-12 mb-4 opacity-30" />
-                        <p className="text-sm font-mono uppercase tracking-wider">No workers in roster</p>
-                        <p className="text-xs text-[#444] mt-2">Click &quot;Manage Roster&quot; to add workers</p>
+            {/* ── RIGHT AREA: Worker Columns OR Doors Station Layout ── */}
+            {
+                isDoorsView ? (
+                    <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
+                        {/* ── UNASSIGNED DOOR LEAF JOBS ── */}
+                        {unassignedDoorLeafs.length > 0 && (
+                            <div className="bg-[#1a1a1a] border border-amber-700/30 rounded-lg p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">🚪 Unassigned Door Leaf Jobs</span>
+                                    <span className="text-[9px] bg-amber-900/40 text-amber-300 px-1.5 py-0.5 rounded border border-amber-700/40 font-mono">{unassignedDoorLeafs.length}</span>
+                                </div>
+                                <div className="space-y-1.5">
+                                    {unassignedDoorLeafs.map(job => (
+                                        <div key={job.id} className="flex items-center justify-between bg-[#222] rounded border border-[#333] px-3 py-2">
+                                            <div className="min-w-0 flex-1">
+                                                <span className="text-xs font-mono font-bold text-white">{job.id}</span>
+                                                <span className="text-[10px] text-slate-400 ml-2 truncate">{job.name}</span>
+                                                {job.description && <span className="text-[9px] text-[#666] ml-2">· {job.description}</span>}
+                                            </div>
+                                            <button
+                                                onClick={() => onAssignToPress(job.id)}
+                                                className="ml-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-[10px] font-bold text-white uppercase tracking-wider transition-colors flex items-center gap-1.5 shrink-0"
+                                            >
+                                                ⚙️ PRESS
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ── PRESS STATION ── */}
+                        <div className="bg-[#1a1a1a] border border-orange-600/40 rounded-lg overflow-hidden">
+                            <div className="bg-gradient-to-r from-orange-900/40 to-[#1a1a1a] px-4 py-2.5 flex items-center justify-between border-b border-orange-700/30">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg">🔧</span>
+                                    <span className="text-sm font-bold uppercase tracking-wider text-orange-300 font-serif">Press Station</span>
+                                </div>
+                                <span className="bg-orange-900/50 text-orange-300 border border-orange-700/50 px-2 py-0.5 rounded text-xs font-mono font-bold">{pressJobs.length}</span>
+                            </div>
+                            <div className="p-3 space-y-2">
+                                {pressJobs.length === 0 ? (
+                                    <p className="text-xs text-[#555] text-center py-6 font-mono">No jobs in Press</p>
+                                ) : pressJobs.map(job => {
+                                    const pressPct = job.weldingStationProgress?.press ?? 0;
+                                    const saving = savingProgress === job.id;
+                                    return (
+                                        <div key={job.id} className="bg-[#222] rounded border border-[#333] p-3">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-mono font-bold text-white">{job.id}</span>
+                                                    <span className="text-[10px] text-slate-400 truncate">{job.name}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    {saving && <Loader2 className="w-2.5 h-2.5 text-orange-400 animate-spin" />}
+                                                    <span className={`text-xs font-mono font-bold ${pressPct >= 100 ? 'text-emerald-400' : pressPct > 0 ? 'text-orange-400' : 'text-[#555]'}`}>{pressPct}%</span>
+                                                </div>
+                                            </div>
+                                            {job.description && <p className="text-[9px] text-[#666] mb-1.5 truncate">{job.description}</p>}
+                                            <div className="h-2 bg-[#0a0a0a] border border-[#333] rounded-sm overflow-hidden mb-2">
+                                                <div className={`h-full transition-all duration-500 ${pressPct >= 100 ? 'bg-emerald-600' : 'bg-orange-500'}`} style={{ width: `${pressPct}%` }} />
+                                            </div>
+                                            <div className="flex gap-1">
+                                                {[0, 25, 50, 75, 100].map(val => (
+                                                    <button key={val} onClick={() => onStationProgressUpdate(job.id, 'press', val)} disabled={saving}
+                                                        className={`flex-1 py-1 rounded text-[9px] font-bold transition-all border
+                                                        ${pressPct === val ? 'bg-orange-600/30 text-orange-300 border-orange-600/50' : 'bg-[#111] text-[#666] border-[#333] hover:text-white hover:border-[#555]'}
+                                                        ${saving ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                                        {val}%
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* ── ROBOT STATION ── */}
+                        <div className="bg-[#1a1a1a] border border-cyan-600/40 rounded-lg overflow-hidden">
+                            <div className="bg-gradient-to-r from-cyan-900/40 to-[#1a1a1a] px-4 py-2.5 flex items-center justify-between border-b border-cyan-700/30">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg">🤖</span>
+                                    <span className="text-sm font-bold uppercase tracking-wider text-cyan-300 font-serif">Robot Station</span>
+                                </div>
+                                <span className="bg-cyan-900/50 text-cyan-300 border border-cyan-700/50 px-2 py-0.5 rounded text-xs font-mono font-bold">{robotJobs.length}</span>
+                            </div>
+                            <div className="p-3 space-y-2">
+                                {robotJobs.length === 0 ? (
+                                    <p className="text-xs text-[#555] text-center py-6 font-mono">No jobs in Robot</p>
+                                ) : robotJobs.map(job => {
+                                    const robotPct = job.weldingStationProgress?.robot ?? 0;
+                                    const saving = savingProgress === job.id;
+                                    return (
+                                        <div key={job.id} className="bg-[#222] rounded border border-[#333] p-3">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-mono font-bold text-white">{job.id}</span>
+                                                    <span className="text-[10px] text-slate-400 truncate">{job.name}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    {saving && <Loader2 className="w-2.5 h-2.5 text-cyan-400 animate-spin" />}
+                                                    <span className={`text-xs font-mono font-bold ${robotPct >= 100 ? 'text-emerald-400' : robotPct > 0 ? 'text-cyan-400' : 'text-[#555]'}`}>{robotPct}%</span>
+                                                </div>
+                                            </div>
+                                            {job.description && <p className="text-[9px] text-[#666] mb-1.5 truncate">{job.description}</p>}
+                                            {/* Show press progress as reference */}
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <span className="text-[8px] text-orange-400/70 font-bold uppercase">Press</span>
+                                                <div className="flex-1 h-1 bg-[#0a0a0a] rounded-sm overflow-hidden">
+                                                    <div className="h-full bg-orange-500/60" style={{ width: `${job.weldingStationProgress?.press ?? 0}%` }} />
+                                                </div>
+                                                <span className="text-[8px] text-orange-400/60 font-mono">{job.weldingStationProgress?.press ?? 0}%</span>
+                                            </div>
+                                            <div className="h-2 bg-[#0a0a0a] border border-[#333] rounded-sm overflow-hidden mb-2">
+                                                <div className={`h-full transition-all duration-500 ${robotPct >= 100 ? 'bg-emerald-600' : 'bg-cyan-500'}`} style={{ width: `${robotPct}%` }} />
+                                            </div>
+                                            <div className="flex gap-1">
+                                                {[0, 25, 50, 75, 100].map(val => (
+                                                    <button key={val} onClick={() => onStationProgressUpdate(job.id, 'robot', val)} disabled={saving}
+                                                        className={`flex-1 py-1 rounded text-[9px] font-bold transition-all border
+                                                        ${robotPct === val ? 'bg-cyan-600/30 text-cyan-300 border-cyan-600/50' : 'bg-[#111] text-[#666] border-[#333] hover:text-white hover:border-[#555]'}
+                                                        ${saving ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                                        {val}%
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* ── FRAME WORKERS ── */}
+                        {frameWorkerJobs.length > 0 && (
+                            <div className="bg-[#1a1a1a] border border-violet-600/40 rounded-lg overflow-hidden">
+                                <div className="bg-gradient-to-r from-violet-900/40 to-[#1a1a1a] px-4 py-2.5 flex items-center justify-between border-b border-violet-700/30">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🖼️</span>
+                                        <span className="text-sm font-bold uppercase tracking-wider text-violet-300 font-serif">Frame Jobs</span>
+                                    </div>
+                                    <span className="bg-violet-900/50 text-violet-300 border border-violet-700/50 px-2 py-0.5 rounded text-xs font-mono font-bold">{frameWorkerJobs.length}</span>
+                                </div>
+                                <div className="p-3">
+                                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+                                        {roster.map(worker => {
+                                            const workerFrameJobs = frameWorkerJobs.filter(j => j.assignedWorkers?.[department]?.includes(worker.name));
+                                            if (workerFrameJobs.length === 0) return null;
+                                            return <WorkerColumn key={worker.name} worker={worker} jobs={workerFrameJobs} department={department} />;
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 ) : (
-                    roster.map(worker => (
-                        <WorkerColumn key={worker.name} worker={worker} jobs={getWorkerJobs(worker.name)} department={department} />
-                    ))
-                )}
-            </div>
-        </div>
+                    <div className="flex-1 overflow-y-auto p-3 grid gap-3"
+                        style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+                        {rosterLoading ? (
+                            <div className="flex items-center justify-center w-full"><Loader2 className="w-6 h-6 text-[#555] animate-spin" /></div>
+                        ) : roster.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center w-full text-[#555]">
+                                <Users className="w-12 h-12 mb-4 opacity-30" />
+                                <p className="text-sm font-mono uppercase tracking-wider">No workers in roster</p>
+                                <p className="text-xs text-[#444] mt-2">Click &quot;Manage Roster&quot; to add workers</p>
+                            </div>
+                        ) : (
+                            roster.map(worker => (
+                                <WorkerColumn key={worker.name} worker={worker} jobs={getWorkerJobs(worker.name)} department={department} />
+                            ))
+                        )}
+                    </div>
+                )
+            }
+        </div >
     );
 }
 
@@ -1203,27 +1522,98 @@ function AlertsView({ alerts, allAlerts, departmentStatus }: {
 // FUTURE WORK VIEW
 // ─────────────────────────────────────────────────────────────────
 
-function FutureWorkView({ jobs, department }: { jobs: Job[]; department: Department }) {
+const PULL_REASONS = [
+    'Job arrived early',
+    'Customer priority change',
+    'Material available ahead of schedule',
+    'Capacity available now',
+    'Other',
+] as const;
+
+function FutureWorkView({
+    jobs,
+    department,
+    onPullToQueue,
+}: {
+    jobs: Job[];
+    department: Department;
+    onPullToQueue: (jobId: string, reason: string) => Promise<void> | void;
+}) {
     const nowMs = new Date().getTime();
+    const [searchTerm, setSearchTerm] = useState('');
+    const [pullingJobId, setPullingJobId] = useState<string | null>(null);
+    const [selectedReason, setSelectedReason] = useState<string>(PULL_REASONS[0]);
+    const [customReason, setCustomReason] = useState('');
+    const [isPulling, setIsPulling] = useState(false);
+
+    const filtered = useMemo(() => {
+        if (!searchTerm.trim()) return jobs;
+        const q = searchTerm.toLowerCase();
+        return jobs.filter(j =>
+            j.id.toLowerCase().includes(q) ||
+            j.name.toLowerCase().includes(q) ||
+            (j.description || '').toLowerCase().includes(q)
+        );
+    }, [jobs, searchTerm]);
+
+    const handlePull = async () => {
+        if (!pullingJobId) return;
+        const reason = selectedReason === 'Other' ? customReason.trim() || 'Other' : selectedReason;
+        setIsPulling(true);
+        try {
+            await onPullToQueue(pullingJobId, reason);
+            setPullingJobId(null);
+            setSelectedReason(PULL_REASONS[0]);
+            setCustomReason('');
+        } finally {
+            setIsPulling(false);
+        }
+    };
 
     return (
         <div className="p-6 overflow-y-auto h-full space-y-4 max-w-4xl mx-auto">
-            {jobs.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 text-[#555]">
+            <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#555]" />
+                <input
+                    type="text"
+                    placeholder="Search by WO#, job name, or description..."
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 bg-[#1a1a1a] border border-[#333] rounded-lg text-sm text-slate-200 placeholder-[#555] focus:outline-none focus:border-sky-600/50 focus:ring-1 focus:ring-sky-600/20 transition-all font-mono"
+                />
+                {searchTerm && (
+                    <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#555] hover:text-slate-300 transition-colors">
+                        <X className="w-3.5 h-3.5" />
+                    </button>
+                )}
+            </div>
+
+            {filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-48 text-[#555]">
                     <Eye className="w-12 h-12 mb-4 opacity-30" />
-                    <p className="text-sm font-mono uppercase tracking-wider">No upcoming jobs for {department}</p>
-                    <p className="text-xs text-[#444] mt-2">Jobs will appear here once scheduled for this department</p>
+                    {searchTerm ? (
+                        <p className="text-sm font-mono uppercase tracking-wider">No jobs matching &quot;{searchTerm}&quot;</p>
+                    ) : (
+                        <>
+                            <p className="text-sm font-mono uppercase tracking-wider">No upcoming jobs for {department}</p>
+                            <p className="text-xs text-[#444] mt-2">Jobs will appear here once scheduled for this department</p>
+                        </>
+                    )}
                 </div>
             ) : (
                 <>
-                    <p className="text-[11px] text-[#666] font-mono uppercase tracking-wider">{jobs.length} upcoming job{jobs.length !== 1 ? 's' : ''} heading to {department}</p>
-                    {jobs.map(job => {
+                    <p className="text-[11px] text-[#666] font-mono uppercase tracking-wider">
+                        {filtered.length} upcoming job{filtered.length !== 1 ? 's' : ''} heading to {department}
+                        {searchTerm && <span className="text-sky-500"> - filtered</span>}
+                    </p>
+                    {filtered.map(job => {
                         const schedule = job.departmentSchedule || job.remainingDepartmentSchedule;
                         const arrivalDate = schedule?.[department]?.start ? new Date(schedule[department].start) : null;
                         const daysUntil = arrivalDate ? Math.ceil((arrivalDate.getTime() - nowMs) / 86400000) : null;
+                        const showingPull = pullingJobId === job.id;
                         return (
-                            <div key={job.id} className="bg-gradient-to-b from-[#222] to-[#1c1c1c] border border-[#333] rounded-lg overflow-hidden hover:border-[#555] transition-colors">
-                                <div className="h-1 w-full bg-gradient-to-r from-[#333] via-[#444] to-[#333]" />
+                            <div key={job.id} className={`bg-gradient-to-b border rounded-lg overflow-hidden transition-colors ${showingPull ? 'border-amber-600/60 from-[#222] to-[#1c1c1c]' : job.currentDepartment === department ? 'border-emerald-400 ring-2 ring-emerald-400/40 shadow-[0_0_20px_rgba(52,211,153,0.3)] from-emerald-950/30 to-[#1c1c1c]' : 'border-[#333] hover:border-[#555] from-[#222] to-[#1c1c1c]'}`}>
+                                <div className="h-1 w-full" style={{ backgroundColor: job.productType === 'FAB' ? '#0ea5e9' : job.productType === 'DOORS' ? '#f59e0b' : '#8b5cf6' }} />
                                 <div className="p-4 flex items-center gap-4">
                                     <div className="shrink-0 w-14 h-14 rounded bg-[#111] border border-[#333] flex flex-col items-center justify-center shadow-inner">
                                         {daysUntil !== null ? (
@@ -1233,7 +1623,11 @@ function FutureWorkView({ jobs, department }: { jobs: Job[]; department: Departm
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-0.5">
                                             <span className="text-[10px] font-mono font-bold text-[#666]">{job.id}</span>
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#111] border border-[#333] text-[#888]">Now: {job.currentDepartment}</span>
+                                            {job.currentDepartment === department ? (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/60 text-emerald-300 font-bold shadow-[0_0_8px_rgba(52,211,153,0.25)]">🔄 IN DEPT — Swap Available</span>
+                                            ) : (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#111] border border-[#333] text-[#888]">Now: {job.currentDepartment}</span>
+                                            )}
                                         </div>
                                         <h4 className="font-bold text-slate-200 text-sm font-serif truncate">{job.name}</h4>
                                         <div className="flex gap-3 mt-1 text-[10px] text-[#666] font-mono">
@@ -1241,11 +1635,68 @@ function FutureWorkView({ jobs, department }: { jobs: Job[]; department: Departm
                                             <span>Due: {new Date(job.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                                         </div>
                                     </div>
-                                    <div className="shrink-0 px-2 py-1 rounded bg-[#111] border border-[#333] shadow-inner">
-                                        <span className="text-sky-400 text-sm font-mono font-bold">{job.weldingPoints}</span>
-                                        <span className="text-[8px] text-[#666] ml-0.5">pt</span>
+                                    <div className="shrink-0 flex items-center gap-3">
+                                        <div className="px-2 py-1 rounded bg-[#111] border border-[#333] shadow-inner">
+                                            <span className="text-sky-400 text-sm font-mono font-bold">{job.weldingPoints}</span>
+                                            <span className="text-[8px] text-[#666] ml-0.5">pt</span>
+                                        </div>
+                                        <button
+                                            onClick={() => setPullingJobId(showingPull ? null : job.id)}
+                                            title="Pull to today's queue"
+                                            className={`p-2 rounded-lg border transition-all text-xs font-bold ${showingPull ? 'bg-amber-600/20 border-amber-600/50 text-amber-400' : 'border-[#444] text-[#666] hover:text-amber-400 hover:border-amber-600/40 hover:bg-amber-900/20'}`}
+                                        >
+                                            <ArrowDownToLine className="w-4 h-4" />
+                                        </button>
                                     </div>
                                 </div>
+
+                                {showingPull && (
+                                    <div className="px-4 pb-4 pt-1 border-t border-amber-800/30 bg-amber-950/20">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <ArrowDownToLine className="w-3.5 h-3.5 text-amber-400" />
+                                            <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Pull to {department} Queue</span>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {PULL_REASONS.map(reason => (
+                                                    <button
+                                                        key={reason}
+                                                        onClick={() => { setSelectedReason(reason); if (reason !== 'Other') setCustomReason(''); }}
+                                                        className={`px-2.5 py-1 rounded text-[10px] font-bold border transition-all ${selectedReason === reason ? 'bg-amber-600/30 text-amber-300 border-amber-600/50' : 'bg-[#111] text-[#888] border-[#333] hover:border-[#555] hover:text-slate-200'}`}
+                                                    >
+                                                        {reason}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {selectedReason === 'Other' && (
+                                                <input
+                                                    type="text"
+                                                    placeholder="Describe reason..."
+                                                    value={customReason}
+                                                    onChange={e => setCustomReason(e.target.value)}
+                                                    className="w-full px-3 py-1.5 bg-[#111] border border-[#333] rounded text-[11px] text-slate-200 placeholder-[#555] focus:outline-none focus:border-amber-600/50"
+                                                    autoFocus
+                                                />
+                                            )}
+                                            <div className="flex gap-2 pt-1">
+                                                <button
+                                                    onClick={handlePull}
+                                                    disabled={isPulling || (selectedReason === 'Other' && !customReason.trim())}
+                                                    className="flex-1 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                                                >
+                                                    {isPulling ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowDownToLine className="w-3 h-3" />}
+                                                    {isPulling ? 'Pulling...' : 'Confirm Pull'}
+                                                </button>
+                                                <button
+                                                    onClick={() => setPullingJobId(null)}
+                                                    className="px-3 py-1.5 rounded border border-[#444] text-[#888] text-[10px] font-bold uppercase hover:text-slate-200 transition-colors"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         );
                     })}

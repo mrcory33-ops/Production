@@ -26,6 +26,7 @@ import ScheduleInsightsPanel from './ScheduleInsightsPanel';
 import AlertManagementPanel from './AlertManagementPanel';
 import RescheduleSuggestionPopover from './RescheduleSuggestionPopover';
 import CompletedJobsPanel from './CompletedJobsPanel';
+import QueueHealthPanel from './QueueHealthPanel';
 import { calculateUrgencyScore } from '@/lib/scoring';
 import { deleteAlert, extendAlert, recordAlertAdjustment, resolveAlert, subscribeToAlerts, updateAlert } from '@/lib/supervisorAlerts';
 import { formatWeekKeyForDisplay } from '@/lib/weekFormatting';
@@ -285,6 +286,7 @@ export default function MasterSchedule() {
     const [rescheduleSuggestion, setRescheduleSuggestion] = useState<RescheduleSuggestion | null>(null);
     const [completedJobs, setCompletedJobs] = useState<Job[]>([]);
     const [showCompletedPanel, setShowCompletedPanel] = useState(false);
+    const [showQueueHealth, setShowQueueHealth] = useState(false);
 
     const columnWidth = useMemo(() => {
         const t = Math.min(1, Math.max(0, zoomLevel / ZOOM_STEPS));
@@ -1257,6 +1259,17 @@ export default function MasterSchedule() {
                             </button>
 
                             <button
+                                onClick={() => setShowQueueHealth(!showQueueHealth)}
+                                className={`p-1.5 rounded-lg border transition-all ${showQueueHealth
+                                    ? 'text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50 border-cyan-200 bg-cyan-50'
+                                    : 'text-slate-600 hover:text-black hover:bg-slate-50 border-transparent hover:border-slate-200'
+                                    }`}
+                                title="Queue Health"
+                            >
+                                <Activity size={16} />
+                            </button>
+
+                            <button
                                 onClick={() => setShowCompletedPanel(true)}
                                 className={`relative p-1.5 rounded-lg border transition-all ${completedJobs.length > 0
                                     ? 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-200 bg-emerald-50'
@@ -1329,6 +1342,13 @@ export default function MasterSchedule() {
                             </button>
                         </div>
                     ))}
+                </div>
+            )}
+
+            {/* Queue Health Dashboard */}
+            {showQueueHealth && (
+                <div className="px-4 py-2 shrink-0">
+                    <QueueHealthPanel jobs={jobs} />
                 </div>
             )}
 

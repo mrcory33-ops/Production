@@ -116,7 +116,7 @@ export interface CustomerMultiplier {
 }
 
 export const CUSTOMER_MULTIPLIERS: Record<string, CustomerMultiplier> = {
-  'GERMFREE': { outputMultiplier: 0.8, engineeringMaxDays: 1 }
+  'GERMFREE': { outputMultiplier: 0.7, engineeringMaxDays: 1 }
 };
 
 /**

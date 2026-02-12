@@ -1140,8 +1140,25 @@ export default function CustomGanttTable({
 
                                                                 {/* ── Progress Overlay (supervisor-reported) ── */}
                                                                 {(() => {
+                                                                    // For welding sub-stages, read station-specific progress
+                                                                    if (segment.subStageLabel && segment.department === 'Welding') {
+                                                                        const stageKey = segment.subStageLabel === 'P' ? 'press' : segment.subStageLabel === 'R' ? 'robot' : null;
+                                                                        const progress = stageKey ? (job.weldingStationProgress as any)?.[stageKey] : null;
+                                                                        if (progress && progress > 0) {
+                                                                            return (
+                                                                                <div
+                                                                                    className="absolute inset-0 z-[1] pointer-events-none overflow-hidden rounded-[inherit]"
+                                                                                    style={{ width: `${Math.min(progress, 100)}%` }}
+                                                                                >
+                                                                                    <div className="absolute inset-0 bg-white/85" />
+                                                                                </div>
+                                                                            );
+                                                                        }
+                                                                        return null;
+                                                                    }
+                                                                    // Standard department progress
                                                                     const progress = job.departmentProgress?.[segment.department];
-                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department && !segment.subStageLabel) {
+                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
                                                                         return (
                                                                             <div
                                                                                 className="absolute inset-0 z-[1] pointer-events-none overflow-hidden rounded-[inherit]"
@@ -1155,11 +1172,24 @@ export default function CustomGanttTable({
                                                                 })()}
                                                                 {/* ── Progress % label inside bar ── */}
                                                                 {(() => {
+                                                                    // Welding sub-stage: show station-specific progress
+                                                                    if (segment.subStageLabel && segment.department === 'Welding') {
+                                                                        const stageKey = segment.subStageLabel === 'P' ? 'press' : segment.subStageLabel === 'R' ? 'robot' : null;
+                                                                        const progress = stageKey ? (job.weldingStationProgress as any)?.[stageKey] : null;
+                                                                        if (progress && progress > 0) {
+                                                                            return (
+                                                                                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 z-[3] text-[10px] font-black pointer-events-none whitespace-nowrap text-black">
+                                                                                    {progress}%
+                                                                                </span>
+                                                                            );
+                                                                        }
+                                                                        return null;
+                                                                    }
+                                                                    // Standard department progress
                                                                     const progress = job.departmentProgress?.[segment.department];
-                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department && !segment.subStageLabel) {
+                                                                    if (progress && progress > 0 && job.currentDepartment === segment.department) {
                                                                         return (
-                                                                            <span className="absolute inset-0 flex items-center justify-center z-[3] text-[13px] font-black pointer-events-none"
-                                                                                style={{ color: segment.color || '#475569' }}>
+                                                                            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 z-[3] text-[10px] font-black pointer-events-none whitespace-nowrap text-black">
                                                                                 {progress}%
                                                                             </span>
                                                                         );
@@ -1175,7 +1205,14 @@ export default function CustomGanttTable({
                                                                         {segment.subStageLabel && job.quantity && (
                                                                             <span className="text-amber-300 ml-2 font-semibold">{job.quantity} doors</span>
                                                                         )}
-                                                                        {job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && !segment.subStageLabel && (
+                                                                        {/* Sub-stage station progress in tooltip */}
+                                                                        {segment.subStageLabel && segment.department === 'Welding' && (() => {
+                                                                            const stageKey = segment.subStageLabel === 'P' ? 'press' : segment.subStageLabel === 'R' ? 'robot' : null;
+                                                                            const pct = stageKey ? (job.weldingStationProgress as any)?.[stageKey] : null;
+                                                                            return pct != null ? <span className="text-emerald-300 ml-2 font-bold">{pct}% done</span> : null;
+                                                                        })()}
+                                                                        {/* Standard dept progress in tooltip */}
+                                                                        {!segment.subStageLabel && job.departmentProgress?.[segment.department] != null && job.currentDepartment === segment.department && (
                                                                             <span className="text-emerald-300 ml-2 font-bold">{job.departmentProgress[segment.department]}% done</span>
                                                                         )}
                                                                         {job.readyToNest && segment.department === 'Engineering' && (
