@@ -3,10 +3,10 @@ import { Department, Job } from '@/types';
 import { PRODUCT_TYPE_COLORS } from '../types';
 import AssignWorkerDropdown from './AssignWorkerDropdown';
 import {
-    AlertTriangle, Loader2, Package, Check, X, PackageX,
+    AlertTriangle, Loader2, Package, Check, X, PackageX, Undo2,
 } from 'lucide-react';
 
-export default function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onProgressUpdate, isSaving, isAssigning, onSetAssigning, hasAlert, onReportIssue, inBatchGroup, batchAccentColor, isDoorLeaf, isFrame, onAssignToPress }: {
+export default function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onProgressUpdate, isSaving, isAssigning, onSetAssigning, hasAlert, onReportIssue, inBatchGroup, batchAccentColor, isDoorLeaf, isFrame, onAssignToPress, onRemoveFromPress }: {
     job: Job; department: Department; rosterNames: string[];
     onAssign: (jobId: string, worker: string) => void;
     onUnassign: (jobId: string, worker: string) => void;
@@ -23,9 +23,10 @@ export default function JobQueueCard({ job, department, rosterNames, onAssign, o
     isFrame?: boolean;
     /** Callback to send door-leaf job to Press station */
     onAssignToPress?: (jobId: string) => void;
+    /** Callback to remove door-leaf job from Press station back to queue */
+    onRemoveFromPress?: (jobId: string) => void;
 }) {
     const assignedWorkers = job.assignedWorkers?.[department] || [];
-    const isActive = assignedWorkers.length > 0;
     const progress = job.departmentProgress?.[department] ?? 0;
     const dueDate = new Date(job.dueDate);
     const isOverdue = dueDate < new Date();
@@ -33,6 +34,8 @@ export default function JobQueueCard({ job, department, rosterNames, onAssign, o
 
     // Already sent to press station?
     const inPress = job.weldingStationProgress?.press !== undefined;
+
+    const isActive = assignedWorkers.length > 0 || inPress;
 
     // Door-leaf vs frame accent colors
     const topBarColor = isDoorLeaf
@@ -170,9 +173,21 @@ export default function JobQueueCard({ job, department, rosterNames, onAssign, o
                 {isDoorLeaf && onAssignToPress && (
                     <div className="mb-2">
                         {inPress ? (
-                            <div className={`flex items-center gap-2 px-3 py-2 rounded ${isActive ? 'bg-orange-50 border border-orange-200' : 'bg-orange-900/20 border border-orange-700/40'}`}>
-                                <span className={`text-[10px] font-bold uppercase tracking-wider ${isActive ? 'text-orange-600' : 'text-orange-300'}`}>⚙️ In Press Station</span>
-                                <span className={`text-[9px] font-mono ${isActive ? 'text-orange-500' : 'text-orange-400/70'}`}>{job.weldingStationProgress?.press ?? 0}%</span>
+                            <div className={`flex items-center justify-between gap-2 px-3 py-2 rounded ${isActive ? 'bg-orange-50 border border-orange-200' : 'bg-orange-900/20 border border-orange-700/40'}`}>
+                                <div className="flex items-center gap-2">
+                                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isActive ? 'text-orange-600' : 'text-orange-300'}`}>⚙️ In Press Station</span>
+                                    <span className={`text-[9px] font-mono ${isActive ? 'text-orange-500' : 'text-orange-400/70'}`}>{job.weldingStationProgress?.press ?? 0}%</span>
+                                </div>
+                                {onRemoveFromPress && (
+                                    <button
+                                        onClick={() => onRemoveFromPress(job.id)}
+                                        title="Back to Queue"
+                                        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all
+                                            ${isActive ? 'border border-orange-300 text-orange-600 hover:bg-orange-100 hover:border-orange-400' : 'border border-orange-700/40 text-orange-300 hover:bg-orange-900/40 hover:border-orange-500'}`}
+                                    >
+                                        <Undo2 className="w-3 h-3" /> Back to Queue
+                                    </button>
+                                )}
                             </div>
                         ) : (
                             <button

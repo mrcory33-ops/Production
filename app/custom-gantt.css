@@ -207,7 +207,8 @@
 }
 
 .gantt-table .date-cell.has-segment {
-    z-index: 5;
+    /* Keep tooltip/popups above sticky date headers (z-index 210) */
+    z-index: 220;
 }
 
 .day-split-overlay {
@@ -401,7 +402,7 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     filter: brightness(1.15);
-    z-index: 50 !important;
+    z-index: 260 !important;
 }
 
 /* Segment resize handles */

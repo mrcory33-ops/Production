@@ -331,7 +331,8 @@ export default function CustomGanttTable({
         // =====================================================================
         // Compute sub-stages at render time from job data (not stored on job)
         let subStages = job.weldingSubStages;
-        if (!subStages && job.productType === 'DOORS' && job.quantity && job.quantity > 0 && job.weldingPoints) {
+        const isFrame = job.productType === 'DOORS' && /\b(frame|fr|borrowed\s*light)/i.test(job.description || '');
+        if (!subStages && job.productType === 'DOORS' && !isFrame && job.quantity && job.quantity > 0 && job.weldingPoints) {
             const pointsPerDoor = job.weldingPoints / job.quantity;
             const result = calculateDoorWeldingSubStages(job.quantity, pointsPerDoor, job.description || '', job.name || '');
             if (result) {

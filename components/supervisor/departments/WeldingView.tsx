@@ -1,20 +1,22 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Job, WeldingSubStage } from '@/types';
 import { startOfDay } from 'date-fns';
 import { getBatchKeyForJob, BATCH_COHORT_WINDOW_BUSINESS_DAYS } from '@/lib/scheduler';
 import { DEPT_ORDER } from '@/lib/departmentConfig';
-import { DeptViewProps, ProductFilter, PRODUCT_TYPE_COLORS } from '../types';
+import { DeptViewProps, WorkerProfile, ProductFilter, PRODUCT_TYPE_COLORS } from '../types';
 import FilterTabs from '../shared/FilterTabs';
 import JobQueueCard from '../shared/JobQueueCard';
 import WorkerColumn from '../shared/WorkerColumn';
 import WorkerEditPopup from '../shared/WorkerEditPopup';
 import {
     ClipboardList, Users, Loader2, GripVertical,
-    X, Plus, Pencil,
+    X, Plus, Pencil, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+
+const WORKERS_PER_PAGE = 8;
 
 /**
  * WeldingView — Custom Today's Plan for the Welding department.
@@ -27,11 +29,13 @@ export default function WeldingView({
     onAddWorker, onRemoveWorker, onSetShowAddWorker,
     onEditWorker, editingWorker, onUpdateWorkerProfile, onCancelEditWorker,
     onAssignWorker, onUnassignWorker, onProgressUpdate,
-    onStationProgressUpdate, onAssignToPress,
+    onStationProgressUpdate, onAssignToPress, onRemoveFromPress,
     savingProgress, assigningJob, onSetAssigningJob,
-    alerts, onReportIssue,
+    alerts, onReportIssue, onWorkerPositionChange,
 }: DeptViewProps) {
     const [productFilter, setProductFilter] = useState<ProductFilter>('ALL');
+    const [workerPage, setWorkerPage] = useState(1);
+    const [frameWorkerPage, setFrameWorkerPage] = useState(1);
 
     // ── Frame vs Door Leaf classifiers ──
     const isWelding = true;
@@ -108,8 +112,53 @@ export default function WeldingView({
         return { counts, labels };
     }, [sorted]);
 
+    const sortedRoster = useMemo(() => [...roster].sort((a, b) => (a.position ?? 999) - (b.position ?? 999)), [roster]);
     const getWorkerJobs = (workerName: string) => jobs.filter(j => j.assignedWorkers?.[department]?.includes(workerName));
-    const rosterNames = roster.map(w => w.name);
+    const rosterNames = sortedRoster.map(w => w.name);
+
+    // Build a position→worker map; workers without position get assigned after the last positioned one
+    const slotMap = useMemo(() => {
+        const map: Record<number, WorkerProfile> = {};
+        const unpositioned: WorkerProfile[] = [];
+        for (const w of sortedRoster) {
+            if (w.position != null && w.position > 0) {
+                map[w.position] = w;
+            } else {
+                unpositioned.push(w);
+            }
+        }
+        const maxPos = Object.keys(map).length > 0 ? Math.max(...Object.keys(map).map(Number)) : 0;
+        let nextSlot = maxPos + 1;
+        for (const w of unpositioned) {
+            while (map[nextSlot]) nextSlot++;
+            map[nextSlot] = w;
+            nextSlot++;
+        }
+        return map;
+    }, [sortedRoster]);
+
+    const highestSlot = useMemo(() => {
+        const positions = Object.keys(slotMap).map(Number);
+        return positions.length > 0 ? Math.max(...positions) : 0;
+    }, [slotMap]);
+
+    const workerPageCount = Math.max(1, Math.ceil(highestSlot / WORKERS_PER_PAGE));
+
+    useEffect(() => {
+        setWorkerPage(prev => Math.min(prev, workerPageCount));
+    }, [workerPageCount]);
+
+    const pageSlots = useMemo(() => {
+        const startPos = (workerPage - 1) * WORKERS_PER_PAGE + 1;
+        const slots: (WorkerProfile | null)[] = [];
+        for (let i = 0; i < WORKERS_PER_PAGE; i++) {
+            slots.push(slotMap[startPos + i] || null);
+        }
+        return slots;
+    }, [slotMap, workerPage]);
+
+    const pageStartPos = (workerPage - 1) * WORKERS_PER_PAGE + 1;
+    const pageEndPos = workerPage * WORKERS_PER_PAGE;
 
     // Count by product type (merge FAB+HARMONIC for Welding)
     const fabCount = jobs.filter(j => j.productType === 'FAB' || j.productType === 'HARMONIC').length;
@@ -126,6 +175,27 @@ export default function WeldingView({
     const frameWorkerJobs = useMemo(() => isDoorsView
         ? sorted.filter(j => isFrame(j))
         : [], [sorted, isDoorsView]);
+
+    const frameWorkers = useMemo(() => {
+        if (!isDoorsView) return [];
+        return sortedRoster.filter(worker =>
+            frameWorkerJobs.some(j => j.assignedWorkers?.[department]?.includes(worker.name))
+        );
+    }, [department, frameWorkerJobs, isDoorsView, sortedRoster]);
+
+    const frameWorkerPageCount = Math.max(1, Math.ceil(frameWorkers.length / WORKERS_PER_PAGE));
+    useEffect(() => {
+        setFrameWorkerPage(prev => Math.min(prev, frameWorkerPageCount));
+    }, [frameWorkerPageCount]);
+
+    const pagedFrameWorkers = useMemo(() => {
+        const start = (frameWorkerPage - 1) * WORKERS_PER_PAGE;
+        return frameWorkers.slice(start, start + WORKERS_PER_PAGE);
+    }, [frameWorkerPage, frameWorkers]);
+    const frameGridRows = pagedFrameWorkers.length > 4 ? 2 : 1;
+
+    const framePageStart = frameWorkers.length === 0 ? 0 : (frameWorkerPage - 1) * WORKERS_PER_PAGE + 1;
+    const framePageEnd = Math.min(frameWorkerPage * WORKERS_PER_PAGE, frameWorkers.length);
 
     return (
         <div className="flex h-full overflow-hidden">
@@ -246,6 +316,7 @@ export default function WeldingView({
                                     isDoorLeaf={doorLeaf}
                                     isFrame={frame}
                                     onAssignToPress={doorLeaf ? onAssignToPress : undefined}
+                                    onRemoveFromPress={doorLeaf ? onRemoveFromPress : undefined}
                                 />
                             </React.Fragment>
                         );
@@ -255,7 +326,7 @@ export default function WeldingView({
 
             {/* ── RIGHT AREA: Worker Columns OR Doors Station Layout ── */}
             {isDoorsView ? (
-                <div className="flex-1 overflow-y-auto p-3 flex gap-3">
+                <div className="flex-1 overflow-auto p-3 flex gap-3">
                     {/* ── PRESS STATION (badge column) ── */}
                     <div className="flex flex-col border border-orange-700/40 rounded-lg bg-[#181818] min-w-[260px] w-[280px] flex-shrink-0">
                         {/* Station Header — badge style */}
@@ -384,19 +455,62 @@ export default function WeldingView({
                     </div>
 
                     {/* ── FRAME WORKERS (badge columns) ── */}
-                    {frameWorkerJobs.length > 0 && (
-                        <div className="flex gap-3 flex-shrink-0">
-                            {roster.map(worker => {
-                                const workerFrameJobs = frameWorkerJobs.filter(j => j.assignedWorkers?.[department]?.includes(worker.name));
-                                if (workerFrameJobs.length === 0) return null;
-                                return <WorkerColumn key={worker.name} worker={worker} jobs={workerFrameJobs} department={department} onProgressUpdate={onProgressUpdate} savingProgress={savingProgress} />;
-                            })}
+                    {frameWorkers.length > 0 && (
+                        <div className="flex flex-col gap-2 min-w-0 flex-1">
+                            {frameWorkers.length > WORKERS_PER_PAGE && (
+                                <div className="flex items-center justify-between rounded-md border border-[#333] bg-[#1a1a1a] px-2 h-6 leading-none">
+                                    <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider leading-none">
+                                        Frame Workers {framePageStart}-{framePageEnd} of {frameWorkers.length}
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={() => setFrameWorkerPage(p => Math.max(1, p - 1))}
+                                            disabled={frameWorkerPage === 1}
+                                            className="inline-flex h-4 items-center gap-0.5 rounded border border-[#444] px-1.5 text-[10px] font-bold leading-none text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#222]"
+                                        >
+                                            <ChevronLeft className="w-2.5 h-2.5" /> Prev
+                                        </button>
+                                        <span className="text-[10px] text-slate-300 font-mono leading-none">
+                                            Page {frameWorkerPage} / {frameWorkerPageCount}
+                                        </span>
+                                        <button
+                                            onClick={() => setFrameWorkerPage(p => Math.min(frameWorkerPageCount, p + 1))}
+                                            disabled={frameWorkerPage === frameWorkerPageCount}
+                                            className="inline-flex h-4 items-center gap-0.5 rounded border border-[#444] px-1.5 text-[10px] font-bold leading-none text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#222]"
+                                        >
+                                            Next <ChevronRight className="w-2.5 h-2.5" />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            <div
+                                className="grid gap-3 flex-1 min-h-0 overflow-auto"
+                                style={{
+                                    gridTemplateColumns: 'repeat(4, minmax(230px, 1fr))',
+                                    gridTemplateRows: `repeat(${frameGridRows}, minmax(0, 1fr))`
+                                }}
+                            >
+                                {pagedFrameWorkers.map(worker => {
+                                    const workerFrameJobs = frameWorkerJobs.filter(j => j.assignedWorkers?.[department]?.includes(worker.name));
+                                    return (
+                                        <div key={worker.name} className="min-h-0">
+                                            <WorkerColumn
+                                                worker={worker}
+                                                jobs={workerFrameJobs}
+                                                department={department}
+                                                onProgressUpdate={onProgressUpdate}
+                                                savingProgress={savingProgress}
+                                                onPositionChange={onWorkerPositionChange}
+                                            />
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
                     )}
                 </div>
             ) : (
-                <div className="flex-1 overflow-y-auto p-3 grid gap-3"
-                    style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+                <div className="flex-1 overflow-hidden p-3 flex flex-col gap-2">
                     {rosterLoading ? (
                         <div className="flex items-center justify-center w-full"><Loader2 className="w-6 h-6 text-[#555] animate-spin" /></div>
                     ) : roster.length === 0 ? (
@@ -406,9 +520,59 @@ export default function WeldingView({
                             <p className="text-xs text-[#444] mt-2">Click &quot;Manage Roster&quot; to add workers</p>
                         </div>
                     ) : (
-                        roster.map(worker => (
-                            <WorkerColumn key={worker.name} worker={worker} jobs={getWorkerJobs(worker.name)} department={department} onProgressUpdate={onProgressUpdate} savingProgress={savingProgress} />
-                        ))
+                        <>
+                            <div className="flex items-center justify-between rounded-md border border-[#333] bg-[#1a1a1a] px-2 h-6 leading-none">
+                                <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider leading-none">
+                                    Positions {pageStartPos}–{pageEndPos}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => setWorkerPage(p => Math.max(1, p - 1))}
+                                        disabled={workerPage === 1}
+                                        className="inline-flex h-4 items-center gap-0.5 rounded border border-[#444] px-1.5 text-[10px] font-bold leading-none text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#222]"
+                                    >
+                                        <ChevronLeft className="w-2.5 h-2.5" /> Prev
+                                    </button>
+                                    <span className="text-[10px] text-slate-300 font-mono leading-none">
+                                        Page {workerPage} / {workerPageCount}
+                                    </span>
+                                    <button
+                                        onClick={() => setWorkerPage(p => Math.min(workerPageCount, p + 1))}
+                                        disabled={workerPage === workerPageCount}
+                                        className="inline-flex h-4 items-center gap-0.5 rounded border border-[#444] px-1.5 text-[10px] font-bold leading-none text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#222]"
+                                    >
+                                        Next <ChevronRight className="w-2.5 h-2.5" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div
+                                className="flex-1 min-h-0 grid gap-3 overflow-auto"
+                                style={{
+                                    gridTemplateColumns: 'repeat(4, minmax(230px, 1fr))',
+                                    gridTemplateRows: 'repeat(2, minmax(0, 1fr))'
+                                }}
+                            >
+                                {pageSlots.map((worker, i) => {
+                                    const slotPos = pageStartPos + i;
+                                    return worker ? (
+                                        <div key={worker.name} className="min-h-0">
+                                            <WorkerColumn
+                                                worker={worker}
+                                                jobs={getWorkerJobs(worker.name)}
+                                                department={department}
+                                                onProgressUpdate={onProgressUpdate}
+                                                savingProgress={savingProgress}
+                                                onPositionChange={onWorkerPositionChange}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div key={`empty-${slotPos}`} className="min-h-0 flex items-center justify-center border-2 border-dashed border-[#333] rounded-lg">
+                                            <span className="text-[10px] text-[#444] font-mono">{slotPos}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
                     )}
                 </div>
             )}

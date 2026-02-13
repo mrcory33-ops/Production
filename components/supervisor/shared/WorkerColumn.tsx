@@ -1,20 +1,32 @@
-'use client';
-
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Department, Job } from '@/types';
 import { WorkerProfile, PRODUCT_TYPE_COLORS } from '../types';
 import { Loader2 } from 'lucide-react';
 
-export default function WorkerColumn({ worker, jobs, department, onProgressUpdate, savingProgress }: {
+export default function WorkerColumn({ worker, jobs, department, onProgressUpdate, savingProgress, onPositionChange }: {
     worker: WorkerProfile;
     jobs: Job[];
     department: Department;
     onProgressUpdate: (jobId: string, pct: number) => void;
     savingProgress: string | null;
+    onPositionChange?: (worker: WorkerProfile, position: number) => void;
 }) {
     const [grouped, setGrouped] = useState(true);
+    const [posInput, setPosInput] = useState(String(worker.position ?? ''));
     const initials = worker.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
     const totalPoints = jobs.reduce((s, j) => s + (j.weldingPoints || 0), 0);
+
+    // Sync local input when the saved position changes externally
+    useEffect(() => {
+        setPosInput(String(worker.position ?? ''));
+    }, [worker.position]);
+
+    const commitPosition = useCallback(() => {
+        const val = parseInt(posInput, 10);
+        if (!isNaN(val) && val > 0 && val !== worker.position) {
+            onPositionChange?.(worker, val);
+        }
+    }, [posInput, worker, onPositionChange]);
 
     // Compute the "effective" group progress — use the max progress across all assigned jobs
     const progressValues = jobs.map(j => j.departmentProgress?.[department] ?? 0);
@@ -31,7 +43,7 @@ export default function WorkerColumn({ worker, jobs, department, onProgressUpdat
     }, [onProgressUpdate]);
 
     return (
-        <div className="flex flex-col border border-[#333] rounded-lg bg-[#181818] min-h-[280px]">
+        <div className="flex h-full min-h-0 flex-col border border-[#333] rounded-lg bg-[#181818]">
             {/* Worker Header */}
             <div className="p-3 border-b border-[#333] bg-gradient-to-b from-[#222] to-[#1a1a1a] shrink-0">
                 <div className="flex items-center gap-2.5">
@@ -39,7 +51,21 @@ export default function WorkerColumn({ worker, jobs, department, onProgressUpdat
                         {initials}
                     </div>
                     <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-bold text-white truncate font-serif">{worker.name}</h4>
+                        <div className="flex items-center gap-1.5">
+                            <h4 className="text-sm font-bold text-white truncate font-serif">{worker.name}</h4>
+                            {onPositionChange && (
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={posInput}
+                                    onChange={e => setPosInput(e.target.value)}
+                                    onBlur={commitPosition}
+                                    onKeyDown={e => { if (e.key === 'Enter') { commitPosition(); (e.target as HTMLInputElement).blur(); } }}
+                                    title="Display position"
+                                    className="w-8 h-5 text-[10px] text-center font-mono font-bold text-slate-400 bg-[#111] border border-[#333] rounded focus:border-sky-500/50 focus:outline-none appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                />
+                            )}
+                        </div>
                         <span className="text-[9px] text-[#666] font-mono">{jobs.length} job{jobs.length !== 1 ? 's' : ''} • {Math.round(totalPoints)} pts</span>
                     </div>
                 </div>
@@ -126,6 +152,7 @@ export default function WorkerColumn({ worker, jobs, department, onProgressUpdat
                                 <span className="text-[9px] font-mono text-[#888]">{job.weldingPoints}pt</span>
                             </div>
                             <p className="text-[11px] text-slate-200 truncate font-medium">{job.name}</p>
+                            {job.description && <p className="text-[10px] text-slate-300 truncate font-semibold">{job.description}</p>}
                             {/* Mini progress bar */}
                             <div className="mt-1.5 h-1 bg-[#0a0a0a] border border-[#333] rounded-sm overflow-hidden">
                                 <div className="h-full transition-all" style={{ width: `${progress}%`, backgroundColor: barColor }} />

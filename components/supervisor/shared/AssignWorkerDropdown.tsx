@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, UserPlus } from 'lucide-react';
 
@@ -9,17 +9,65 @@ export default function AssignWorkerDropdown({ jobId, rosterNames, assignedWorke
 }) {
     const btnRef = useRef<HTMLButtonElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
-    const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+    const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
 
-    // Calculate position when dropdown opens
+    const availableWorkers = rosterNames.filter(w => !assignedWorkers.includes(w));
+
+    const updateDropdownPosition = useCallback(() => {
+        if (!btnRef.current) return;
+
+        const rect = btnRef.current.getBoundingClientRect();
+        const viewportPadding = 8;
+        const gap = 4;
+        const dropdownMaxHeight = 224;
+        const rowEstimate = 40;
+        const estimatedHeight = Math.min(
+            dropdownMaxHeight,
+            Math.max(48, availableWorkers.length * rowEstimate + 8)
+        );
+
+        const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - viewportPadding - gap);
+        const spaceAbove = Math.max(0, rect.top - viewportPadding - gap);
+        const shouldOpenUpward = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
+
+        const maxHeight = Math.max(
+            64,
+            Math.min(dropdownMaxHeight, shouldOpenUpward ? spaceAbove : spaceBelow)
+        );
+
+        const unclampedTop = shouldOpenUpward ? rect.top - maxHeight - gap : rect.bottom + gap;
+        const top = Math.max(
+            viewportPadding,
+            Math.min(unclampedTop, window.innerHeight - maxHeight - viewportPadding)
+        );
+
+        const width = rect.width;
+        const left = Math.max(
+            viewportPadding,
+            Math.min(rect.left, window.innerWidth - width - viewportPadding)
+        );
+
+        setPos({ top, left, width, maxHeight });
+    }, [availableWorkers.length]);
+
+    // Calculate and maintain position while dropdown is open.
     useEffect(() => {
-        if (isAssigning && btnRef.current) {
-            const rect = btnRef.current.getBoundingClientRect();
-            setPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-        } else {
+        if (!isAssigning) {
             setPos(null);
+            return;
         }
-    }, [isAssigning]);
+
+        updateDropdownPosition();
+
+        const reposition = () => updateDropdownPosition();
+        window.addEventListener('resize', reposition);
+        document.addEventListener('scroll', reposition, true);
+
+        return () => {
+            window.removeEventListener('resize', reposition);
+            document.removeEventListener('scroll', reposition, true);
+        };
+    }, [isAssigning, updateDropdownPosition]);
 
     // Close on outside click
     useEffect(() => {
@@ -36,8 +84,6 @@ export default function AssignWorkerDropdown({ jobId, rosterNames, assignedWorke
         return () => document.removeEventListener('mousedown', handler);
     }, [isAssigning, onSetAssigning]);
 
-    const availableWorkers = rosterNames.filter(w => !assignedWorkers.includes(w));
-
     return (
         <div className="mb-2">
             <button
@@ -51,7 +97,7 @@ export default function AssignWorkerDropdown({ jobId, rosterNames, assignedWorke
                 <div
                     ref={dropdownRef}
                     className="fixed bg-[#1a1a1a] border border-[#444] rounded-lg shadow-2xl max-h-56 overflow-y-auto"
-                    style={{ top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
+                    style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight, zIndex: 9999 }}
                 >
                     {availableWorkers.map(w => (
                         <button key={w} onClick={() => { onAssign(jobId, w); onSetAssigning(null); }}

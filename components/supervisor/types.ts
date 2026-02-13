@@ -12,6 +12,7 @@ export interface WorkerProfile {
     qualifications?: string[];  // e.g. ["TIG Welding", "Blueprint Reading", "Forklift Certified"]
     comments?: string;
     notes?: string;
+    position?: number;  // display order (lower = first)
 }
 
 export type ProductFilter = 'ALL' | 'FAB' | 'DOORS' | 'HARMONIC';
@@ -93,9 +94,11 @@ export interface DeptViewProps {
     onProgressUpdate: (jobId: string, pct: number) => void;
     onStationProgressUpdate: (jobId: string, stage: WeldingSubStage, pct: number) => void;
     onAssignToPress: (jobId: string) => void;
+    onRemoveFromPress: (jobId: string) => void;
     savingProgress: string | null;
     assigningJob: string | null;
     onSetAssigningJob: (v: string | null) => void;
     alerts: SupervisorAlert[];
     onReportIssue: (jobId: string) => void;
+    onWorkerPositionChange: (worker: WorkerProfile, position: number) => void;
 }

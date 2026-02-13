@@ -1,20 +1,22 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Job } from '@/types';
 import { startOfDay } from 'date-fns';
 import { getBatchKeyForJob, BATCH_COHORT_WINDOW_BUSINESS_DAYS } from '@/lib/scheduler';
 import { DEPT_ORDER } from '@/lib/departmentConfig';
-import { DeptViewProps, ProductFilter, PRODUCT_TYPE_COLORS } from '../types';
+import { DeptViewProps, WorkerProfile, ProductFilter, PRODUCT_TYPE_COLORS } from '../types';
 import FilterTabs from '../shared/FilterTabs';
 import JobQueueCard from '../shared/JobQueueCard';
 import WorkerColumn from '../shared/WorkerColumn';
 import WorkerEditPopup from '../shared/WorkerEditPopup';
 import {
     ClipboardList, Users, Loader2, GripVertical,
-    X, Plus, Pencil,
+    X, Plus, Pencil, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+
+const WORKERS_PER_PAGE = 8;
 
 /**
  * DefaultDeptView — Generic Today's Plan view used by departments
@@ -27,9 +29,10 @@ export default function DefaultDeptView({
     onEditWorker, editingWorker, onUpdateWorkerProfile, onCancelEditWorker,
     onAssignWorker, onUnassignWorker, onProgressUpdate,
     savingProgress, assigningJob, onSetAssigningJob,
-    alerts, onReportIssue,
+    alerts, onReportIssue, onWorkerPositionChange,
 }: DeptViewProps) {
     const [productFilter, setProductFilter] = useState<ProductFilter>('ALL');
+    const [workerPage, setWorkerPage] = useState(1);
     const isWelding = false;
 
     // Sort jobs: active first, then group by product type, then by description (batching), then by due date
@@ -97,8 +100,55 @@ export default function DefaultDeptView({
         return { counts, labels };
     }, [sorted]);
 
+    const sortedRoster = useMemo(() => [...roster].sort((a, b) => (a.position ?? 999) - (b.position ?? 999)), [roster]);
     const getWorkerJobs = (workerName: string) => jobs.filter(j => j.assignedWorkers?.[department]?.includes(workerName));
-    const rosterNames = roster.map(w => w.name);
+    const rosterNames = sortedRoster.map(w => w.name);
+
+    // Build a position→worker map; workers without position get assigned after the last positioned one
+    const slotMap = useMemo(() => {
+        const map: Record<number, WorkerProfile> = {};
+        const unpositioned: WorkerProfile[] = [];
+        for (const w of sortedRoster) {
+            if (w.position != null && w.position > 0) {
+                map[w.position] = w;
+            } else {
+                unpositioned.push(w);
+            }
+        }
+        // Put unpositioned workers into the first available slots after all positioned ones
+        const maxPos = Object.keys(map).length > 0 ? Math.max(...Object.keys(map).map(Number)) : 0;
+        let nextSlot = maxPos + 1;
+        for (const w of unpositioned) {
+            while (map[nextSlot]) nextSlot++;
+            map[nextSlot] = w;
+            nextSlot++;
+        }
+        return map;
+    }, [sortedRoster]);
+
+    const highestSlot = useMemo(() => {
+        const positions = Object.keys(slotMap).map(Number);
+        return positions.length > 0 ? Math.max(...positions) : 0;
+    }, [slotMap]);
+
+    const workerPageCount = Math.max(1, Math.ceil(highestSlot / WORKERS_PER_PAGE));
+
+    useEffect(() => {
+        setWorkerPage(prev => Math.min(prev, workerPageCount));
+    }, [workerPageCount]);
+
+    // Build the 8 slots for the current page (some may be null = empty)
+    const pageSlots = useMemo(() => {
+        const startPos = (workerPage - 1) * WORKERS_PER_PAGE + 1;
+        const slots: (WorkerProfile | null)[] = [];
+        for (let i = 0; i < WORKERS_PER_PAGE; i++) {
+            slots.push(slotMap[startPos + i] || null);
+        }
+        return slots;
+    }, [slotMap, workerPage]);
+
+    const pageStartPos = (workerPage - 1) * WORKERS_PER_PAGE + 1;
+    const pageEndPos = workerPage * WORKERS_PER_PAGE;
 
     const fabCount = jobs.filter(j => j.productType === 'FAB').length;
     const doorsCount = jobs.filter(j => j.productType === 'DOORS').length;
@@ -225,8 +275,7 @@ export default function DefaultDeptView({
             </div>
 
             {/* ── RIGHT AREA: Worker Columns ── */}
-            <div className="flex-1 overflow-y-auto p-3 grid gap-3"
-                style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+            <div className="flex-1 overflow-hidden p-3 flex flex-col gap-2">
                 {rosterLoading ? (
                     <div className="flex items-center justify-center w-full"><Loader2 className="w-6 h-6 text-[#555] animate-spin" /></div>
                 ) : roster.length === 0 ? (
@@ -236,9 +285,59 @@ export default function DefaultDeptView({
                         <p className="text-xs text-[#444] mt-2">Click &quot;Manage Roster&quot; to add workers</p>
                     </div>
                 ) : (
-                    roster.map(worker => (
-                        <WorkerColumn key={worker.name} worker={worker} jobs={getWorkerJobs(worker.name)} department={department} onProgressUpdate={onProgressUpdate} savingProgress={savingProgress} />
-                    ))
+                    <>
+                        <div className="flex items-center justify-between rounded-md border border-[#333] bg-[#1a1a1a] px-2 h-6 leading-none">
+                            <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider leading-none">
+                                Positions {pageStartPos}–{pageEndPos}
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setWorkerPage(p => Math.max(1, p - 1))}
+                                    disabled={workerPage === 1}
+                                    className="inline-flex h-4 items-center gap-0.5 rounded border border-[#444] px-1.5 text-[10px] font-bold leading-none text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#222]"
+                                >
+                                    <ChevronLeft className="w-2.5 h-2.5" /> Prev
+                                </button>
+                                <span className="text-[10px] text-slate-300 font-mono leading-none">
+                                    Page {workerPage} / {workerPageCount}
+                                </span>
+                                <button
+                                    onClick={() => setWorkerPage(p => Math.min(workerPageCount, p + 1))}
+                                    disabled={workerPage === workerPageCount}
+                                    className="inline-flex h-4 items-center gap-0.5 rounded border border-[#444] px-1.5 text-[10px] font-bold leading-none text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#222]"
+                                >
+                                    Next <ChevronRight className="w-2.5 h-2.5" />
+                                </button>
+                            </div>
+                        </div>
+                        <div
+                            className="flex-1 min-h-0 grid gap-3 overflow-auto"
+                            style={{
+                                gridTemplateColumns: 'repeat(4, minmax(230px, 1fr))',
+                                gridTemplateRows: 'repeat(2, minmax(0, 1fr))'
+                            }}
+                        >
+                            {pageSlots.map((worker, i) => {
+                                const slotPos = pageStartPos + i;
+                                return worker ? (
+                                    <div key={worker.name} className="min-h-0">
+                                        <WorkerColumn
+                                            worker={worker}
+                                            jobs={getWorkerJobs(worker.name)}
+                                            department={department}
+                                            onProgressUpdate={onProgressUpdate}
+                                            savingProgress={savingProgress}
+                                            onPositionChange={onWorkerPositionChange}
+                                        />
+                                    </div>
+                                ) : (
+                                    <div key={`empty-${slotPos}`} className="min-h-0 flex items-center justify-center border-2 border-dashed border-[#333] rounded-lg">
+                                        <span className="text-[10px] text-[#444] font-mono">{slotPos}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </>
                 )}
             </div>
         </div>

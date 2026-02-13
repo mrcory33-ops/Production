@@ -4,10 +4,11 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
     collection, query, where, limit, doc, updateDoc, onSnapshot,
-    Timestamp, setDoc, getDoc, arrayUnion, arrayRemove
+    Timestamp, setDoc, getDoc, arrayUnion, arrayRemove, deleteField
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Department, Job, SupervisorAlert, WeldingSubStage } from '@/types';
+import { shouldIncludeJobForDepartmentQueue } from '@/lib/supervisorQueue';
 import { startOfDay } from 'date-fns';
 import { getDepartmentStatus, subscribeToAlerts, createPullNotice } from '@/lib/supervisorAlerts';
 import AlertCreateModal from '../AlertCreateModal';
@@ -132,6 +133,7 @@ export default function SupervisorSchedule() {
     const deptJobs = useMemo(() => {
         const { weekStart, weekEnd } = getCurrentWorkWeek();
         const filtered = jobs.filter(j => {
+            if (!shouldIncludeJobForDepartmentQueue(j, selectedDept)) return false;
             const schedule = j.remainingDepartmentSchedule || j.departmentSchedule;
             const window = schedule?.[selectedDept];
             if (!window) return false;
@@ -148,6 +150,7 @@ export default function SupervisorSchedule() {
     const futureJobs = useMemo(() => {
         const { weekEnd } = getCurrentWorkWeek();
         return jobs.filter(j => {
+            if (!shouldIncludeJobForDepartmentQueue(j, selectedDept)) return false;
             const schedule = j.remainingDepartmentSchedule || j.departmentSchedule;
             const window = schedule?.[selectedDept];
             if (!window) return false;
@@ -190,6 +193,14 @@ export default function SupervisorSchedule() {
         await updateDoc(rosterRef, { workers: arrayUnion(updatedProfile) });
         setEditingWorker(null);
     }, [selectedDept, selectedSlot]);
+
+    const workerPositionChange = useCallback(async (worker: WorkerProfile, position: number) => {
+        const updated = { ...worker, position };
+        const rosterKey = selectedSlot.replace(/[\s\/]/g, '_');
+        const rosterRef = doc(db, 'departmentRosters', rosterKey);
+        await updateDoc(rosterRef, { workers: arrayRemove(worker) });
+        await updateDoc(rosterRef, { workers: arrayUnion(updated) });
+    }, [selectedSlot]);
 
     const removeWorker = useCallback(async (profile: WorkerProfile) => {
         const rosterKey = selectedSlot.replace(/[\s\/]/g, '_');
@@ -276,6 +287,17 @@ export default function SupervisorSchedule() {
         }
     }, []);
 
+    const removeFromPress = useCallback(async (jobId: string) => {
+        try {
+            await updateDoc(doc(db, 'jobs', jobId), {
+                'weldingStationProgress.press': deleteField(),
+                updatedAt: Timestamp.now(),
+            });
+        } catch (err) {
+            console.error('Failed to remove from press', err);
+        }
+    }, []);
+
     // Pull job from Future Work into today's queue for this department.
     const pullJobToQueue = useCallback(async (jobId: string, reason: string) => {
         const job = jobs.find(j => j.id === jobId);
@@ -324,11 +346,13 @@ export default function SupervisorSchedule() {
         onProgressUpdate: handleProgressUpdate,
         onStationProgressUpdate: handleStationProgressUpdate,
         onAssignToPress: assignToPress,
+        onRemoveFromPress: removeFromPress,
         savingProgress,
         assigningJob,
         onSetAssigningJob: setAssigningJob,
         alerts: deptAlerts,
         onReportIssue: (jobId: string) => { setPrefillJobId(jobId); setShowCreateModal(true); },
+        onWorkerPositionChange: workerPositionChange,
     };
 
     // Choose the right view component for the current department
@@ -478,3 +502,4 @@ export default function SupervisorSchedule() {
         </div>
     );
 }
+
