@@ -148,6 +148,22 @@
     border-right: 2px solid #3b82f6 !important;
 }
 
+/* Sticky date headers need OPAQUE backgrounds so bars don't bleed through */
+.gantt-table .date-header.today-column {
+    background: #e7edf8 !important;
+    /* opaque equivalent of rgba(37,99,235,0.05) over #f1f5f9 */
+}
+
+.gantt-table .date-header.saturday-column {
+    background: #e3e8ef !important;
+    /* opaque equivalent of rgba(148,163,184,0.15) over #f1f5f9 */
+}
+
+.gantt-table .week-header {
+    background: #f1f5f9 !important;
+    /* ensure week row is fully opaque */
+}
+
 /* ===== STICKY JOB COLUMN ===== */
 
 .gantt-table .sticky-job-cell {
@@ -207,8 +223,8 @@
 }
 
 .gantt-table .date-cell.has-segment {
-    /* Keep tooltip/popups above sticky date headers (z-index 210) */
-    z-index: 220;
+    /* Must stay BELOW sticky date headers (z-index 210) so bars don't cover them on scroll */
+    z-index: 2;
 }
 
 .day-split-overlay {
@@ -402,7 +418,7 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     filter: brightness(1.15);
-    z-index: 260 !important;
+    z-index: 100 !important;
 }
 
 /* Segment resize handles */

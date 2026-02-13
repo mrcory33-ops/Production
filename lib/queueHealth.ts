@@ -61,8 +61,10 @@ export const calculateQueueHealth = (jobs: Job[]): DepartmentQueueHealth[] => {
         const weeklyCap = config.weeklyTarget.max;
 
         // Only count jobs physically IN this department right now
+        // For Engineering: exclude readyToNest jobs (shown in Nesting card instead)
         const jobsInDept = jobs.filter(
             (job) => job.currentDepartment === dept && job.weldingPoints > 0
+                && !(dept === 'Engineering' && job.readyToNest)
         );
 
         const pointsOnHand = jobsInDept.reduce(

@@ -3,10 +3,10 @@ import { Department, Job } from '@/types';
 import { PRODUCT_TYPE_COLORS } from '../types';
 import AssignWorkerDropdown from './AssignWorkerDropdown';
 import {
-    AlertTriangle, Loader2, Package, Check, X, PackageX, Undo2,
+    AlertTriangle, Package, Check, X, Undo2,
 } from 'lucide-react';
 
-export default function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onProgressUpdate, isSaving, isAssigning, onSetAssigning, hasAlert, onReportIssue, inBatchGroup, batchAccentColor, isDoorLeaf, isFrame, onAssignToPress, onRemoveFromPress }: {
+export default function JobQueueCard({ job, department, rosterNames, onAssign, onUnassign, onProgressUpdate, isSaving, isAssigning, onSetAssigning, hasAlert, onReportIssue, inBatchGroup, batchAccentColor, isDoorLeaf, isFrame, onAssignToPress, onRemoveFromPress, onOpenPODetails }: {
     job: Job; department: Department; rosterNames: string[];
     onAssign: (jobId: string, worker: string) => void;
     onUnassign: (jobId: string, worker: string) => void;
@@ -25,9 +25,10 @@ export default function JobQueueCard({ job, department, rosterNames, onAssign, o
     onAssignToPress?: (jobId: string) => void;
     /** Callback to remove door-leaf job from Press station back to queue */
     onRemoveFromPress?: (jobId: string) => void;
+    /** Open JCS PO details panel for this job */
+    onOpenPODetails?: (job: Job) => void;
 }) {
     const assignedWorkers = job.assignedWorkers?.[department] || [];
-    const progress = job.departmentProgress?.[department] ?? 0;
     const dueDate = new Date(job.dueDate);
     const isOverdue = dueDate < new Date();
     const productColor = PRODUCT_TYPE_COLORS[job.productType] || PRODUCT_TYPE_COLORS.FAB;
@@ -68,6 +69,7 @@ export default function JobQueueCard({ job, department, rosterNames, onAssign, o
     const workerBadgeBg = isActive ? 'bg-sky-100 text-sky-700 border-sky-200' : 'bg-sky-900/30 text-sky-300 border-sky-700/30';
     const workerRemoveBtn = isActive ? 'text-sky-500 hover:text-rose-500' : 'text-sky-500 hover:text-rose-400';
     const qtyBadge = isActive ? 'bg-slate-200 text-slate-600 border-slate-300' : 'bg-[#222] text-slate-300 border-[#444]';
+    const poBadgeInteraction = onOpenPODetails ? 'cursor-pointer hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-sky-500/40' : 'cursor-default';
 
     return (
         <div className={`${cardBg} border rounded-lg transition-all relative
@@ -144,19 +146,34 @@ export default function JobQueueCard({ job, department, rosterNames, onAssign, o
                 {(job.openPOs || job.closedPOs) && (
                     <div className="flex items-center gap-1.5 mb-2">
                         {job.openPOs && !job.closedPOs && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold ${isActive ? 'bg-orange-100 text-orange-600 border border-orange-300' : 'bg-orange-900/30 text-orange-300 border border-orange-700/40'}`}>
+                            <button
+                                type="button"
+                                onClick={() => onOpenPODetails?.(job)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold ${isActive ? 'bg-orange-100 text-orange-600 border border-orange-300' : 'bg-orange-900/30 text-orange-300 border border-orange-700/40'} ${poBadgeInteraction}`}
+                                disabled={!onOpenPODetails}
+                            >
                                 <Package className="w-3 h-3" /> Open
-                            </span>
+                            </button>
                         )}
                         {job.openPOs && job.closedPOs && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold ${isActive ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-yellow-900/30 text-yellow-300 border border-yellow-700/40'}`}>
+                            <button
+                                type="button"
+                                onClick={() => onOpenPODetails?.(job)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold ${isActive ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-yellow-900/30 text-yellow-300 border border-yellow-700/40'} ${poBadgeInteraction}`}
+                                disabled={!onOpenPODetails}
+                            >
                                 <Package className="w-3 h-3" /> Partial
-                            </span>
+                            </button>
                         )}
                         {!job.openPOs && job.closedPOs && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold ${isActive ? 'bg-emerald-100 text-emerald-600 border border-emerald-300' : 'bg-emerald-900/30 text-emerald-300 border border-emerald-700/40'}`}>
+                            <button
+                                type="button"
+                                onClick={() => onOpenPODetails?.(job)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold ${isActive ? 'bg-emerald-100 text-emerald-600 border border-emerald-300' : 'bg-emerald-900/30 text-emerald-300 border border-emerald-700/40'} ${poBadgeInteraction}`}
+                                disabled={!onOpenPODetails}
+                            >
                                 <Check className="w-3 h-3" /> Received
-                            </span>
+                            </button>
                         )}
                     </div>
                 )}

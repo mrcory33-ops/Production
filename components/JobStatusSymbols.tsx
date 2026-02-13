@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Job, SupervisorAlert } from '@/types';
 import { X } from 'lucide-react';
@@ -13,14 +13,13 @@ interface StatusSymbol {
     borderClass: string;
     textClass: string;
     explanation: string;
-    actionType?: 'reschedule';
+    actionType?: 'reschedule' | 'po-details';
     jobId?: string;
 }
 
 function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
     const symbols: StatusSymbol[] = [];
 
-    // Scheduling Conflict — system could not meet due date
     if (job.schedulingConflict) {
         symbols.push({
             key: 'conflict',
@@ -29,14 +28,13 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
             bgClass: 'bg-red-100',
             borderClass: 'border-red-300',
             textClass: 'text-red-600',
-            explanation: `This job cannot meet its due date within the current capacity limits. ` +
-                `The scheduler placed all departments starting from today (to avoid scheduling in the past), ` +
-                `but the total time required exceeds the time available before the due date. ` +
-                `Consider: overtime, moving other jobs later, or requesting a due date extension.`
+            explanation:
+                `This job cannot meet its due date within current capacity. ` +
+                `The scheduler placed departments from today forward, but required time still exceeds available time. ` +
+                `Consider overtime, reprioritizing other jobs, or a due date extension.`,
         });
     }
 
-    // STALLED — no progress + behind schedule → OT candidate
     if (job.progressStatus === 'STALLED') {
         symbols.push({
             key: 'stalled',
@@ -45,85 +43,74 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
             bgClass: 'bg-orange-100',
             borderClass: 'border-orange-300',
             textClass: 'text-orange-600',
-            explanation: `This job has stalled — it hasn't progressed for 2+ work days and is behind schedule. ` +
-                `Without intervention, it will likely miss its due date. ` +
-                `Overtime (Saturday work) is recommended to get it back on track. ` +
-                `The system detected this by comparing the job's current department against its scheduled department for today.`
+            explanation:
+                `This job has not progressed for 2+ work days and is behind schedule. ` +
+                `Without intervention, it is likely to miss due date.`,
         });
     }
 
-    // SLIPPING — behind schedule but still progressing
     if (job.progressStatus === 'SLIPPING' && !job.schedulingConflict) {
         symbols.push({
             key: 'slipping',
-            icon: '⚠',
+            icon: 'WARN',
             label: 'Slipping Behind',
             bgClass: 'bg-yellow-100',
             borderClass: 'border-yellow-300',
             textClass: 'text-yellow-600',
-            explanation: `This job is falling behind its scheduled timeline. ` +
-                `It is still progressing but slower than planned. The current department or ` +
-                `completion timeline indicates it won't finish on the original schedule. ` +
-                `If it continues slipping, it may become an overtime candidate.`
+            explanation:
+                `This job is behind its planned timeline but still progressing. ` +
+                `If the trend continues, it may need overtime or reprioritization.`,
         });
     }
 
-    // AHEAD — progressed past expected department
     if (job.progressStatus === 'AHEAD') {
         symbols.push({
             key: 'ahead',
-            icon: '🚀',
+            icon: 'AHEAD',
             label: 'Ahead of Schedule',
             bgClass: 'bg-emerald-100',
             borderClass: 'border-emerald-300',
             textClass: 'text-emerald-600',
-            explanation: `Great news — this job has advanced past its expected department! ` +
-                `It's running ahead of schedule. This freed-up capacity can be applied ` +
-                `to other jobs in the earlier department(s).`
+            explanation:
+                `This job has advanced past its expected department and is running ahead of schedule.`,
         });
     }
 
-    // Due Date Changed — needs reschedule
     if (job.needsReschedule) {
-        const prev = job.previousDueDate ? new Date(job.previousDueDate).toLocaleDateString() : '?';
-        const curr = new Date(job.dueDate).toLocaleDateString();
+        const previous = job.previousDueDate ? new Date(job.previousDueDate).toLocaleDateString() : '?';
+        const current = new Date(job.dueDate).toLocaleDateString();
         symbols.push({
             key: 'reschedule',
-            icon: '📅',
+            icon: 'DUE',
             label: 'Due Date Changed',
             bgClass: 'bg-purple-100',
             borderClass: 'border-purple-300',
             textClass: 'text-purple-600',
-            explanation: `The customer or sales team changed this job's due date. ` +
-                `Previous: ${prev} → Now: ${curr}. ` +
-                `The schedule was built with the old due date, so this job may need to be ` +
-                `re-prioritized or rescheduled to meet the new deadline.`,
+            explanation:
+                `Due date changed. Previous: ${previous}. Current: ${current}. ` +
+                `This job should be reviewed for rescheduling.`,
             actionType: 'reschedule',
-            jobId: job.id
+            jobId: job.id,
         });
     }
 
-    // OT Needed — overloaded capacity weeks intersect this job's schedule
     if (job.schedulingConflict && job.progressStatus !== 'STALLED') {
-        // Only add if not already showing OT? from STALLED
-        const hasOTSymbol = symbols.some(s => s.key === 'stalled');
-        if (!hasOTSymbol) {
+        const alreadyMarkedStalled = symbols.some((s) => s.key === 'stalled');
+        if (!alreadyMarkedStalled) {
             symbols.push({
                 key: 'ot-needed',
-                icon: '⏱',
+                icon: 'OT',
                 label: 'OT Likely Needed',
                 bgClass: 'bg-amber-100',
                 borderClass: 'border-amber-300',
                 textClass: 'text-amber-700',
-                explanation: `Based on current capacity, this job is scheduled beyond its due date. ` +
-                    `Overtime (Saturday shifts) will likely be needed to bring it back on time. ` +
-                    `The scheduler detected that the total work points in the affected week(s) ` +
-                    `exceed the 850-point weekly capacity for at least one department.`
+                explanation:
+                    `Current capacity places this job beyond due date. ` +
+                    `Overtime is likely required to recover schedule.`,
             });
         }
     }
 
-    // Special Purchase — Open PO (nothing received yet)
     if (job.openPOs && !job.closedPOs) {
         symbols.push({
             key: 'open-po',
@@ -132,13 +119,12 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
             bgClass: 'bg-orange-100',
             borderClass: 'border-orange-400',
             textClass: 'text-orange-700',
-            explanation: `This job has open Purchase Orders — special parts or materials have been ordered ` +
-                `but NOTHING has been received yet. The job may not be ready to move to the next ` +
-                `department until these materials arrive. Check with Purchasing for ETA updates.`
+            explanation: `Purchase orders are open and no receipts are complete yet.`,
+            actionType: 'po-details',
+            jobId: job.id,
         });
     }
 
-    // Special Purchase — Partially Received (some POs closed, some still open)
     if (job.openPOs && job.closedPOs) {
         symbols.push({
             key: 'partial-po',
@@ -147,13 +133,12 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
             bgClass: 'bg-yellow-100',
             borderClass: 'border-yellow-400',
             textClass: 'text-yellow-700',
-            explanation: `This job has special parts that are PARTIALLY received — some Purchase Orders ` +
-                `have been fulfilled, but others are still open. The job may be able to start ` +
-                `some work, but full completion depends on remaining deliveries.`
+            explanation: `Some PO lines are received, but one or more lines remain open.`,
+            actionType: 'po-details',
+            jobId: job.id,
         });
     }
 
-    // Special Purchase — Received (all POs closed, none still open)
     if (!job.openPOs && job.closedPOs) {
         symbols.push({
             key: 'received-po',
@@ -162,18 +147,14 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
             bgClass: 'bg-emerald-100',
             borderClass: 'border-emerald-400',
             textClass: 'text-emerald-700',
-            explanation: `All special parts and materials for this job have been RECEIVED. ` +
-                `All Purchase Orders are closed. This job is clear to proceed ` +
-                `through production without material delays.`
+            explanation: `All purchase orders for this job are fully received.`,
+            actionType: 'po-details',
+            jobId: job.id,
         });
     }
 
-    // ---- Alert-driven issue flags ----
     if (alerts && alerts.length > 0) {
-        const hasCsi = alerts.some(a => a.isCsiNotReceived);
-        const hasOos = alerts.some(a => a.isOutOfStock);
-
-        if (hasCsi) {
+        if (alerts.some((a) => a.isCsiNotReceived)) {
             symbols.push({
                 key: 'csi-missing',
                 icon: 'CSI',
@@ -181,13 +162,11 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
                 bgClass: 'bg-amber-100',
                 borderClass: 'border-amber-400',
                 textClass: 'text-amber-700',
-                explanation: `A supervisor alert has flagged this job as missing its CSI (Customer Supplied Information). ` +
-                    `Work may be blocked until the CSI documents or specs are received from the customer. ` +
-                    `Contact the sales rep to follow up on the missing information.`
+                explanation: `A supervisor alert indicates missing CSI information.`,
             });
         }
 
-        if (hasOos) {
+        if (alerts.some((a) => a.isOutOfStock)) {
             symbols.push({
                 key: 'out-of-stock',
                 icon: 'OOS',
@@ -195,9 +174,7 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
                 bgClass: 'bg-rose-100',
                 borderClass: 'border-rose-400',
                 textClass: 'text-rose-700',
-                explanation: `A supervisor alert has flagged this job as having an out-of-stock part. ` +
-                    `Production is held until the part becomes available or an alternative is sourced. ` +
-                    `Check with Purchasing for restock ETA or substitute options.`
+                explanation: `A supervisor alert indicates at least one required part is out of stock.`,
             });
         }
     }
@@ -208,9 +185,10 @@ function getJobSymbols(job: Job, alerts?: SupervisorAlert[]): StatusSymbol[] {
 interface SymbolButtonProps {
     symbol: StatusSymbol;
     onRescheduleRequest?: (jobId: string) => void;
+    onPoDetailRequest?: (jobId: string) => void;
 }
 
-function SymbolButton({ symbol, onRescheduleRequest }: SymbolButtonProps) {
+function SymbolButton({ symbol, onRescheduleRequest, onPoDetailRequest }: SymbolButtonProps) {
     const [open, setOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
@@ -219,28 +197,22 @@ function SymbolButton({ symbol, onRescheduleRequest }: SymbolButtonProps) {
     const updatePopoverPosition = () => {
         if (!buttonRef.current) return;
         const rect = buttonRef.current.getBoundingClientRect();
-        const popoverWidth = 288; // w-72 = 18rem = 288px
+        const popoverWidth = 288;
 
-        // Position below the button, clamped to viewport
         let left = rect.left;
         let top = rect.bottom + 4;
 
-        // Clamp to right edge of viewport
         if (left + popoverWidth > window.innerWidth - 8) {
             left = window.innerWidth - popoverWidth - 8;
         }
-        // Clamp to left edge
         if (left < 8) left = 8;
-
-        // If popover would go below viewport, show above instead
         if (top + 120 > window.innerHeight) {
-            top = rect.top - 4; // will use bottom-positioning in CSS
+            top = rect.top - 4;
         }
 
         setPopoverPos({ top, left });
     };
 
-    // Close on outside click
     useEffect(() => {
         if (!open) return;
         const handleClick = (e: MouseEvent) => {
@@ -256,11 +228,9 @@ function SymbolButton({ symbol, onRescheduleRequest }: SymbolButtonProps) {
         return () => document.removeEventListener('mousedown', handleClick);
     }, [open]);
 
-    // Close on scroll (the table scrolls, position would be stale)
     useEffect(() => {
         if (!open) return;
         const handleScroll = () => setOpen(false);
-        // Capture phase to catch scroll on any container
         document.addEventListener('scroll', handleScroll, true);
         return () => document.removeEventListener('scroll', handleScroll, true);
     }, [open]);
@@ -273,14 +243,11 @@ function SymbolButton({ symbol, onRescheduleRequest }: SymbolButtonProps) {
                     e.stopPropagation();
                     setOpen((prev) => {
                         const next = !prev;
-                        if (next) {
-                            updatePopoverPosition();
-                        }
+                        if (next) updatePopoverPosition();
                         return next;
                     });
                 }}
-                className={`flex items-center justify-center min-w-[20px] h-5 px-1 ${symbol.bgClass} border ${symbol.borderClass} rounded cursor-pointer 
-                           hover:brightness-95 active:scale-95 transition-all`}
+                className={`flex items-center justify-center min-w-[20px] h-5 px-1 ${symbol.bgClass} border ${symbol.borderClass} rounded cursor-pointer hover:brightness-95 active:scale-95 transition-all`}
             >
                 <span className={`text-[10px] ${symbol.textClass} font-bold leading-none`}>{symbol.icon}</span>
             </button>
@@ -325,7 +292,19 @@ function SymbolButton({ symbol, onRescheduleRequest }: SymbolButtonProps) {
                                 }}
                                 className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold rounded transition-colors"
                             >
-                                📅 View Suggested Placement →
+                                View Suggested Placement
+                            </button>
+                        )}
+                        {symbol.actionType === 'po-details' && onPoDetailRequest && symbol.jobId && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpen(false);
+                                    onPoDetailRequest(symbol.jobId!);
+                                }}
+                                className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-semibold rounded transition-colors"
+                            >
+                                View PO Detail
                             </button>
                         )}
                     </div>
@@ -340,16 +319,22 @@ interface JobStatusSymbolsProps {
     job: Job;
     alerts?: SupervisorAlert[];
     onRescheduleRequest?: (jobId: string) => void;
+    onPoDetailRequest?: (jobId: string) => void;
 }
 
-export default function JobStatusSymbols({ job, alerts, onRescheduleRequest }: JobStatusSymbolsProps) {
+export default function JobStatusSymbols({ job, alerts, onRescheduleRequest, onPoDetailRequest }: JobStatusSymbolsProps) {
     const symbols = getJobSymbols(job, alerts);
     if (symbols.length === 0) return null;
 
     return (
         <div className="flex items-center gap-0.5 shrink-0">
-            {symbols.map(s => (
-                <SymbolButton key={s.key} symbol={s} onRescheduleRequest={onRescheduleRequest} />
+            {symbols.map((symbol) => (
+                <SymbolButton
+                    key={symbol.key}
+                    symbol={symbol}
+                    onRescheduleRequest={onRescheduleRequest}
+                    onPoDetailRequest={onPoDetailRequest}
+                />
             ))}
         </div>
     );

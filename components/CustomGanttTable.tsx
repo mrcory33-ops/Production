@@ -43,6 +43,7 @@ interface CustomGanttTableProps {
     onDateSelect?: (dates: Date[]) => void;
     alertsByJobId?: Record<string, SupervisorAlert[]>;
     onRescheduleRequest?: (jobId: string) => void;
+    onPoDetailRequest?: (jobId: string) => void;
 }
 
 export default function CustomGanttTable({
@@ -65,7 +66,8 @@ export default function CustomGanttTable({
     selectedDates = [],
     onDateSelect,
     alertsByJobId = {},
-    onRescheduleRequest
+    onRescheduleRequest,
+    onPoDetailRequest
 }: CustomGanttTableProps) {
     const [editingSegment, setEditingSegment] = useState<{
         job: Job;
@@ -928,7 +930,12 @@ export default function CustomGanttTable({
                                                         </div>
                                                     )}
                                                     {/* Status Symbols — clickable with explanation popovers */}
-                                                    <JobStatusSymbols job={job} alerts={jobAlerts} onRescheduleRequest={onRescheduleRequest} />
+                                                    <JobStatusSymbols
+                                                        job={job}
+                                                        alerts={jobAlerts}
+                                                        onRescheduleRequest={onRescheduleRequest}
+                                                        onPoDetailRequest={onPoDetailRequest}
+                                                    />
                                                 </div>
                                                 <div
                                                     className="job-id font-extrabold tracking-wide opacity-100"
@@ -939,6 +946,11 @@ export default function CustomGanttTable({
                                                 <div className="text-[11px] text-black font-semibold mt-0.5 truncate leading-tight">
                                                     {job.description || 'No description'}
                                                 </div>
+                                                {job.customerPartAndName && job.customerPartAndName.length > 0 && (
+                                                    <div className="text-[10px] text-slate-600 font-medium truncate leading-tight" title={`Item #: ${job.customerPartAndName.join(', ')}`}>
+                                                        Item #: {job.customerPartAndName.join(', ')}
+                                                    </div>
+                                                )}
                                                 <div className="flex justify-between items-center mt-1.5 text-[11px] text-black font-mono">
                                                     <span className={differenceInCalendarDays(job.dueDate, today) < 0 ? "text-red-600 font-bold" : ""}>
                                                         Due: {format(job.dueDate, 'M/d')}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Activity, ChevronDown, ChevronUp, Clock, Layers, Zap } from 'lucide-react';
 import { Job } from '@/types';
 import { calculateQueueHealth, getHealthColor, getHealthLabel, type DepartmentQueueHealth, type HealthStatus } from '@/lib/queueHealth';
@@ -161,6 +161,18 @@ export default function QueueHealthPanel({ jobs, defaultCollapsed = false }: Que
 
     const queueHealth = useMemo(() => calculateQueueHealth(jobs), [jobs]);
 
+    // Nesting: jobs in Engineering with readyToNest=true
+    const nestingSummary = useMemo(() => {
+        const nestingJobs = jobs.filter(
+            (j) => j.currentDepartment === 'Engineering' && j.readyToNest && j.weldingPoints > 0
+        );
+        const totalPts = nestingJobs.reduce((s, j) => s + (j.weldingPoints || 0), 0);
+        const fab = nestingJobs.filter(j => (j.productType || 'FAB') === 'FAB').reduce((s, j) => s + (j.weldingPoints || 0), 0);
+        const doors = nestingJobs.filter(j => j.productType === 'DOORS').reduce((s, j) => s + (j.weldingPoints || 0), 0);
+        const harmonic = nestingJobs.filter(j => j.productType === 'HARMONIC').reduce((s, j) => s + (j.weldingPoints || 0), 0);
+        return { totalPts: Math.round(totalPts), fab: Math.round(fab), doors: Math.round(doors), harmonic: Math.round(harmonic), count: nestingJobs.length };
+    }, [jobs]);
+
     // Summary stats
     const totalPoints = useMemo(
         () => queueHealth.reduce((sum, d) => sum + d.pointsOnHand, 0),
@@ -173,6 +185,67 @@ export default function QueueHealthPanel({ jobs, defaultCollapsed = false }: Que
     const overloadedCount = useMemo(
         () => queueHealth.filter(d => d.health === 'OVERLOADED').length,
         [queueHealth]
+    );
+
+    // Build card list: insert Nesting after Engineering
+    const NestingCard = () => (
+        <div
+            className="rounded-xl border bg-slate-950/70 p-4 transition-all hover:bg-slate-900/80"
+            style={{ borderColor: '#14b8a630' }}
+        >
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3">
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-teal-400" />
+                    </span>
+                    <span className="text-sm font-bold text-white">Nesting</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider bg-teal-500/20 text-teal-300">
+                    Ready
+                </span>
+            </div>
+
+            {/* Primary metric */}
+            <div className="mb-3">
+                <div className="flex items-end gap-1.5">
+                    <span className="text-3xl font-bold text-white tabular-nums">
+                        {nestingSummary.totalPts.toLocaleString()}
+                    </span>
+                    <span className="text-xs text-slate-500 pb-1">pts</span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5 uppercase tracking-wider">Points on Hand</p>
+
+                {/* FAB / DOORS / HARMONIC breakdown */}
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {nestingSummary.fab > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 font-semibold tabular-nums">
+                            F {nestingSummary.fab.toLocaleString()}
+                        </span>
+                    )}
+                    {nestingSummary.doors > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-semibold tabular-nums">
+                            D {nestingSummary.doors.toLocaleString()}
+                        </span>
+                    )}
+                    {nestingSummary.harmonic > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 font-semibold tabular-nums">
+                            H {nestingSummary.harmonic.toLocaleString()}
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Job count */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex items-center gap-1.5 text-slate-400">
+                    <Layers className="w-3 h-3 text-slate-500" />
+                    <span>
+                        <span className="text-slate-200 font-semibold tabular-nums">{nestingSummary.count}</span> jobs
+                    </span>
+                </div>
+            </div>
+        </div>
     );
 
     return (
@@ -211,9 +284,13 @@ export default function QueueHealthPanel({ jobs, defaultCollapsed = false }: Que
             {/* Expandable body */}
             {!collapsed && (
                 <div className="px-4 pb-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3">
                         {queueHealth.map((dept) => (
-                            <DeptCard key={dept.department} data={dept} />
+                            <React.Fragment key={dept.department}>
+                                <DeptCard data={dept} />
+                                {/* Insert Nesting card after Engineering */}
+                                {dept.department === 'Engineering' && <NestingCard />}
+                            </React.Fragment>
                         ))}
                     </div>
                 </div>

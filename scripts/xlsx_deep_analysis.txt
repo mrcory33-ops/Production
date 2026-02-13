@@ -1,0 +1,213 @@
+﻿=== ROW TYPE ANALYSIS ===
+Customer/Project header rows: 45
+Job rows: 64
+Component detail rows: 435
+Other/empty rows: 0
+
+=== UNIQUE COUNTS ===
+Unique customers: 30
+Unique jobs: 64
+Unique sales orders: 35
+Unique components: 111
+Unique vendors: 22
+Unique PO numbers: 57
+
+=== CODE_SORT VALUES ===
+  TP: 10
+  AD: 9
+  OB: 8
+  ED: 7
+  ND: 3
+  CF: 3
+  EN: 1
+  DD: 1
+
+=== CUSTOMER LIST ===
+  ADCOCK-HENGES & COMPANY, LLC (5318)
+  ARCHITECTURAL HARDWARE OF VA (5749)
+  BLOCK IRON & SUPPLY (3262)
+  BROCCOLINI CONSTRUCTION INC. (5790)
+  BUILDERS FIRSTSOURCE (5709)
+  CENTRAL DOOR & HARDWARE INC. (3343)
+  CLEVELAND VICON COMPANY, INC. (3430)
+  DAD 1300 N ATLANTIC COCOA, LP (5686)
+  DEUTSCHER & DAUGHTER,INC. (3287)
+  DOOR SYSTEMS, INC. (3851)
+  ELLISON-GERHARDT COMPANY LLC (5680)
+  EMJAC INDUSTRIES INC. (1098)
+  G & G DOOR PRODUCTS INC. (3213)
+  GERMFREE LABORATORIES (1025)
+  GLOBAL RESTAURANT EQPT. & SUP. (3702)
+  GRANITE CITY DOOR, LLC (3641)
+  H & G SALES, INC./SCHULTZ DOOR (5154)
+  HILDRETHS GLASS INC (5811)
+  JOHNSON-LANCASTER INC. (1709)
+  LACE FOOD SERVICE CORP. (2703)
+  LAKELAND DOOR & SERVICE, INC. (3893)
+  NORWOOD HARDWARE AND SUPPLY (3252)
+  SAVANNAH TRIMS INCORPORATED (5479)
+  SINGER EQUIPMENT COMPANY (5344)
+  THE BOELTER COMPANY (3568)
+  TRIMARK GILL GROUP, INC. (3409)
+  TRUDOOR LLC (5323)
+  UNIFIED DOOR AND HARDWARE (4092)
+  USA FIRE DOOR, LLC (5373)
+  WESTERN SPECIALTIES INC (4020)
+
+=== SALES ORDER LIST ===
+  80022
+  80497
+  86701
+  86753
+  86952
+  86988
+  87115
+  87252
+  87586
+  87632
+  87821
+  87837
+  88002
+  88492
+  88500
+  88501
+  88617
+  88648
+  88734
+  88856
+  88950
+  88978
+  88995
+  89005
+  89011
+  89023
+  89029
+  89037
+  89041
+  89043
+  89046
+  89047
+  89049
+  89055
+  89058
+
+=== JOB LIST ===
+  80022-002
+  80497-900
+  86701-008
+  86701-020
+  86701-021
+  86701-031
+  86701-032
+  86753-017
+  86952-016
+  86988-010
+  87115-001
+  87252-015
+  87586-001
+  87632-004
+  87632-005
+  87821-001
+  87821-002
+  87837-030
+  87837-032
+  87837-034
+  87837-035
+  87837-039
+  88002-001
+  88492-008
+  88500-018
+  88500-028
+  88500-030
+  88500-036
+  88500-040
+  88500-047
+  88500-049
+  88500-051
+  88501-021
+  88501-029
+  88617-030
+  88617-041
+  88648-002
+  88734-001
+  88734-003
+  88734-005
+  88734-006
+  88856-001
+  88856-003
+  88950-001
+  88978-001
+  88995-004
+  89000-001
+  89000-003
+  89000-005
+  89000-006
+  89005-001
+  89011-001
+  89023-001
+  89029-001
+  89037-002
+  89041-001
+  89041-002
+  89043-001
+  89046-001
+  89047-001
+  89047-002
+  89049-001
+  89055-001
+  89058-003
+
+=== PURCHASE ORDER ANALYSIS ===
+Components with PO (#9 purchases): 148
+PO fully received: 90
+PO partially received: 0
+PO not yet received: 58
+
+=== STOCK AVAILABILITY ANALYSIS ===
+Stock items with sufficient qty: 267
+Stock items with shortage: 20
+
+=== EXAMPLE JOB BREAKDOWNS (first 3 jobs with POs) ===
+
+  JOB: 80022-002
+    9 - BEARING F/TENSIONER 6029K22: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - BELT TENSIONER 11-1/2" 6029K43: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - CHAIN SPROCKET 21T 1" 6280K981: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - CHAIN SPROCKET 9T 3/4 6280K862: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - CLEVIS PIN 5/16 25PK 98306A219: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - COMP. SPRING 2" 6PK 9657K499: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - DRIVE ROLLER 6" 2478K32: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - GEARMOTOR DC 1/2HP 6470K51: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - GUIDE RAIL 32MM WIDE 9870K514: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - LANYARD S/S 12" 30745T307: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - LANYARD SS 4FT 30745T357: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - LINK FOR CHAIN 50H 7265K424: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - LINK FOR CHAIN 50H 7265K425: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - LINK FOR CHAIN 50H 7265K426: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - MOUNTED BALL BEARING 5967K84: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - NUT M8 X1.00MM 50PK 90374A113: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - POLYURETHANE WHEEL 8946T64: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:6 rcvd:6 due:2020-04-14 00:00:00
+    9 - PULLEY W/ROPE 3.16DIA 3434T23: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - ROLLER 4" 60A 2476K36: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:3 rcvd:3 due:2020-04-14 00:00:00
+    9 - ROLLER BEARING 3/4" 8258K22: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:3 rcvd:3 due:2020-04-14 00:00:00
+    9 - ROLLER CHAIN 50H 4FT 7265K4: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - ROTARY SHAFT 1"X12" 1497K281: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - SCREW 10-24X1" 91259A542: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - SCREW 3/8-16X1-3/4 91259A718: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:12 rcvd:12 due:2020-04-14 00:00:00
+    9 - SCREW 6-32X1/2 100PK 90272A148: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:10 rcvd:10 due:2020-04-14 00:00:00
+    9 - SCREW PIN SHACKLE 1/4 35685T43: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:3 rcvd:3 due:2020-04-14 00:00:00
+    9 - SHAFT 3/4" X 10" 6061K113: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - SHAFT COLLAR 1" DIA 8386K11: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - SHAFT COLLAR 3/4 8686K39: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - SHEET COLD ROLLED 12GA 48X120: committed=0 onhand=0 issued=0 | PO#70481 vendor:2039 ordered:1 rcvd:1 due:2020-04-16 00:00:00
+    9 - SOCKET SCREW M10 10PK 93070A21: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - SOCKET SCREW M8 50PK 91290A446: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - SPEED CONTROL AC TO DC 7793K64: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+    9 - TRACK ROLLER 32MM 9881K44: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:2 rcvd:2 due:2020-04-14 00:00:00
+    9 - TWIST SHACKLE 90DEG 33845T34: committed=0 onhand=0 issued=0 | PO#70456 vendor:2071 ordered:1 rcvd:1 due:2020-04-14 00:00:00
+
+  JOB: 80497-900
+    CSI - HTLAMP/LIGHT HATCO GRAHL-72D3: committed=0 onhand=0 issued=0 | PO#1138 vendor:1000 ordered:2 rcvd:0 due:2021-10-06 00:00:00
+
+  JOB: 86701-020
+    9 - WHITE CARRARA SLAB #A-6714: committed=0 onhand=0 issued=0 | PO#87389 vendor:3888 ordered:1 rcvd:0 due:2026-02-10 00:00:00

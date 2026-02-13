@@ -2,12 +2,13 @@
 
 import { useState, useCallback } from 'react';
 import { parseGlobalShopExport } from '@/lib/parser';
-import { Job, ScheduleInsights } from '@/types';
-import { Upload, FileUp, AlertCircle, CheckCircle, ArrowLeft, Database, MessageSquareWarning } from 'lucide-react';
+import { JCSJobSummary, Job, ScheduleInsights } from '@/types';
+import { FileUp, AlertCircle, CheckCircle, ArrowLeft, Database, MessageSquareWarning } from 'lucide-react';
 import Link from 'next/link';
 import clsx from 'clsx';
 import PaintingPrompt from '@/components/PaintingPrompt';
 import ScheduleInsightsPanel from '@/components/ScheduleInsightsPanel';
+import { ENABLE_JCS_INTEGRATION, ENABLE_JCS_STRICT_STALE_CLEANUP } from '@/lib/featureFlags';
 
 export default function UploadPage() {
     const [dragActive, setDragActive] = useState(false);
@@ -18,6 +19,11 @@ export default function UploadPage() {
     const [jobsRequiringPainting, setJobsRequiringPainting] = useState<Set<string>>(new Set());
     const [scheduleInsights, setScheduleInsights] = useState<ScheduleInsights | null>(null);
     const [showInsights, setShowInsights] = useState(false);
+    const [jcsSummaries, setJcsSummaries] = useState<JCSJobSummary[]>([]);
+    const [jcsError, setJcsError] = useState<string | null>(null);
+    const [jcsFileName, setJcsFileName] = useState('');
+    const [jcsSyncing, setJcsSyncing] = useState(false);
+    const [jcsLastSyncMessage, setJcsLastSyncMessage] = useState<string | null>(null);
 
     const handleFile = useCallback(async (file: File) => {
         setLoading(true);
@@ -118,6 +124,60 @@ export default function UploadPage() {
             setLoading(false);
         }
     };
+
+    const handleJcsFile = useCallback(async (file: File) => {
+        setJcsError(null);
+        setJcsLastSyncMessage(null);
+        setJcsSyncing(true);
+        try {
+            const buffer = await file.arrayBuffer();
+            const { parseJobComponentStatus } = await import('@/lib/parseJobComponentStatus');
+            const summaries = await parseJobComponentStatus(buffer);
+            if (!summaries.length) {
+                throw new Error('No JCS rows with job + PO data were found in this file.');
+            }
+            setJcsSummaries(summaries);
+            setJcsFileName(file.name);
+        } catch (err) {
+            console.error(err);
+            setJcsError("Failed to parse JCS file. Please upload a valid #9's report.");
+            setJcsSummaries([]);
+            setJcsFileName('');
+        } finally {
+            setJcsSyncing(false);
+        }
+    }, []);
+
+    const handleJcsSync = useCallback(async () => {
+        if (!jcsSummaries.length) return;
+        setJcsError(null);
+        setJcsLastSyncMessage(null);
+        setJcsSyncing(true);
+        try {
+            const { syncJCSData } = await import('@/lib/jobs');
+            const result = await syncJCSData(jcsSummaries, {
+                allowAutoClearStale: ENABLE_JCS_STRICT_STALE_CLEANUP,
+            });
+            const message = [
+                `JCS Sync Complete`,
+                `Import ID: ${result.importId}`,
+                `Upserted: ${result.upsertedJobs}`,
+                `Stale docs marked: ${result.staleDocsMarked}`,
+                `Jobs marked stale: ${result.jobsMarkedStale}`,
+                `Jobs auto-cleared: ${result.jobsAutoCleared}`,
+                `Unmatched jobs: ${result.unmatchedJobIds.length}`,
+            ].join(' | ');
+            setJcsLastSyncMessage(message);
+            alert(message);
+            setJcsSummaries([]);
+            setJcsFileName('');
+        } catch (err) {
+            console.error(err);
+            setJcsError('Failed to sync JCS data to database. Check console details.');
+        } finally {
+            setJcsSyncing(false);
+        }
+    }, [jcsSummaries]);
 
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
@@ -353,6 +413,96 @@ export default function UploadPage() {
                             {parsedJobs.length > 50 && (
                                 <div className="p-4 text-center text-slate-500 text-sm border-t border-slate-800 font-mono">
                                     ...and {parsedJobs.length - 50} more records
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {ENABLE_JCS_INTEGRATION && (
+                    <div className="mt-8 glass-panel rounded-xl border border-sky-900/40 overflow-hidden">
+                        <div className="p-4 border-b border-slate-700/50 bg-sky-950/20 flex items-center justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-bold text-white">JCS Component Report Import</h2>
+                                <p className="text-xs text-slate-400 mt-1">Upload #9&apos;s.xlsx and sync PO truth data (components + PO summaries).</p>
+                            </div>
+                            <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800 cursor-pointer text-sm font-medium">
+                                <FileUp className="w-4 h-4" />
+                                Select JCS File
+                                <input
+                                    type="file"
+                                    className="hidden"
+                                    accept=".xlsx,.xls,.csv"
+                                    onChange={(e) => e.target.files && handleJcsFile(e.target.files[0])}
+                                />
+                            </label>
+                        </div>
+
+                        <div className="p-4 space-y-4">
+                            {jcsError && (
+                                <div className="rounded-lg border border-rose-700/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-200">
+                                    {jcsError}
+                                </div>
+                            )}
+
+                            {jcsLastSyncMessage && (
+                                <div className="rounded-lg border border-emerald-700/40 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200 font-mono">
+                                    {jcsLastSyncMessage}
+                                </div>
+                            )}
+
+                            {jcsSummaries.length === 0 && !jcsSyncing && (
+                                <div className="rounded-lg border border-dashed border-slate-700 p-6 text-center text-slate-400">
+                                    No parsed JCS file loaded.
+                                </div>
+                            )}
+
+                            {(jcsSummaries.length > 0 || jcsSyncing) && (
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                        <div className="rounded border border-slate-700 bg-slate-900/50 px-3 py-2">
+                                            <p className="text-[10px] uppercase tracking-wider text-slate-500">File</p>
+                                            <p className="text-xs text-slate-200 truncate" title={jcsFileName}>{jcsFileName || 'Parsing...'}</p>
+                                        </div>
+                                        <div className="rounded border border-slate-700 bg-slate-900/50 px-3 py-2">
+                                            <p className="text-[10px] uppercase tracking-wider text-slate-500">Jobs</p>
+                                            <p className="text-sm font-mono text-slate-200">{jcsSummaries.length}</p>
+                                        </div>
+                                        <div className="rounded border border-slate-700 bg-slate-900/50 px-3 py-2">
+                                            <p className="text-[10px] uppercase tracking-wider text-slate-500">Total POs</p>
+                                            <p className="text-sm font-mono text-slate-200">{jcsSummaries.reduce((sum, job) => sum + job.totalPOs, 0)}</p>
+                                        </div>
+                                        <div className="rounded border border-amber-700/30 bg-amber-950/20 px-3 py-2">
+                                            <p className="text-[10px] uppercase tracking-wider text-amber-300/70">Open + Overdue</p>
+                                            <p className="text-sm font-mono text-amber-300">{jcsSummaries.reduce((sum, job) => sum + job.openPOs, 0)}</p>
+                                        </div>
+                                        <div className="rounded border border-emerald-700/30 bg-emerald-950/20 px-3 py-2">
+                                            <p className="text-[10px] uppercase tracking-wider text-emerald-300/70">Received</p>
+                                            <p className="text-sm font-mono text-emerald-300">{jcsSummaries.reduce((sum, job) => sum + job.receivedPOs, 0)}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => {
+                                                setJcsSummaries([]);
+                                                setJcsFileName('');
+                                                setJcsError(null);
+                                            }}
+                                            disabled={jcsSyncing}
+                                            className="px-4 py-2 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-800 transition-colors text-sm font-medium disabled:opacity-50"
+                                        >
+                                            Clear
+                                        </button>
+                                        <button
+                                            onClick={handleJcsSync}
+                                            disabled={jcsSyncing || jcsSummaries.length === 0}
+                                            className="bg-sky-600 hover:bg-sky-500 text-white px-6 py-2 rounded-lg flex items-center shadow-lg shadow-sky-500/20 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale"
+                                        >
+                                            <CheckCircle className="h-4 w-4 mr-2" />
+                                            {jcsSyncing ? 'Syncing JCS...' : 'Sync JCS to Database'}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>

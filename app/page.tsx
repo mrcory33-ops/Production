@@ -4,9 +4,10 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Users, Calculator, UploadCloud,
-  AlertTriangle, Hammer, Gauge,
+  Hammer, Gauge, PackageSearch,
   ChevronRight,
 } from 'lucide-react';
+import { ENABLE_JCS_INTEGRATION } from '@/lib/featureFlags';
 
 // ─────────────────────────────────────────────────────────────────
 // HOME PORTAL — Stainless Steel Industrial Theme
@@ -53,6 +54,15 @@ export default function HomePortal() {
       statusColor: 'bg-slate-500',
       href: '/upload',
     },
+    ...(ENABLE_JCS_INTEGRATION ? [{
+      title: 'Component Report',
+      subtitle: 'JCS Detail',
+      icon: <PackageSearch className="w-8 h-8" />,
+      description: 'Search JCS component lines, PO status, vendor detail, and stale PO visibility.',
+      status: 'Ready',
+      statusColor: 'bg-cyan-500',
+      href: '/components-report',
+    }] : []),
     {
       title: 'Design Lab',
       subtitle: 'R&D Sandbox',

@@ -101,4 +101,5 @@ export interface DeptViewProps {
     alerts: SupervisorAlert[];
     onReportIssue: (jobId: string) => void;
     onWorkerPositionChange: (worker: WorkerProfile, position: number) => void;
+    onOpenPODetails?: (job: Job) => void;
 }

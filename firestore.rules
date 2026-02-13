@@ -21,6 +21,14 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    match /jcs_components/{jobId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /jcs_imports/{importId} {
+      allow read, write: if isSignedIn();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

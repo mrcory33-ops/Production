@@ -11,7 +11,9 @@ import { Department, Job, SupervisorAlert, WeldingSubStage } from '@/types';
 import { shouldIncludeJobForDepartmentQueue } from '@/lib/supervisorQueue';
 import { startOfDay } from 'date-fns';
 import { getDepartmentStatus, subscribeToAlerts, createPullNotice } from '@/lib/supervisorAlerts';
+import { ENABLE_JCS_INTEGRATION } from '@/lib/featureFlags';
 import AlertCreateModal from '../AlertCreateModal';
+import PODetailPanel from '../PODetailPanel';
 
 import {
     NavView,
@@ -63,6 +65,7 @@ export default function SupervisorSchedule() {
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [savingProgress, setSavingProgress] = useState<string | null>(null);
     const [prefillJobId, setPrefillJobId] = useState<string | undefined>(undefined);
+    const [poDetailJob, setPoDetailJob] = useState<{ id: string; name?: string } | null>(null);
 
     // ── Roster State ──
     const [roster, setRoster] = useState<WorkerProfile[]>([]);
@@ -353,6 +356,9 @@ export default function SupervisorSchedule() {
         alerts: deptAlerts,
         onReportIssue: (jobId: string) => { setPrefillJobId(jobId); setShowCreateModal(true); },
         onWorkerPositionChange: workerPositionChange,
+        onOpenPODetails: ENABLE_JCS_INTEGRATION ? (job: Job) => {
+            setPoDetailJob({ id: job.id, name: job.name });
+        } : undefined,
     };
 
     // Choose the right view component for the current department
@@ -366,6 +372,13 @@ export default function SupervisorSchedule() {
                 onClose={() => { setShowCreateModal(false); setPrefillJobId(undefined); }}
                 onCreated={() => { setShowCreateModal(false); setPrefillJobId(undefined); }}
                 prefillJobId={prefillJobId}
+            />
+            <PODetailPanel
+                key={poDetailJob?.id || 'po-detail-closed'}
+                isOpen={poDetailJob !== null}
+                jobId={poDetailJob?.id || null}
+                jobName={poDetailJob?.name}
+                onClose={() => setPoDetailJob(null)}
             />
 
             {/* ═══════════════════════════════════════════════════════

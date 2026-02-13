@@ -27,10 +27,12 @@ import AlertManagementPanel from './AlertManagementPanel';
 import RescheduleSuggestionPopover from './RescheduleSuggestionPopover';
 import CompletedJobsPanel from './CompletedJobsPanel';
 import QueueHealthPanel from './QueueHealthPanel';
+import PODetailPanel from './PODetailPanel';
 import { calculateUrgencyScore } from '@/lib/scoring';
 import { deleteAlert, extendAlert, recordAlertAdjustment, resolveAlert, subscribeToAlerts, updateAlert } from '@/lib/supervisorAlerts';
 import { formatWeekKeyForDisplay } from '@/lib/weekFormatting';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
+import { ENABLE_JCS_INTEGRATION } from '@/lib/featureFlags';
 
 
 
@@ -284,6 +286,7 @@ export default function MasterSchedule() {
     const [supervisorAlerts, setSupervisorAlerts] = useState<SupervisorAlert[]>([]);
     const [showAlertPanel, setShowAlertPanel] = useState(false);
     const [rescheduleSuggestion, setRescheduleSuggestion] = useState<RescheduleSuggestion | null>(null);
+    const [poDetailJob, setPoDetailJob] = useState<{ id: string; name?: string } | null>(null);
     const [completedJobs, setCompletedJobs] = useState<Job[]>([]);
     const [showCompletedPanel, setShowCompletedPanel] = useState(false);
     const [showQueueHealth, setShowQueueHealth] = useState(false);
@@ -1387,6 +1390,10 @@ export default function MasterSchedule() {
                                 const suggestion = suggestReschedule(job, jobs);
                                 setRescheduleSuggestion(suggestion);
                             }}
+                            onPoDetailRequest={ENABLE_JCS_INTEGRATION ? (jobId) => {
+                                const job = jobs.find(j => j.id === jobId);
+                                setPoDetailJob({ id: jobId, name: job?.name });
+                            } : undefined}
                         />
                     ) : (
                         <div className="flex flex-1 items-center justify-center">
@@ -1773,6 +1780,14 @@ export default function MasterSchedule() {
                     }}
                 />
             )}
+
+            <PODetailPanel
+                key={poDetailJob?.id || 'po-detail-closed'}
+                isOpen={poDetailJob !== null}
+                jobId={poDetailJob?.id || null}
+                jobName={poDetailJob?.name}
+                onClose={() => setPoDetailJob(null)}
+            />
         </div>
     );
 }

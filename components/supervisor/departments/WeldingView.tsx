@@ -31,7 +31,7 @@ export default function WeldingView({
     onAssignWorker, onUnassignWorker, onProgressUpdate,
     onStationProgressUpdate, onAssignToPress, onRemoveFromPress,
     savingProgress, assigningJob, onSetAssigningJob,
-    alerts, onReportIssue, onWorkerPositionChange,
+    alerts, onReportIssue, onWorkerPositionChange, onOpenPODetails,
 }: DeptViewProps) {
     const [productFilter, setProductFilter] = useState<ProductFilter>('ALL');
     const [workerPage, setWorkerPage] = useState(1);
@@ -317,6 +317,7 @@ export default function WeldingView({
                                     isFrame={frame}
                                     onAssignToPress={doorLeaf ? onAssignToPress : undefined}
                                     onRemoveFromPress={doorLeaf ? onRemoveFromPress : undefined}
+                                    onOpenPODetails={onOpenPODetails}
                                 />
                             </React.Fragment>
                         );

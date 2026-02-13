@@ -120,6 +120,10 @@ export interface Job {
     openPOs: boolean; // Column AP (#9 missing)
     closedPOs: boolean; // Column AQ (#9 received)
     readyToNest: boolean; // USER_6 (X)
+    jcsLastUpdated?: Date; // Last successful JCS sync timestamp
+    jcsDataState?: 'none' | 'live' | 'stale'; // JCS freshness state
+    jcsLastSeenImportId?: string; // Last JCS import this job appeared in
+    jcsMissingImportCount?: number; // Consecutive imports this job has been missing from
 
     // Details
     partNumber: string; // PART
@@ -186,6 +190,58 @@ export interface DepartmentSchedule {
     allocatedPoints: number;
     capacity: number; // Default 200
     jobIds: string[];
+}
+
+export interface JCSComponentLine {
+    componentId: string;
+    description: string;
+    purchaseOrder: string;
+    vendor: string;
+    qtyOrdered: number;
+    qtyReceived: number;
+    dueDate?: string; // ISO date
+    status: 'received' | 'open' | 'overdue';
+}
+
+export interface JCSPOSummary {
+    purchaseOrder: string;
+    vendor?: string;
+    lineCount: number;
+    qtyOrderedTotal: number;
+    qtyReceivedTotal: number;
+    status: 'received' | 'open' | 'overdue';
+}
+
+export interface JCSJobSummary {
+    jobId: string;
+    project?: string;
+    codeSort?: string;
+    components: JCSComponentLine[];
+    poSummary: JCSPOSummary[];
+    totalPOs: number;
+    receivedPOs: number;
+    openPOs: number;
+    overduePOs: number;
+    hasOpenPOs: boolean;
+    hasClosedPOs: boolean;
+}
+
+export interface JCSJobDocument {
+    jobId: string;
+    project?: string;
+    codeSort?: string;
+    components: JCSComponentLine[];
+    poSummary: JCSPOSummary[];
+    counts: {
+        totalPOs: number;
+        receivedPOs: number;
+        openPOs: number;
+        overduePOs: number;
+    };
+    lastSeenImportId: string;
+    importedAt: string;
+    stale: boolean;
+    staleSince?: string;
 }
 
 export interface ShopCalendarDay {

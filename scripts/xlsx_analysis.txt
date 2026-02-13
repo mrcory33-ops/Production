@@ -1,0 +1,74 @@
+﻿File exists: True
+File size: 37964 bytes
+
+Sheet names: ['JCS']
+
+================================================================================
+SHEET: JCS
+Dimensions: A1:V545
+Max row: 545, Max col: 22
+
+Header Row: 1
+  Col 1: Text48
+  Col 2: Auto_Date
+  Col 3: SALES_ORDERf
+  Col 4: MARK_INFOf
+  Col 5: SALESPERSONf
+  Col 6: CUSTOMERf
+  Col 7: CODE_SORT
+  Col 8: JOBf
+  Col 9: PART_CUSTOMERf
+  Col 10: Text72
+  Col 11: COMPONENTf
+  Col 12: DESCRIPTIONf
+  Col 13: UMf
+  Col 14: QTY_COMMITTED
+  Col 15: QTY_ISSUED
+  Col 16: QTY_ONHAND
+  Col 17: PURCHASE_ORDER
+  Col 18: VENDORf
+  Col 19: QTY_ORDER
+  Col 20: QTY_RECEIVED
+  Col 21: DATE_DUE_LINE
+  Col 22: DATE_LAST_RECEIVEDf
+
+--- Sample Data (first 10 data rows) ---
+  Row 2: [None, None, None, 'STOCK', '()', 'EMJAC INDUSTRIES INC. (1098)', None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None]
+  Row 3: [None, None, None, None, None, None, None, '89000-005', ', DRAWER SLIDE ASSY. 21-1/4" (3074)', datetime.datetime(2026, 1, 21, 0, 0), None, None, None, None, None, None, None, None, None, None, None, None]
+  Row 4: [None, None, None, None, None, None, None, None, None, None, '1203', 'SCREW 1/4-20 X 1 SS MS FL PH', 'EA', 400, 0, 1537, None, None, None, None, None, None]
+  Row 5: [None, None, None, None, None, None, None, None, None, None, '1226', 'NUT, LOCKING 1/4-20 S/S', 'EA', 400, 0, 1318, None, None, None, None, None, None]
+  Row 6: [None, None, None, None, None, None, None, None, None, None, '2466', 'BEARING BALL SS ASSEMBLIES', 'EA', 400, 0, 2500, None, None, None, None, None, None]
+  Row 7: [None, None, None, None, None, None, None, None, None, None, '2801', 'BUMPER DOOR SILENCER F/SLIDES', 'EA', 300, 0, 743, None, None, None, None, None, None]
+  Row 8: [None, None, None, None, None, None, None, '89000-006', ', DRAWER SLIDE ASSY, 24" (3078)', datetime.datetime(2026, 1, 21, 0, 0), None, None, None, None, None, None, None, None, None, None, None, None]
+  Row 9: [None, None, None, None, None, None, None, None, None, None, '1203', 'SCREW 1/4-20 X 1 SS MS FL PH', 'EA', 400, 0, 1537, None, None, None, None, None, None]
+  Row 10: [None, None, None, None, None, None, None, None, None, None, '1226', 'NUT, LOCKING 1/4-20 S/S', 'EA', 400, 0, 1318, None, None, None, None, None, None]
+  Row 11: [None, None, None, None, None, None, None, None, None, None, '2466', 'BEARING BALL SS ASSEMBLIES', 'EA', 400, 0, 2500, None, None, None, None, None, None]
+
+--- Column Data Type Analysis ---
+  Text48: types={}, samples=[]
+  Auto_Date: types={}, samples=[]
+  SALES_ORDERf: types={'str': 11}, samples=['87252', '88492', '88978', '86988', '87115']
+  MARK_INFOf: types={'str': 13}, samples=['STOCK', 'RITZ CARLTON - SARASOTA BAY', 'STOCK', 'DIPLOMAT HOTEL PLAYA PHASE 2', 'JOB 135754 - 800 W MADISON']
+  SALESPERSONf: types={'str': 13}, samples=['()', 'ALEX DIAZ (11)', '()', 'OMAR BARZAGA (33)', 'GREAT MIDWEST PARTNERS, INC (04)']
+  CUSTOMERf: types={'str': 13}, samples=['EMJAC INDUSTRIES INC. (1098)', 'JOHNSON-LANCASTER INC. (1709)', 'EMJAC INDUSTRIES INC. (1098)', 'SINGER EQUIPMENT COMPANY (5344)', 'DOOR SYSTEMS, INC. (3851)']
+  CODE_SORT: types={'str': 10}, samples=['AD', 'OB', 'ND', 'TP', 'OB']
+  JOBf: types={'str': 17}, samples=['89000-005', '89000-006', '87252-015', '89000-001', '89000-003']
+  PART_CUSTOMERf: types={'str': 17}, samples=[', DRAWER SLIDE ASSY. 21-1/4" (3074)', ', DRAWER SLIDE ASSY, 24" (3078)', "323, REF. CHEF'S COUNTER (87252-015)", ', SINK,SILVERSOAK W/CHUTE SS (3006)', ', CHANNEL,TABLE 30 W/GUSSET GALV (3338G)']
+  Text72: types={'datetime': 17}, samples=['2026-01-21 00:00:00', '2026-01-21 00:00:00', '2026-01-22 00:00:00', '2026-01-28 00:00:00', '2026-01-28 00:00:00']
+  COMPONENTf: types={'str': 70}, samples=['1203', '1226', '2466', '2801', '1203']
+  DESCRIPTIONf: types={'str': 70}, samples=['SCREW 1/4-20 X 1 SS MS FL PH', 'NUT, LOCKING 1/4-20 S/S', 'BEARING BALL SS ASSEMBLIES', 'BUMPER DOOR SILENCER F/SLIDES', 'SCREW 1/4-20 X 1 SS MS FL PH']
+  UMf: types={'str': 70}, samples=['EA', 'EA', 'EA', 'EA', 'EA']
+  QTY_COMMITTED: types={'int': 59}, samples=['400', '400', '400', '300', '400']
+  QTY_ISSUED: types={'int': 59}, samples=['0', '0', '0', '0', '0']
+  QTY_ONHAND: types={'int': 59}, samples=['1537', '1318', '2500', '743', '1537']
+  PURCHASE_ORDER: types={'str': 17}, samples=['87438', '87463', '87450', '87452', '87384']
+  VENDORf: types={'str': 17}, samples=['2470', '2470', '3983', '1025', '1025']
+  QTY_ORDER: types={'int': 17}, samples=['20', '1', '4', '1', '14']
+  QTY_RECEIVED: types={'int': 17}, samples=['0', '0', '0', '0', '0']
+  DATE_DUE_LINE: types={'datetime': 17}, samples=['2026-02-10 00:00:00', '2026-02-12 00:00:00', '2026-03-17 00:00:00', '2026-02-16 00:00:00', '2026-02-12 00:00:00']
+  DATE_LAST_RECEIVEDf: types={'int': 9}, samples=['46059', '46051', '46064', '46050', '46057']
+
+Total data rows (non-empty): 544
+
+
+DONE

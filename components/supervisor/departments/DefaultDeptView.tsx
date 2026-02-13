@@ -29,7 +29,7 @@ export default function DefaultDeptView({
     onEditWorker, editingWorker, onUpdateWorkerProfile, onCancelEditWorker,
     onAssignWorker, onUnassignWorker, onProgressUpdate,
     savingProgress, assigningJob, onSetAssigningJob,
-    alerts, onReportIssue, onWorkerPositionChange,
+    alerts, onReportIssue, onWorkerPositionChange, onOpenPODetails,
 }: DeptViewProps) {
     const [productFilter, setProductFilter] = useState<ProductFilter>('ALL');
     const [workerPage, setWorkerPage] = useState(1);
@@ -267,6 +267,7 @@ export default function DefaultDeptView({
                                     onReportIssue={onReportIssue}
                                     inBatchGroup={inBatchGroup}
                                     batchAccentColor={batchAccent}
+                                    onOpenPODetails={onOpenPODetails}
                                 />
                             </React.Fragment>
                         );
